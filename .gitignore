@@ -39,3 +39,5 @@ datasets/workspaces/*
 
 # Local prompt customizations
 prompt_templates.json
+
+.history/

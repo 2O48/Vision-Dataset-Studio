@@ -175,6 +175,35 @@ def _cleanup_project_assets(project_dir: Path, active_roles: list[str], keep_fil
                     pass
 
 
+def _sync_directory_contents(source: Path, target: Path) -> None:
+    target.mkdir(parents=True, exist_ok=True)
+    wanted: set[Path] = {target.resolve()}
+
+    for source_path in sorted(source.rglob("*")):
+        relative = source_path.relative_to(source)
+        target_path = target / relative
+        wanted.add(target_path.resolve())
+        if source_path.is_dir():
+            target_path.mkdir(parents=True, exist_ok=True)
+        elif source_path.is_file():
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source_path, target_path)
+
+    if not target.exists():
+        return
+    for target_path in sorted(target.rglob("*"), key=lambda item: len(item.parts), reverse=True):
+        resolved = target_path.resolve()
+        if resolved in wanted:
+            continue
+        if target_path.is_file() or target_path.is_symlink():
+            target_path.unlink(missing_ok=True)
+        elif target_path.is_dir():
+            try:
+                target_path.rmdir()
+            except OSError:
+                pass
+
+
 class ProjectStore:
     def __init__(self, projects_dir: Path = PROJECTS_DIR):
         self.projects_dir = projects_dir
@@ -192,6 +221,15 @@ class ProjectStore:
 
     def _write_index(self, rows: list[dict]) -> None:
         _write_json(self.index_file, {"schema_version": SCHEMA_VERSION, "projects": rows})
+
+    def _cleanup_tmp_projects(self, project_id: str) -> None:
+        prefix = f".tmp-{project_id}-"
+        if not self.projects_dir.is_dir():
+            return
+        for path in self.projects_dir.iterdir():
+            if not path.is_dir() or not path.name.startswith(prefix):
+                continue
+            shutil.rmtree(path, ignore_errors=True)
 
     def _refresh_index(self) -> list[dict]:
         rows = self.list_projects(write_index=False)
@@ -433,16 +471,9 @@ class ProjectStore:
         _write_json(paths["state"] / "caption_config.json", workspace_state["ui_state"].get("caption_settings", {}))
         _write_json(paths["state"] / "ui_state.json", workspace_state["ui_state"])
         if staging_dir is not None:
-            backup_dir = self._project_dir(f".bak-{project_id}-{_now_id()}")
-            if backup_dir.exists():
-                shutil.rmtree(backup_dir)
-            final_project_dir.replace(backup_dir)
-            try:
-                staging_dir.replace(final_project_dir)
-            except Exception:
-                backup_dir.replace(final_project_dir)
-                raise
-            shutil.rmtree(backup_dir, ignore_errors=True)
+            _sync_directory_contents(staging_dir, final_project_dir)
+            shutil.rmtree(staging_dir, ignore_errors=True)
+            self._cleanup_tmp_projects(project_id)
         self._refresh_index()
         return {"project": project_meta, "workspace": workspace_state}
 

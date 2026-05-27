@@ -7,6 +7,7 @@ export function createBrowserModule({
   saveStored,
   apiGet,
   apiPost,
+  showError,
   confirmDiscardCaptionChanges,
   setCaptionEditorText,
   renderTags,
@@ -17,6 +18,10 @@ export function createBrowserModule({
   closeUtilityPanel,
   setAiStatusLine,
 }) {
+  const ITEM_DRAG_TYPE = "application/x-lora-item-name";
+  const itemContextMenu = document.querySelector("#itemContextMenu");
+  let itemContextTarget = null;
+
   function currentIssueCount() {
     return state.items.reduce((total, item) => {
       const hasMissingControl = activeControlRoles().some((role) => !item.exists?.[role]);
@@ -114,11 +119,318 @@ export function createBrowserModule({
     return `${name || ""}`.replace(/\\/g, "/");
   }
 
+  function displayItemBasename(name) {
+    const parts = displayItemName(name).split("/").filter(Boolean);
+    return parts.length ? parts[parts.length - 1] : "";
+  }
+
+  function displayItemListName(name) {
+    return state.itemFolderFilter ? displayItemBasename(name) : displayItemName(name);
+  }
+
+  function appendHighlightedText(parent, text, query) {
+    const value = `${text ?? ""}`;
+    const needle = `${query ?? ""}`.trim();
+    if (!needle) {
+      parent.textContent = value;
+      return;
+    }
+    const lowerValue = value.toLowerCase();
+    const lowerNeedle = needle.toLowerCase();
+    let index = 0;
+    let matchIndex = lowerValue.indexOf(lowerNeedle);
+    if (matchIndex < 0) {
+      parent.textContent = value;
+      return;
+    }
+    parent.textContent = "";
+    while (matchIndex >= 0) {
+      if (matchIndex > index) {
+        parent.appendChild(document.createTextNode(value.slice(index, matchIndex)));
+      }
+      const mark = document.createElement("span");
+      mark.className = "search-hit";
+      mark.textContent = value.slice(matchIndex, matchIndex + needle.length);
+      parent.appendChild(mark);
+      index = matchIndex + needle.length;
+      matchIndex = lowerValue.indexOf(lowerNeedle, index);
+    }
+    if (index < value.length) {
+      parent.appendChild(document.createTextNode(value.slice(index)));
+    }
+  }
+
+  function itemFolder(name) {
+    const parts = displayItemName(name).split("/").filter(Boolean);
+    parts.pop();
+    return parts.join("/");
+  }
+
+  function itemFolders() {
+    return [...new Set(state.items.map((item) => itemFolder(item.name)).filter(Boolean))]
+      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
+  }
+
+  function filteredItems() {
+    const folder = state.itemFolderFilter || "";
+    return folder ? state.items.filter((item) => itemFolder(item.name) === folder) : [...state.items];
+  }
+
+  function renderFolderFilters() {
+    if (!refs.itemFolderFilters) return;
+    const folders = itemFolders();
+    if (state.itemFolderFilter && !folders.includes(state.itemFolderFilter)) {
+      state.itemFolderFilter = "";
+    }
+    refs.itemFolderFilters.textContent = "";
+
+    const allButton = document.createElement("button");
+    allButton.type = "button";
+    allButton.className = `folder-filter-chip all${state.itemFolderFilter ? "" : " active"}`;
+    allButton.textContent = "全部";
+    allButton.addEventListener("click", () => {
+      state.itemFolderFilter = "";
+      renderItemList();
+      const next = state.visibleItems[0];
+      if (next && !state.visibleItems.some((item) => item.name === state.selectedName)) {
+        selectItem(next.name, false).catch(showError || console.error);
+      }
+    });
+    refs.itemFolderFilters.appendChild(allButton);
+
+    if (!folders.length) return;
+
+    const group = document.createElement("div");
+    group.className = "folder-filter-group";
+    for (const folder of folders) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = `folder-filter-chip${state.itemFolderFilter === folder ? " active" : ""}`;
+      button.dataset.folder = folder;
+      button.textContent = folder;
+      button.addEventListener("click", () => {
+        state.itemFolderFilter = folder;
+        renderItemList();
+        const next = state.visibleItems[0];
+        if (next && !state.visibleItems.some((item) => item.name === state.selectedName)) {
+          selectItem(next.name, false).catch(showError || console.error);
+        }
+      });
+      button.addEventListener("dragover", (event) => {
+        if (!Array.from(event.dataTransfer?.types || []).includes(ITEM_DRAG_TYPE)) return;
+        event.preventDefault();
+        button.classList.add("drag-over");
+        event.dataTransfer.dropEffect = "move";
+      });
+      button.addEventListener("dragleave", () => {
+        button.classList.remove("drag-over");
+      });
+      button.addEventListener("drop", (event) => {
+        const name = event.dataTransfer?.getData(ITEM_DRAG_TYPE) || "";
+        if (!name) return;
+        event.preventDefault();
+        button.classList.remove("drag-over");
+        moveItemToFolder(name, folder).catch(showError || console.error);
+      });
+      group.appendChild(button);
+    }
+    refs.itemFolderFilters.appendChild(group);
+  }
+
+  async function moveItemToFolder(name, folder) {
+    if (!name || !folder) return;
+    if (itemFolder(name) === folder) return;
+    if (!(await confirmDiscardCaptionChanges())) return;
+    const data = await apiPost("/api/item/move-folder", { name, folder });
+    if (data.workspace) applyWorkspaceSummary(data.workspace);
+    state.itemFolderFilter = folder;
+    setAiStatusLine(`已移动到子文件夹：${folder}`);
+    await refreshItems({ skipDirtyCheck: true, suppressSelectionSync: true });
+    await selectItem(data.new_name || name, true, { skipDirtyCheck: true });
+  }
+
+  function closeItemContextMenu() {
+    if (!itemContextMenu) return;
+    itemContextMenu.hidden = true;
+    itemContextTarget = null;
+  }
+
+  function positionItemContextMenu(event) {
+    if (!itemContextMenu) return;
+    itemContextMenu.hidden = false;
+    const rect = itemContextMenu.getBoundingClientRect();
+    const padding = 8;
+    const left = Math.min(Math.max(padding, event.clientX), window.innerWidth - rect.width - padding);
+    const top = Math.min(Math.max(padding, event.clientY), window.innerHeight - rect.height - padding);
+    itemContextMenu.style.left = `${Math.round(left)}px`;
+    itemContextMenu.style.top = `${Math.round(top)}px`;
+  }
+
+  function openItemContextMenu(event, item, title) {
+    if (!itemContextMenu || !item?.name) return;
+    event.preventDefault();
+    event.stopPropagation();
+    itemContextTarget = { item, title };
+    positionItemContextMenu(event);
+  }
+
+  async function revealItemInFileManager(item) {
+    if (!item?.name) return;
+    const data = await apiPost("/api/item/reveal", { name: item.name });
+    setAiStatusLine(`已在文件管理器中定位：${data.path || item.name}`);
+  }
+
+  async function trashItemFiles(item) {
+    if (!item?.name) return;
+    if (item.name === state.selectedName && !(await confirmDiscardCaptionChanges())) return;
+    const ok = await window.appConfirm(`确定将「${displayItemName(item.name)}」的图像和关联 TXT 移到系统回收站吗？`, "删除图片");
+    if (!ok) return;
+    const data = await apiPost("/api/item/trash", { name: item.name });
+    if (data.workspace) applyWorkspaceSummary(data.workspace);
+    setAiStatusLine(`已移到系统回收站：${displayItemName(item.name)}`);
+    await refreshItems({ skipDirtyCheck: true, suppressSelectionSync: true });
+    const next = state.visibleItems[0];
+    if (next) {
+      await selectItem(next.name, true, { skipDirtyCheck: true });
+    } else {
+      state.selectedName = "";
+      state.currentItem = null;
+      setCaptionEditorText("", { markSaved: true });
+      renderViewer();
+      renderTags();
+      renderGlobalTags();
+      renderSelectionSummary();
+    }
+  }
+
+  function ensureItemContextMenuEvents() {
+    if (!itemContextMenu || state.itemContextMenuBound) return;
+    state.itemContextMenuBound = true;
+    itemContextMenu.addEventListener("click", (event) => {
+      const button = event.target.closest("button[data-action]");
+      if (!button || !itemContextTarget) return;
+      const { item, title } = itemContextTarget;
+      closeItemContextMenu();
+      const action = button.dataset.action;
+      if (action === "rename") {
+        beginInlineItemRename(item, title).catch(showError || console.error);
+      } else if (action === "reveal") {
+        revealItemInFileManager(item).catch(showError || console.error);
+      } else if (action === "trash") {
+        trashItemFiles(item).catch(showError || console.error);
+      }
+    });
+    document.addEventListener("click", (event) => {
+      if (event.target.closest("#itemContextMenu")) return;
+      closeItemContextMenu();
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") closeItemContextMenu();
+    });
+    window.addEventListener("resize", closeItemContextMenu);
+    document.addEventListener("scroll", closeItemContextMenu, true);
+  }
+
+  async function beginInlineItemRename(item, title) {
+    if (!item?.name) return;
+    if (title?.querySelector(".item-rename-input")) {
+      title.querySelector(".item-rename-input")?.focus();
+      return;
+    }
+    if (!(await confirmDiscardCaptionChanges())) return;
+    const currentBase = displayItemBasename(item.name);
+    const originalText = displayItemListName(item.name);
+    const input = document.createElement("textarea");
+    input.className = "item-rename-input";
+    input.value = currentBase;
+    input.setAttribute("aria-label", "重命名图片名称");
+    input.rows = 2;
+    title.textContent = "";
+    title.appendChild(input);
+    title.closest(".item-card")?.classList.add("renaming");
+    input.focus();
+    input.select();
+
+    let committed = false;
+    const restore = () => {
+      title.closest(".item-card")?.classList.remove("renaming");
+      title.textContent = originalText;
+    };
+    const commit = async () => {
+      if (committed) return;
+      const cleanBase = input.value.trim();
+      if (!cleanBase || cleanBase === currentBase) {
+        committed = true;
+        restore();
+        return;
+      }
+      if (cleanBase.includes("/") || cleanBase.includes("\\")) {
+        setAiStatusLine("重命名只允许修改图片名称，不包含文件夹。");
+        input.focus();
+        input.select();
+        return;
+      }
+      committed = true;
+      input.disabled = true;
+      try {
+        const data = await apiPost("/api/item/rename", {
+          name: item.name,
+          new_name: cleanBase,
+        });
+        if (data.workspace) applyWorkspaceSummary(data.workspace);
+        setAiStatusLine(`已重命名：${data.new_name || cleanBase}`);
+        await refreshItems({ skipDirtyCheck: true, suppressSelectionSync: true });
+        await selectItem(data.new_name || cleanBase, true, { skipDirtyCheck: true });
+      } catch (error) {
+        committed = false;
+        input.disabled = false;
+        input.focus();
+        input.select();
+        throw error;
+      }
+    };
+
+    input.addEventListener("click", (event) => event.stopPropagation());
+    input.addEventListener("dblclick", (event) => event.stopPropagation());
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        commit().catch(showError || console.error);
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        committed = true;
+        restore();
+      }
+    });
+    input.addEventListener("blur", () => {
+      commit().catch(showError || console.error);
+    });
+  }
+
   function scrollSelectedItemIntoView(block = "center") {
     if (!state.selectedName) return;
     const activeCard = refs.itemList.querySelector(`.item-card[data-name="${CSS.escape(state.selectedName)}"]`);
     if (!activeCard) return;
+    if (block === "nearest") {
+      const listRect = refs.itemList.getBoundingClientRect();
+      const cardRect = activeCard.getBoundingClientRect();
+      const clippedTop = cardRect.top < listRect.top;
+      const clippedBottom = cardRect.bottom > listRect.bottom;
+      if (!clippedTop && !clippedBottom) return;
+      if (clippedTop) {
+        refs.itemList.scrollTop -= listRect.top - cardRect.top;
+      } else {
+        refs.itemList.scrollTop += cardRect.bottom - listRect.bottom;
+      }
+      return;
+    }
     activeCard.scrollIntoView({ block, inline: "nearest" });
+  }
+
+  function updateItemCardActiveState() {
+    refs.itemList.querySelectorAll(".item-card").forEach((card) => {
+      card.classList.toggle("active", card.dataset.name === state.selectedName);
+    });
   }
 
   function updateViewerImageFit(img) {
@@ -154,11 +466,16 @@ export function createBrowserModule({
   }
 
   function renderItemList() {
+    ensureItemContextMenuEvents();
+    renderFolderFilters();
+    const items = filteredItems();
+    state.visibleItems = items;
     refs.itemList.textContent = "";
-    refs.listStats.textContent = `${state.items.length} 项`;
+    refs.listStats.textContent = state.itemFolderFilter ? `${items.length}/${state.items.length} 项` : `${items.length} 项`;
     renderWorkspaceSummary();
+    if (refs.metricFiltered) refs.metricFiltered.textContent = `${items.length || 0}`;
 
-    for (const item of state.items) {
+    for (const item of items) {
       const thumbRole =
         item.exists.result
           ? "result"
@@ -172,6 +489,22 @@ export function createBrowserModule({
       const card = document.createElement("article");
       card.className = `item-card${item.name === state.selectedName ? " active" : ""}`;
       card.dataset.name = item.name;
+      card.draggable = true;
+      card.title = "双击重命名图片";
+      card.addEventListener("dragstart", (event) => {
+        if (event.target.closest(".item-rename-input")) {
+          event.preventDefault();
+          return;
+        }
+        event.dataTransfer?.setData(ITEM_DRAG_TYPE, item.name);
+        event.dataTransfer?.setData("text/plain", item.name);
+        if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
+        card.classList.add("dragging");
+      });
+      card.addEventListener("dragend", () => {
+        card.classList.remove("dragging");
+        refs.itemFolderFilters?.querySelectorAll(".drag-over").forEach((node) => node.classList.remove("drag-over"));
+      });
       if (thumbRole) {
         const img = document.createElement("img");
         img.className = "item-thumb";
@@ -189,7 +522,7 @@ export function createBrowserModule({
       right.className = "item-card-main";
       const title = document.createElement("div");
       title.className = "item-title";
-      title.textContent = displayItemName(item.name);
+      appendHighlightedText(title, displayItemListName(item.name), state.segmentQuery);
       right.appendChild(title);
 
       const flags = document.createElement("div");
@@ -202,7 +535,25 @@ export function createBrowserModule({
       }
       right.appendChild(flags);
       card.appendChild(right);
-      card.addEventListener("click", () => selectItem(item.name));
+      card.addEventListener("click", (event) => {
+        if (event.target.closest(".item-rename-input")) return;
+        if (event.detail > 1) {
+          event.preventDefault();
+          beginInlineItemRename(item, title).catch(showError || console.error);
+          return;
+        }
+        selectItem(item.name, false).catch(showError || console.error);
+      });
+      card.addEventListener("dblclick", (event) => {
+        if (event.target.closest(".item-rename-input")) return;
+        event.preventDefault();
+        event.stopPropagation();
+        beginInlineItemRename(item, title).catch(showError || console.error);
+      });
+      card.addEventListener("contextmenu", (event) => {
+        if (event.target.closest(".item-rename-input")) return;
+        openItemContextMenu(event, item, title);
+      });
       refs.itemList.appendChild(card);
     }
 
@@ -327,6 +678,7 @@ export function createBrowserModule({
   async function refreshItems(options = {}) {
     const { skipDirtyCheck = false, suppressSelectionSync = false } = options;
     const data = await apiGet("/api/items", { filter: state.filter, tag: state.segmentQuery });
+    if (data.workspace) state.workspace = data.workspace;
     state.items = data.items;
     state.itemStats = data.stats;
     state.globalSegments = data.global_segments || data.global_tags || [];
@@ -335,7 +687,7 @@ export function createBrowserModule({
     renderGlobalTags();
     renderWorkspaceSummary();
 
-    if (!state.items.length) {
+    if (!state.items.length || !state.visibleItems.length) {
       state.selectedName = "";
       state.currentItem = null;
       setCaptionEditorText("", { markSaved: true });
@@ -348,8 +700,8 @@ export function createBrowserModule({
       return;
     }
 
-    const stillExists = state.items.some((item) => item.name === state.selectedName);
-    const nextName = stillExists ? state.selectedName : state.items[0].name;
+    const stillExists = state.visibleItems.some((item) => item.name === state.selectedName);
+    const nextName = stillExists ? state.selectedName : state.visibleItems[0].name;
     await selectItem(nextName, !stillExists, { skipDirtyCheck });
   }
 
@@ -360,6 +712,7 @@ export function createBrowserModule({
       if (!ok) return;
     }
     state.selectedName = name;
+    if (!rerenderList) updateItemCardActiveState();
     const data = await apiGet("/api/item", { name });
     state.currentItem = data.item;
     setCaptionEditorText(data.item.text || "", { markSaved: true });
@@ -402,6 +755,12 @@ export function createBrowserModule({
     refs.control2Dir.value = dirs.control2 || "";
     refs.control3Dir.value = dirs.control3 || "";
     refs.resultDir.value = dirs.result || "";
+    if (refs.swapControlDir && !refs.swapControlDir.value.trim() && dirs.control1) {
+      refs.swapControlDir.value = dirs.control1;
+    }
+    if (refs.swapResultDir && !refs.swapResultDir.value.trim() && dirs.result) {
+      refs.swapResultDir.value = dirs.result;
+    }
     seedWorkspaceBrowserRootFromInputs();
     updateControlFieldVisibility();
     renderWorkspaceBrowser();

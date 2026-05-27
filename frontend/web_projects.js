@@ -17,6 +17,7 @@ export function createProjectsModule({
   saveCurrentCaption,
 }) {
   const PROJECT_STATE_VERSION = 1;
+  let projectUiStateSaveTimer = 0;
 
   function selectedTemplateIds() {
     const values = {};
@@ -37,6 +38,7 @@ export function createProjectsModule({
       if (!targetId || !select || !value) return;
       if (Array.from(select.options).some((option) => option.value === value)) {
         select.value = value;
+        select.dispatchEvent(new Event("lora-select-sync", { bubbles: true }));
       }
     });
   }
@@ -44,6 +46,7 @@ export function createProjectsModule({
   function setValue(ref, value, storageKey = "") {
     if (!ref || value === undefined || value === null) return;
     ref.value = `${value}`;
+    ref.dispatchEvent?.(new Event("lora-select-sync", { bubbles: true }));
     if (storageKey) saveStored(storageKey, ref.value);
   }
 
@@ -276,11 +279,52 @@ export function createProjectsModule({
 
   async function saveOpenProjectUiState() {
     if (!state.currentProjectId) return;
+    if (projectUiStateSaveTimer) {
+      window.clearTimeout(projectUiStateSaveTimer);
+      projectUiStateSaveTimer = 0;
+    }
     await apiPost("/api/projects/ui-state", {
       id: state.currentProjectId,
       ui_state: collectProjectUiState(state.currentProjectName || refs.projectNameInput?.value || ""),
     });
   }
+
+  function saveOpenProjectUiStateNow() {
+    if (!state.currentProjectId) return;
+    const payload = {
+      id: state.currentProjectId,
+      ui_state: collectProjectUiState(state.currentProjectName || refs.projectNameInput?.value || ""),
+    };
+    const body = JSON.stringify(payload);
+    if (navigator.sendBeacon) {
+      navigator.sendBeacon("/api/projects/ui-state", new Blob([body], { type: "application/json" }));
+    }
+  }
+
+  function scheduleOpenProjectUiStateSave() {
+    if (!state.currentProjectId) return;
+    if (projectUiStateSaveTimer) window.clearTimeout(projectUiStateSaveTimer);
+    projectUiStateSaveTimer = window.setTimeout(() => {
+      projectUiStateSaveTimer = 0;
+      saveOpenProjectUiState().catch((error) => console.warn(error));
+    }, 650);
+  }
+
+  function bindProjectCaptionSettingsAutosave() {
+    const bind = (ref, eventName) => ref?.addEventListener(eventName, scheduleOpenProjectUiStateSave);
+    bind(refs.overwriteMode, "change");
+    bind(refs.captionMode, "change");
+    bind(refs.maxTokens, "input");
+    bind(refs.maxTokens, "change");
+    bind(refs.customPrompt, "input");
+    bind(refs.customPrompt, "change");
+    document.querySelectorAll(".template-row .promptTemplateSelect").forEach((select) => {
+      select.addEventListener("change", scheduleOpenProjectUiStateSave);
+    });
+    window.addEventListener("beforeunload", saveOpenProjectUiStateNow);
+  }
+
+  bindProjectCaptionSettingsAutosave();
 
   async function openProject(projectId) {
     await saveOpenProjectUiState();
@@ -309,7 +353,7 @@ export function createProjectsModule({
   }
 
   async function renameProject(project) {
-    const name = window.prompt("输入新的项目名称", project.name || project.id);
+    const name = await window.appPrompt("输入新的项目名称", project.name || project.id);
     if (!name || !name.trim()) return;
     await runWithStatus("正在重命名项目...", async () => {
       const data = await apiPost("/api/projects/rename", { id: project.id, name: name.trim() });
@@ -326,7 +370,7 @@ export function createProjectsModule({
 
   async function cloneProject(project) {
     const defaultName = `${project.name || project.id} 副本`;
-    const name = window.prompt("输入克隆后的项目名称", defaultName);
+    const name = await window.appPrompt("输入克隆后的项目名称", defaultName);
     if (!name || !name.trim()) return;
     await runWithStatus("正在克隆项目...", async () => {
       const data = await apiPost("/api/projects/clone", { id: project.id, name: name.trim() });
@@ -336,7 +380,7 @@ export function createProjectsModule({
   }
 
   async function deleteProject(project) {
-    if (!window.confirm(`删除项目「${project.name || project.id}」？项目会移动到用户目录 .lora_dataset_edit/trash。`)) return;
+    if (!(await window.appConfirm(`删除项目「${project.name || project.id}」？项目会移动到用户目录 .lora_dataset_edit/trash。`))) return;
     await runWithStatus("正在删除项目...", async () => {
       await apiPost("/api/projects/delete", { id: project.id });
       if (state.currentProjectId === project.id) {
@@ -425,8 +469,10 @@ export function createProjectsModule({
   return {
     renderProjects,
     refreshProjects,
+    applyProjectUiState,
     saveCurrentProject,
     saveProjectAsNew,
+    saveOpenProjectUiState,
     openProject,
     renameProject,
     cloneProject,

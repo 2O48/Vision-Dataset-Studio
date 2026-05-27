@@ -4,6 +4,15 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>LoRA Data Edit Console</title>
+  <script>
+    (() => {
+      const mode = window.localStorage.getItem("lora-ui.theme-mode") || "auto";
+      const prefersDark = window.matchMedia?.("(prefers-color-scheme: dark)")?.matches;
+      const resolved = mode === "dark" || (mode === "auto" && prefersDark) ? "dark" : "light";
+      document.documentElement.dataset.themeMode = ["auto", "light", "dark"].includes(mode) ? mode : "auto";
+      document.documentElement.dataset.theme = resolved;
+    })();
+  </script>
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
@@ -11,9 +20,16 @@
   <div class="site-shell">
     <header class="command-bar">
       <div class="command-top">
-        <div class="command-brand">
-          <p class="eyebrow">LoRA Dataset Editorial Console</p>
-          <h1>LoRA 数据集标注工作台</h1>
+        <div class="command-run-actions" aria-label="标注操作">
+          <button class="top-icon-button primary" id="captionCurrentBtn" type="button" aria-label="标注当前" title="标注当前">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" aria-hidden="true"><rect width="256" height="256" fill="none"/><path d="M240,128a15.74,15.74,0,0,1-7.6,13.51L88.32,229.65a16,16,0,0,1-16.2.3A15.86,15.86,0,0,1,64,216.13V39.87a15.86,15.86,0,0,1,8.12-13.82,16,16,0,0,1,16.2.3L232.4,114.49A15.74,15.74,0,0,1,240,128Z"/></svg>
+          </button>
+          <button class="top-icon-button" id="captionBatchBtn" type="button" aria-label="批量标注" title="批量标注">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" aria-hidden="true"><rect width="256" height="256" fill="none"/><path d="M208,40V216a8,8,0,0,1-16,0V146.77L72.43,221.55A15.95,15.95,0,0,1,48,208.12V47.88A15.95,15.95,0,0,1,72.43,34.45L192,109.23V40a8,8,0,0,1,16,0Z"/></svg>
+          </button>
+          <button class="top-icon-button danger" id="stopBatchBtn" type="button" aria-label="停止" title="停止">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" aria-hidden="true"><rect width="256" height="256" fill="none"/><path d="M216,56V200a16,16,0,0,1-16,16H56a16,16,0,0,1-16-16V56A16,16,0,0,1,56,40H200A16,16,0,0,1,216,56Z"/></svg>
+          </button>
         </div>
         <div class="command-progress" aria-label="打标进度">
           <div class="top-caption-progress">
@@ -26,24 +42,21 @@
 
         <div class="command-caption">
           <label class="caption-engine-field">
-            <span>标注引擎</span>
-            <select id="captionBackend">
+            <select id="captionBackend" aria-label="标注引擎">
               <option value="local">本地 Qwen</option>
               <option value="ollama">Ollama</option>
               <option value="api">OpenAI 兼容 API</option>
             </select>
           </label>
-          <button class="button-primary" id="captionCurrentBtn" type="button">标注当前</button>
-          <button class="button-ghost" id="captionBatchBtn" type="button">批量标注</button>
-          <button class="button-ghost" id="openCaptionSettingsBtn" type="button">标注配置</button>
-          <button class="button-ghost danger" id="stopBatchBtn" type="button">停止</button>
+          <button class="top-icon-button" id="openCaptionSettingsBtn" type="button" aria-label="标注配置" title="标注配置">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" aria-hidden="true"><rect width="256" height="256" fill="none"/><path d="M32,80a8,8,0,0,1,8-8H77.17a28,28,0,0,1,53.66,0H216a8,8,0,0,1,0,16H130.83a28,28,0,0,1-53.66,0H40A8,8,0,0,1,32,80Zm184,88H194.83a28,28,0,0,0-53.66,0H40a8,8,0,0,0,0,16H141.17a28,28,0,0,0,53.66,0H216a8,8,0,0,0,0-16Z"/></svg>
+          </button>
         </div>
       </div>
     </header>
 
     <main class="workbench-shell" id="workbenchShell">
       <section class="utility-page-shell" id="utilityPageShell" aria-hidden="true">
-        <div class="panel-resizer left-panel-resizer" id="leftPanelResizer" role="separator" aria-orientation="vertical" aria-label="调整左侧面板宽度"></div>
         <div class="side-panel-head">
           <div>
             <p class="card-kicker">Options</p>
@@ -55,9 +68,38 @@
         <nav class="utility-actions" id="utilityActions" aria-label="配置面板">
           <button class="utility-tab" data-panel="projects" type="button">项目</button>
           <button class="utility-tab" data-panel="workspace" type="button">数据</button>
-          <button class="utility-tab" data-panel="batch" type="button">批量与状态</button>
+          <button class="utility-tab" data-panel="batch" type="button">批量</button>
           <button class="utility-tab" data-panel="process" type="button">图像处理</button>
           <button class="utility-tab" data-panel="export" type="button">导出</button>
+          <div class="theme-mode-group" id="themeModeGroup" role="group" aria-label="网页配色模式">
+            <button class="theme-mode-button" data-theme-mode="auto" type="button" aria-label="自动配色" title="自动">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" aria-hidden="true">
+                <rect width="256" height="256" fill="none"></rect>
+                <rect x="32" y="48" width="192" height="144" rx="16" transform="translate(256 240) rotate(180)" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"></rect>
+                <line x1="160" y1="224" x2="96" y2="224" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"></line>
+              </svg>
+            </button>
+            <button class="theme-mode-button" data-theme-mode="light" type="button" aria-label="浅色模式" title="浅色">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" aria-hidden="true">
+                <rect width="256" height="256" fill="none"></rect>
+                <line x1="128" y1="40" x2="128" y2="16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"></line>
+                <circle cx="128" cy="128" r="56" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"></circle>
+                <line x1="64" y1="64" x2="48" y2="48" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"></line>
+                <line x1="64" y1="192" x2="48" y2="208" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"></line>
+                <line x1="192" y1="64" x2="208" y2="48" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"></line>
+                <line x1="192" y1="192" x2="208" y2="208" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"></line>
+                <line x1="40" y1="128" x2="16" y2="128" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"></line>
+                <line x1="128" y1="216" x2="128" y2="240" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"></line>
+                <line x1="216" y1="128" x2="240" y2="128" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"></line>
+              </svg>
+            </button>
+            <button class="theme-mode-button" data-theme-mode="dark" type="button" aria-label="深色模式" title="深色">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" aria-hidden="true">
+                <rect width="256" height="256" fill="none"></rect>
+                <path d="M108.11,28.11A96.09,96.09,0,0,0,227.89,147.89,96,96,0,1,1,108.11,28.11Z" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"></path>
+              </svg>
+            </button>
+          </div>
         </nav>
 
         <section class="utility-panel active" data-panel="workspace">
@@ -216,16 +258,60 @@
               <p class="card-note">作用于当前筛选结果。</p>
             </div>
             <div class="batch-grid">
-              <input id="batchAddInput" placeholder="添加短语，逗号分隔">
-              <button class="button-ghost" id="batchAddBtn" type="button">批量添加</button>
-              <input id="batchDeleteInput" placeholder="删除短语 / 片段，逗号分隔">
-              <button class="button-ghost danger" id="batchDeleteBtn" type="button">批量删除</button>
+              <input class="span-2" id="batchAddInput" placeholder="添加短语，逗号分隔">
+              <button class="button-primary span-2" id="batchAddBtn" type="button">批量添加</button>
+              <input class="span-2" id="batchDeleteInput" placeholder="删除短语 / 片段，逗号分隔">
+              <button class="button-primary danger-text span-2" id="batchDeleteBtn" type="button">批量删除</button>
               <input id="batchReplaceOld" placeholder="旧短语">
               <input id="batchReplaceNew" placeholder="新短语（留空表示删除）">
-              <button class="button-ghost warn span-2" id="batchReplaceBtn" type="button">批量替换</button>
+              <button class="button-primary span-2" id="batchReplaceBtn" type="button">批量替换</button>
               <button class="button-ghost danger span-2" id="deleteCurrentBtn" type="button">从导出集中排除当前条目</button>
             </div>
-          </article>        </section>
+          </article>
+          <article class="card batch-card">
+            <div class="card-head">
+              <div>
+                <p class="card-kicker">File Names</p>
+                <h2>批量重命名</h2>
+              </div>
+              <p class="card-note">重命名当前筛选结果的图片与同名 TXT。</p>
+            </div>
+            <div class="batch-grid">
+              <input class="span-2" id="batchRenameAddInput" placeholder="添加到文件名的文字">
+              <button class="button-primary" id="batchRenameAddPrefixBtn" type="button">添加至最前</button>
+              <button class="button-primary" id="batchRenameAddSuffixBtn" type="button">添加至最后</button>
+              <input class="span-2" id="batchRenameDeleteInput" placeholder="删除文字 / 片段，逗号分隔">
+              <button class="button-primary danger-text span-2" id="batchRenameDeleteBtn" type="button">批量删除</button>
+              <input id="batchRenameReplaceOld" placeholder="旧文字">
+              <input id="batchRenameReplaceNew" placeholder="新文字（留空表示删除）">
+              <button class="button-primary span-2" id="batchRenameReplaceBtn" type="button">批量替换</button>
+            </div>
+          </article>
+          <article class="card batch-card">
+            <div class="card-head">
+              <div>
+                <p class="card-kicker">Pair Shuffle</p>
+                <h2>批量对调</h2>
+              </div>
+              <p class="card-note">按同名图片复制出新图像对，不改动原始文件。</p>
+            </div>
+            <div class="batch-grid">
+              <label class="stacked-label span-2">
+                <span>控制图目录</span>
+                <input id="swapControlDir" placeholder="例如 D:\dataset\control1">
+              </label>
+              <label class="stacked-label span-2">
+                <span>结果图目录</span>
+                <input id="swapResultDir" placeholder="例如 D:\dataset\result">
+              </label>
+              <label class="stacked-label span-2">
+                <span>新增文件后缀</span>
+                <input id="swapSuffix" value="_swap" placeholder="_swap">
+              </label>
+              <button class="button-primary span-2" id="swapPairsBtn" type="button">生成对调副本</button>
+            </div>
+          </article>
+        </section>
 
         <section class="utility-panel single-page-panel" data-panel="process">
           <article class="card export-card">
@@ -261,15 +347,15 @@
               </label>
             </div>
 
-            <label class="toggle-row">
+            <label class="checkbox-row">
               <input id="processIncludeControls" type="checkbox" checked>
               <span>同时处理当前启用的控制图目录</span>
             </label>
-            <label class="toggle-row">
+            <label class="checkbox-row">
               <input id="processLoadWorkspace" type="checkbox" checked>
               <span>处理完成后加载为当前工作区</span>
             </label>
-            <label class="toggle-row">
+            <label class="checkbox-row">
               <input id="processOnlyMismatched" type="checkbox" checked>
               <span>批量匹配结果尺寸时只重采样尺寸不一致项，已匹配项直接复制</span>
             </label>
@@ -277,10 +363,6 @@
               <button class="button-primary" id="processImagesBtn" type="button">处理图像工作集</button>
               <button class="button-ghost" id="processMatchResultBtn" type="button">批量匹配结果尺寸</button>
             </div>
-            <div class="progress-shell">
-              <div class="progress-bar" id="processProgressBar"></div>
-            </div>
-            <div class="export-status" id="processStatus">等待图像处理</div>
           </article>
         </section>
 
@@ -312,22 +394,26 @@
               </label>
             </div>
 
-            <label class="toggle-row">
+            <label class="checkbox-row">
               <input id="exportProcessImages" type="checkbox" checked>
               <span>导出时按图像处理参数再次缩放并中心裁切</span>
             </label>
-            <label class="toggle-row">
+            <label class="checkbox-row">
               <input id="exportIncludeControls" type="checkbox" checked>
               <span>同时导出当前启用的控制图目录</span>
+            </label>
+            <label class="checkbox-row">
+              <input id="exportPreserveSubfolders" type="checkbox">
+              <span>按子文件夹结构导出</span>
             </label>
 
             <div class="action-row">
               <button class="button-primary" id="exportDatasetBtn" type="button">导出数据集</button>
             </div>
-            <div class="export-status" id="exportStatus">等待导出</div>
           </article>
         </section>
       </section>
+      <div class="content-resizer vertical-resizer left-panel-resizer" id="leftPanelResizer" role="separator" aria-orientation="vertical" aria-label="调整左侧面板宽度"></div>
 
       <div class="workbench-layout" id="workbenchLayout">
         <aside class="card list-card">
@@ -350,8 +436,8 @@
             <button data-filter="res_mismatch" type="button">分辨率异</button>
           </div>
           <label class="stacked-label">
-            <span>短语搜索</span>
-            <input id="tagSearch" placeholder="输入 tag / caption 片段">
+            <span>短语 / 名称搜索</span>
+            <input id="tagSearch" placeholder="输入 tag / caption / 子文件夹 / 图片名称">
           </label>
         </div>
 
@@ -359,7 +445,10 @@
           <span id="listStats">0 项</span>
         </div>
         <div class="item-list" id="itemList"></div>
+        <div class="folder-filter-bar" id="itemFolderFilters"></div>
       </aside>
+
+        <div class="content-resizer vertical-resizer" id="listViewerResizer" role="separator" aria-orientation="vertical" aria-label="调整缩略图列表宽度"></div>
 
         <div class="browser-main">
         <article class="card viewer-card">
@@ -417,8 +506,10 @@
           </div>
 
           <div class="note-bar" id="resolutionNote">等待载入分辨率信息</div>
-          <div class="note-bar subtle" id="viewerProcessStatus">Viewer 图像处理会写入 datasets/tmp/viewer，不改动原始文件。</div>
+          <div class="note-bar subtle" id="viewerProcessStatus">Viewer 图像处理会生成临时副本并更新当前预览；保存项目时写入 ~/.lora_dataset_edit/projects，不改动原始文件。</div>
         </article>
+
+        <div class="content-resizer horizontal-resizer" id="viewerEditorResizer" role="separator" aria-orientation="horizontal" aria-label="调整 Viewer 高度"></div>
 
         <div class="browser-detail-grid">
           <section class="card edit-card">
@@ -429,24 +520,30 @@
               </div>
               <div class="card-actions">
                 <button class="button-ghost" id="translateCurrentBtn" type="button">翻译</button>
-                <button class="button-primary" id="saveTagsBtn" type="button">保存</button>
               </div>
             </div>
-            <textarea id="captionEditor" class="caption-editor" placeholder="可直接编辑自然语言 caption"></textarea>
-            <div class="chip-editor" id="tagChips"></div>
-            <div class="inline-form">
-              <input id="newTagInput" placeholder="输入短语，回车或点按钮追加到 caption">
-              <button class="button-ghost" id="addTagBtn" type="button">追加</button>
-            </div>
-            <div class="quick-tag-panel collapsed" id="quickTagPanel">
-              <div class="quick-tag-head">
-                <button class="quick-tag-toggle" id="quickTagToggleBtn" type="button" aria-expanded="false">快捷标注</button>
-                <button class="button-ghost quick-tag-save" id="quickTagSaveBtn" type="button">存储</button>
+            <div class="edit-card-body">
+              <div class="caption-editor-wrap">
+                <pre class="caption-highlight-layer" id="captionHighlight" aria-hidden="true"></pre>
+                <textarea id="captionEditor" class="caption-editor" placeholder="可直接编辑自然语言 caption"></textarea>
               </div>
-              <div class="quick-tag-grid" id="quickTagGrid"></div>
+              <div class="chip-editor" id="tagChips"></div>
+              <div class="inline-form">
+                <input id="newTagInput" placeholder="输入短语，回车或点按钮追加到 caption">
+                <button class="button-ghost" id="addTagBtn" type="button">追加</button>
+              </div>
+              <div class="quick-tag-panel collapsed" id="quickTagPanel">
+                <div class="quick-tag-head">
+                  <button class="quick-tag-toggle" id="quickTagToggleBtn" type="button" aria-expanded="false">快捷标注</button>
+                  <button class="button-ghost quick-tag-save" id="quickTagSaveBtn" type="button">存储</button>
+                </div>
+                <div class="quick-tag-grid" id="quickTagGrid"></div>
+              </div>
+              <textarea id="translatedText" class="translated-box" placeholder="翻译结果会显示在这里"></textarea>
             </div>
-            <textarea id="translatedText" class="translated-box" placeholder="翻译结果会显示在这里"></textarea>
           </section>
+
+          <div class="content-resizer vertical-resizer" id="captionGlobalResizer" role="separator" aria-orientation="vertical" aria-label="调整 Caption 与全局短语宽度"></div>
 
           <section class="card global-tags-card">
             <div class="card-head">
@@ -454,7 +551,7 @@
                 <p class="card-kicker">Caption Index</p>
                 <h2>全局短语</h2>
               </div>
-              <p class="card-note" id="globalTagCount">0</p>
+              <input class="global-tag-search" id="globalTagSearch" placeholder="搜索全局短语，共0项">
             </div>
             <div class="global-tag-list" id="globalTagList"></div>
           </section>
@@ -462,8 +559,8 @@
         </div>
       </div>
 
+      <div class="content-resizer vertical-resizer right-panel-resizer" id="rightPanelResizer" role="separator" aria-orientation="vertical" aria-label="调整右侧面板宽度"></div>
       <section class="caption-settings-shell" id="captionSettingsShell" aria-hidden="true">
-        <div class="panel-resizer right-panel-resizer" id="rightPanelResizer" role="separator" aria-orientation="vertical" aria-label="调整右侧面板宽度"></div>
         <div class="side-panel-head">
           <div>
             <p class="card-kicker">Caption</p>
@@ -638,7 +735,35 @@
       <span class="bottom-status-item" title="本地模型服务的运行状态" aria-label="本地模型服务的运行状态"><span>本地模型状态</span> <strong id="localAiStatusText">未配置</strong></span>
       <span class="bottom-status-item" title="API 标注服务的配置与请求状态" aria-label="API 标注服务的配置与请求状态"><span>API 状态</span> <strong id="apiAiStatusText">未配置</strong></span>
       <span class="bottom-status-item" title="Ollama 服务的配置与请求状态" aria-label="Ollama 服务的配置与请求状态"><span>Ollama 状态</span> <strong id="ollamaAiStatusText">未配置</strong></span>
+      <span class="bottom-status-title">数据集标注工作台</span>
     </footer>
+  </div>
+
+  <div class="dialog-backdrop" id="appDialog" aria-hidden="true">
+    <section class="dialog-panel" role="dialog" aria-modal="true" aria-labelledby="appDialogTitle">
+      <h2 id="appDialogTitle">提示</h2>
+      <p class="dialog-message" id="appDialogMessage"></p>
+      <input class="dialog-input" id="appDialogInput">
+      <div class="dialog-actions">
+        <button class="button-ghost" id="appDialogCancel" type="button">取消</button>
+        <button class="button-primary" id="appDialogConfirm" type="button">确定</button>
+      </div>
+    </section>
+  </div>
+
+  <div class="item-context-menu" id="itemContextMenu" hidden>
+    <button type="button" data-action="rename">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" aria-hidden="true"><rect width="256" height="256" fill="none"/><path d="M92.69,216H48a8,8,0,0,1-8-8V163.31a8,8,0,0,1,2.34-5.65L165.66,34.34a8,8,0,0,1,11.31,0L221.66,79a8,8,0,0,1,0,11.31L98.34,213.66A8,8,0,0,1,92.69,216Z" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/><line x1="136" y1="64" x2="192" y2="120" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/></svg>
+      <span>重命名</span>
+    </button>
+    <button type="button" data-action="reveal">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" aria-hidden="true"><rect width="256" height="256" fill="none"/><path d="M32,208V64a8,8,0,0,1,8-8H93.33a8,8,0,0,1,4.8,1.6L128,80h72a8,8,0,0,1,8,8v24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/><path d="M32,208l30.18-90.53A8,8,0,0,1,69.77,112H232a8,8,0,0,1,7.59,10.53L211.09,208Z" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/></svg>
+      <span>在文件管理器中打开</span>
+    </button>
+    <button class="danger" type="button" data-action="trash">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" aria-hidden="true"><rect width="256" height="256" fill="none"/><line x1="216" y1="56" x2="40" y2="56" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/><line x1="104" y1="104" x2="104" y2="168" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/><line x1="152" y1="104" x2="152" y2="168" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/><path d="M200,56V208a8,8,0,0,1-8,8H64a8,8,0,0,1-8-8V56" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/><path d="M168,56V40a16,16,0,0,0-16-16H104A16,16,0,0,0,88,40V56" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/></svg>
+      <span>删除</span>
+    </button>
   </div>
 
   <template id="tagChipTemplate">

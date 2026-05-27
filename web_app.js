@@ -12,7 +12,7 @@ import {
   restoreSelectValue,
   apiGet,
   apiPost,
-  apiPostDownload,
+  filenameFromDisposition,
   splitSegmentInput,
   parseSegments,
 } from "./frontend/web_shared.js";
@@ -30,9 +30,15 @@ const state = {
   itemStats: null,
   items: [],
   globalSegments: [],
+  globalTagQuery: "",
+  globalTagDragging: "",
+  globalTagPointerDrag: null,
+  globalTagSuppressClick: false,
   selectedName: "",
   currentItem: null,
   filter: "all",
+  itemFolderFilter: "",
+  visibleItems: [],
   segmentQuery: "",
   utilityPanel: window.localStorage.getItem(STORAGE_KEYS.utilityPanel) || "workspace",
   utilityOpen: false,
@@ -47,6 +53,8 @@ const state = {
   currentText: "",
   captionSavedText: "",
   captionDirty: false,
+  captionAutoSaveTimer: 0,
+  captionAutoSavePromise: null,
   currentSegments: [],
   quickTags: [],
   quickTagsCollapsed: true,
@@ -68,6 +76,9 @@ const state = {
   ollamaModelQuery: "",
   lastBatchSignature: "",
   lastImageProcessSignature: "",
+  lastExportSignature: "",
+  lastExportDownloadPath: "",
+  exportDownloadRequested: false,
   aiPollTimer: null,
   aiPollInFlight: false,
   projects: [],
@@ -75,10 +86,12 @@ const state = {
   currentProjectName: "",
   projectQuery: "",
   projectSortMode: window.localStorage.getItem(STORAGE_KEYS.projectSortMode) || "updated",
+  themeMode: window.localStorage.getItem(STORAGE_KEYS.themeMode) || "auto",
 };
 
 let renderTags = () => {};
 let renderGlobalTags = () => {};
+let flushCaptionAutosave = async () => true;
 
 const refs = {
   workbenchShell: document.querySelector("#workbenchShell"),
@@ -86,10 +99,14 @@ const refs = {
   utilityActions: document.querySelector("#utilityActions"),
   utilityPageShell: document.querySelector("#utilityPageShell"),
   leftPanelResizer: document.querySelector("#leftPanelResizer"),
+  listViewerResizer: document.querySelector("#listViewerResizer"),
   utilityPageTitle: document.querySelector("#utilityPageTitle"),
   closeUtilityBtn: document.querySelector("#closeUtilityBtn"),
+  themeModeGroup: document.querySelector("#themeModeGroup"),
   captionSettingsShell: document.querySelector("#captionSettingsShell"),
   rightPanelResizer: document.querySelector("#rightPanelResizer"),
+  viewerEditorResizer: document.querySelector("#viewerEditorResizer"),
+  captionGlobalResizer: document.querySelector("#captionGlobalResizer"),
   closeCaptionSettingsBtn: document.querySelector("#closeCaptionSettingsBtn"),
   control1Dir: document.querySelector("#control1Dir"),
   control2Dir: document.querySelector("#control2Dir"),
@@ -146,6 +163,7 @@ const refs = {
   filterSummary: document.querySelector("#filterSummary"),
   tagSearch: document.querySelector("#tagSearch"),
   itemList: document.querySelector("#itemList"),
+  itemFolderFilters: document.querySelector("#itemFolderFilters"),
   listStats: document.querySelector("#listStats"),
   currentName: document.querySelector("#currentName"),
   currentMeta: document.querySelector("#currentMeta"),
@@ -157,6 +175,7 @@ const refs = {
   viewerMatchResultBtn: document.querySelector("#viewerMatchResultBtn"),
   viewerProcessStatus: document.querySelector("#viewerProcessStatus"),
   captionEditor: document.querySelector("#captionEditor"),
+  captionHighlight: document.querySelector("#captionHighlight"),
   tagChips: document.querySelector("#tagChips"),
   newTagInput: document.querySelector("#newTagInput"),
   addTagBtn: document.querySelector("#addTagBtn"),
@@ -164,9 +183,9 @@ const refs = {
   quickTagPanel: document.querySelector("#quickTagPanel"),
   quickTagToggleBtn: document.querySelector("#quickTagToggleBtn"),
   quickTagSaveBtn: document.querySelector("#quickTagSaveBtn"),
-  saveTagsBtn: document.querySelector("#saveTagsBtn"),
   translateCurrentBtn: document.querySelector("#translateCurrentBtn"),
   translatedText: document.querySelector("#translatedText"),
+  globalTagSearch: document.querySelector("#globalTagSearch"),
   globalTagList: document.querySelector("#globalTagList"),
   globalTagCount: document.querySelector("#globalTagCount"),
   batchAddInput: document.querySelector("#batchAddInput"),
@@ -176,7 +195,19 @@ const refs = {
   batchAddBtn: document.querySelector("#batchAddBtn"),
   batchDeleteBtn: document.querySelector("#batchDeleteBtn"),
   batchReplaceBtn: document.querySelector("#batchReplaceBtn"),
+  batchRenameAddInput: document.querySelector("#batchRenameAddInput"),
+  batchRenameAddPrefixBtn: document.querySelector("#batchRenameAddPrefixBtn"),
+  batchRenameAddSuffixBtn: document.querySelector("#batchRenameAddSuffixBtn"),
+  batchRenameDeleteInput: document.querySelector("#batchRenameDeleteInput"),
+  batchRenameDeleteBtn: document.querySelector("#batchRenameDeleteBtn"),
+  batchRenameReplaceOld: document.querySelector("#batchRenameReplaceOld"),
+  batchRenameReplaceNew: document.querySelector("#batchRenameReplaceNew"),
+  batchRenameReplaceBtn: document.querySelector("#batchRenameReplaceBtn"),
   deleteCurrentBtn: document.querySelector("#deleteCurrentBtn"),
+  swapControlDir: document.querySelector("#swapControlDir"),
+  swapResultDir: document.querySelector("#swapResultDir"),
+  swapSuffix: document.querySelector("#swapSuffix"),
+  swapPairsBtn: document.querySelector("#swapPairsBtn"),
   exportTargetPixels: document.querySelector("#exportTargetPixels"),
   exportSizeMultiple: document.querySelector("#exportSizeMultiple"),
   exportProjectName: document.querySelector("#exportProjectName"),
@@ -184,16 +215,14 @@ const refs = {
   exportOutputDir: document.querySelector("#exportOutputDir"),
   exportProcessImages: document.querySelector("#exportProcessImages"),
   exportIncludeControls: document.querySelector("#exportIncludeControls"),
+  exportPreserveSubfolders: document.querySelector("#exportPreserveSubfolders"),
   processProjectName: document.querySelector("#processProjectName"),
   processIncludeControls: document.querySelector("#processIncludeControls"),
   processLoadWorkspace: document.querySelector("#processLoadWorkspace"),
   processOnlyMismatched: document.querySelector("#processOnlyMismatched"),
   processImagesBtn: document.querySelector("#processImagesBtn"),
   processMatchResultBtn: document.querySelector("#processMatchResultBtn"),
-  processProgressBar: document.querySelector("#processProgressBar"),
-  processStatus: document.querySelector("#processStatus"),
   exportDatasetBtn: document.querySelector("#exportDatasetBtn"),
-  exportStatus: document.querySelector("#exportStatus"),
   aiModel: document.querySelector("#aiModel"),
   overwriteMode: document.querySelector("#overwriteMode"),
   captionMode: document.querySelector("#captionMode"),
@@ -245,6 +274,88 @@ const refs = {
   aiStatusLine: document.querySelector("#aiStatusLine"),
 };
 
+function createAppDialog() {
+  const root = document.querySelector("#appDialog");
+  const title = document.querySelector("#appDialogTitle");
+  const message = document.querySelector("#appDialogMessage");
+  const input = document.querySelector("#appDialogInput");
+  const cancelBtn = document.querySelector("#appDialogCancel");
+  const confirmBtn = document.querySelector("#appDialogConfirm");
+  let resolver = null;
+  let dialogKind = "alert";
+  let previousFocus = null;
+
+  function finish(value) {
+    if (!resolver || !root) return;
+    const resolve = resolver;
+    resolver = null;
+    root.setAttribute("aria-hidden", "true");
+    document.body.classList.remove("dialog-open");
+    input.value = "";
+    if (previousFocus?.focus) previousFocus.focus();
+    resolve(value);
+  }
+
+  function open({ kind = "alert", titleText = "提示", messageText = "", defaultValue = "" } = {}) {
+    if (!root || !title || !message || !input || !cancelBtn || !confirmBtn) {
+      return Promise.resolve(kind === "prompt" ? null : kind === "confirm" ? false : true);
+    }
+    if (resolver) finish(kind === "prompt" ? null : false);
+    dialogKind = kind;
+    previousFocus = document.activeElement;
+    title.textContent = titleText || "提示";
+    message.textContent = messageText || "";
+    input.hidden = kind !== "prompt";
+    input.value = defaultValue || "";
+    cancelBtn.hidden = kind === "alert";
+    root.dataset.kind = kind;
+    root.setAttribute("aria-hidden", "false");
+    document.body.classList.add("dialog-open");
+    return new Promise((resolve) => {
+      resolver = resolve;
+      requestAnimationFrame(() => {
+        const target = kind === "prompt" ? input : confirmBtn;
+        target.focus();
+        if (kind === "prompt") input.select();
+      });
+    });
+  }
+
+  confirmBtn?.addEventListener("click", () => {
+    finish(dialogKind === "prompt" ? input.value : true);
+  });
+  cancelBtn?.addEventListener("click", () => {
+    finish(dialogKind === "prompt" ? null : false);
+  });
+  root?.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      finish(dialogKind === "alert" ? true : dialogKind === "prompt" ? null : false);
+    }
+    if (event.key === "Enter" && dialogKind === "prompt" && document.activeElement === input) {
+      event.preventDefault();
+      finish(input.value);
+    }
+  });
+
+  return {
+    alert(messageText, titleText = "提示") {
+      return open({ kind: "alert", titleText, messageText });
+    },
+    confirm(messageText, titleText = "确认") {
+      return open({ kind: "confirm", titleText, messageText });
+    },
+    prompt(titleText, defaultValue = "") {
+      return open({ kind: "prompt", titleText, defaultValue });
+    },
+  };
+}
+
+const appDialog = createAppDialog();
+window.appAlert = (message, title) => appDialog.alert(message, title);
+window.appConfirm = (message, title) => appDialog.confirm(message, title);
+window.appPrompt = (title, defaultValue) => appDialog.prompt(title, defaultValue);
+
 function saveQuickTags() {
   state.quickTags = cleanQuickTags(state.quickTags);
   saveStored(STORAGE_KEYS.quickTags, JSON.stringify(state.quickTags));
@@ -266,8 +377,21 @@ function syncCaptionDirty() {
   state.captionDirty = state.currentText !== state.captionSavedText;
 }
 
+function normalizeCaptionText(text) {
+  return `${text || ""}`
+    .replace(/[，,]/g, ",")
+    .replace(/(?:,\s*){2,}/g, ", ")
+    .replace(/,\s*/g, ", ");
+}
+
+function normalizeCaptionInputText(text) {
+  return `${text || ""}`
+    .replace(/，/g, ",")
+    .replace(/(?:,\s*){2,}/g, ", ");
+}
+
 function setCaptionEditorText(text, { markSaved = false } = {}) {
-  state.currentText = `${text || ""}`;
+  state.currentText = normalizeCaptionText(text);
   if (refs.captionEditor) refs.captionEditor.value = state.currentText;
   syncSegmentsFromText();
   if (markSaved) {
@@ -279,12 +403,12 @@ function setCaptionEditorText(text, { markSaved = false } = {}) {
 }
 
 async function confirmDiscardCaptionChanges() {
-  if (!state.captionDirty) return true;
-  return window.confirm("当前 Caption 有未保存改动，继续操作会丢失改动。是否继续？");
+  return await flushCaptionAutosave();
 }
 
 function visibleNames() {
-  return state.items.map((item) => item.name);
+  const items = Array.isArray(state.visibleItems) ? state.visibleItems : state.items;
+  return items.map((item) => item.name);
 }
 
 function syncBottomStatusTooltips() {
@@ -300,6 +424,49 @@ function syncBottomStatusTooltips() {
   });
 }
 
+const themeMediaQuery = window.matchMedia?.("(prefers-color-scheme: dark)");
+
+function normalizeThemeMode(mode) {
+  return ["auto", "light", "dark"].includes(mode) ? mode : "auto";
+}
+
+function resolveThemeMode(mode) {
+  const normalized = normalizeThemeMode(mode);
+  if (normalized === "auto") return themeMediaQuery?.matches ? "dark" : "light";
+  return normalized;
+}
+
+function renderThemeMode() {
+  const mode = normalizeThemeMode(state.themeMode);
+  const resolved = resolveThemeMode(mode);
+  document.documentElement.dataset.themeMode = mode;
+  document.documentElement.dataset.theme = resolved;
+  document.documentElement.style.colorScheme = resolved;
+  refs.themeModeGroup?.querySelectorAll("button[data-theme-mode]").forEach((button) => {
+    const isActive = button.dataset.themeMode === mode;
+    button.classList.toggle("active", isActive);
+    button.setAttribute("aria-pressed", String(isActive));
+  });
+}
+
+function setThemeMode(mode, { persist = true } = {}) {
+  state.themeMode = normalizeThemeMode(mode);
+  if (persist) saveStored(STORAGE_KEYS.themeMode, state.themeMode);
+  renderThemeMode();
+}
+
+refs.themeModeGroup?.addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-theme-mode]");
+  if (!button) return;
+  setThemeMode(button.dataset.themeMode);
+});
+
+themeMediaQuery?.addEventListener?.("change", () => {
+  if (state.themeMode === "auto") renderThemeMode();
+});
+
+renderThemeMode();
+
 const bottomStatusTooltipObserver = new MutationObserver(syncBottomStatusTooltips);
 document.querySelectorAll(".bottom-status-item").forEach((item) => {
   bottomStatusTooltipObserver.observe(item, { childList: true, subtree: true, characterData: true });
@@ -308,7 +475,7 @@ syncBottomStatusTooltips();
 
 function showError(error) {
   console.error(error);
-  window.alert(error.message || String(error));
+  window.appAlert(error.message || String(error), "错误");
 }
 
 function activeControlCount() {
@@ -367,6 +534,7 @@ const browserModule = createBrowserModule({
   saveStored,
   apiGet,
   apiPost,
+  showError,
   confirmDiscardCaptionChanges,
   setCaptionEditorText,
   renderTags: (...args) => renderTags(...args),
@@ -397,8 +565,10 @@ const {
 const {
   renderProjects,
   refreshProjects,
+  applyProjectUiState,
   saveCurrentProject,
   saveProjectAsNew,
+  saveOpenProjectUiState,
   cleanupTmpNow,
 } = createProjectsModule({
   state,
@@ -430,10 +600,13 @@ const editorModule = createEditorModule({
   apiPost,
   setAiStatusLine,
   refreshItems,
+  applyWorkspaceSummary,
   visibleNames,
   renderViewer,
   confirmDiscardCaptionChanges,
   setCaptionEditorText,
+  normalizeCaptionText,
+  normalizeCaptionInputText,
   syncSegmentsFromText,
   syncCaptionDirty,
   onGlobalTagClick: (segment) => {
@@ -449,10 +622,14 @@ const {
   toggleQuickTags,
   renderQuickTags,
   saveCurrentCaption,
+  scheduleCaptionAutosave,
+  flushCaptionAutosave: editorFlushCaptionAutosave,
   translateCurrent,
   batchAdd,
   batchDelete,
   batchReplace,
+  batchRename,
+  swapControlResultPairs,
   deleteCurrent,
   loadPromptTemplates,
   savePromptTemplateFor,
@@ -460,6 +637,7 @@ const {
 } = editorModule;
 renderTags = editorModule.renderTags;
 renderGlobalTags = editorModule.renderGlobalTags;
+flushCaptionAutosave = editorFlushCaptionAutosave;
 
 const {
   renderImageProcessStatus,
@@ -472,10 +650,10 @@ const {
   state,
   refs,
   apiPost,
-  apiPostDownload,
   pollAiStatus: (...args) => pollAiStatus(...args),
   renderViewer,
   refreshItems,
+  setAiStatusLine,
 });
 
 const captionModule = createCaptionModule({
@@ -488,6 +666,7 @@ const captionModule = createCaptionModule({
   restoreSelectValue,
   apiGet,
   apiPost,
+  filenameFromDisposition,
   setAiStatusLine,
   activeCaptionBackendLabel,
   renderImageProcessStatus,
@@ -555,6 +734,7 @@ const { restorePersistedSettings, bindSettingsPersistence, bindEvents, bootstrap
   closeOllamaModelMenu,
   renderOllamaSuggestions,
   renderProjects,
+  applyProjectUiState,
   renderViewer,
   renderTags,
   renderQuickTags,
@@ -578,11 +758,13 @@ const { restorePersistedSettings, bindSettingsPersistence, bindEvents, bootstrap
   saveProjectAsNew,
   refreshProjects,
   cleanupTmpNow,
-  saveCurrentCaption,
+  scheduleCaptionAutosave,
   translateCurrent,
   batchAdd,
   batchDelete,
   batchReplace,
+  batchRename,
+  swapControlResultPairs,
   deleteCurrent,
   mergeWorkspace,
   scaleViewerItem,
@@ -612,6 +794,8 @@ const { restorePersistedSettings, bindSettingsPersistence, bindEvents, bootstrap
   toggleQuickTags,
   saveQuickTags,
   setCaptionEditorText,
+  normalizeCaptionText,
+  normalizeCaptionInputText,
   syncSegmentsFromText,
   syncCaptionDirty,
   restoreCaptionSettings,

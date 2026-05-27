@@ -198,7 +198,10 @@ class BatchCaptionManager:
             }
         )
         self.logs = self.logs[-400:]
-        print(f"[{ts}] [batch] [{level}] {message}", flush=True)
+        try:
+            print(f"[{ts}] [batch] [{level}] {message}", flush=True)
+        except OSError:
+            pass
 
     def snapshot(self) -> dict:
         with self._lock:
@@ -236,9 +239,12 @@ class BatchCaptionManager:
 
     def stop(self):
         with self._lock:
+            if not self.running:
+                return False
             self.stop_requested = True
             self.status = "stopping"
             self._log("Stop requested.", "warn")
+            return True
 
     def _run(self, names: list[str], options: dict):
         backend = str(options.get("backend", "local") or "local")
