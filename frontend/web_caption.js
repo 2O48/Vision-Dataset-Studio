@@ -8,6 +8,7 @@ export function createCaptionModule({
   restoreSelectValue,
   apiGet,
   apiPost,
+  filenameFromDisposition,
   setAiStatusLine,
   activeCaptionBackendLabel,
   renderImageProcessStatus,
@@ -100,6 +101,7 @@ export function createCaptionModule({
       .map((item) => `<option value="${item.key}">${item.label} · ${item.size_note}</option>`)
       .join("");
     refs.aiModel.value = nextValue;
+    refs.aiModel.dispatchEvent(new Event("lora-select-sync", { bubbles: true }));
     renderLocalModelMeta();
   }
 
@@ -146,8 +148,9 @@ export function createCaptionModule({
     if (!refs.apiModelMenu) return;
     state.apiModelMenuOpen = false;
     refs.apiModelMenu.hidden = true;
+    refs.apiModelMenu.classList.remove("select-menu-portal");
     refs.apiModelMenuBtn?.setAttribute("aria-expanded", "false");
-    refs.apiModelPicker?.classList.remove("drop-up");
+    refs.apiModelPicker?.classList.remove("drop-up", "menu-open");
   }
 
   function selectApiModel(name) {
@@ -160,8 +163,9 @@ export function createCaptionModule({
     if (!refs.ollamaModelMenu) return;
     state.ollamaModelMenuOpen = false;
     refs.ollamaModelMenu.hidden = true;
+    refs.ollamaModelMenu.classList.remove("select-menu-portal");
     refs.ollamaModelMenuBtn?.setAttribute("aria-expanded", "false");
-    refs.ollamaModelPicker?.classList.remove("drop-up");
+    refs.ollamaModelPicker?.classList.remove("drop-up", "menu-open");
   }
 
   function selectOllamaModel(name) {
@@ -208,6 +212,9 @@ export function createCaptionModule({
   function openApiModelMenu({ focusSearch = true } = {}) {
     if (!refs.apiModelMenu) return;
     state.apiModelMenuOpen = true;
+    refs.apiModelPicker?.classList.add("menu-open");
+    if (refs.apiModelMenu.parentElement !== document.body) document.body.appendChild(refs.apiModelMenu);
+    refs.apiModelMenu.classList.add("select-menu-portal");
     refs.apiModelMenu.hidden = false;
     refs.apiModelMenuBtn?.setAttribute("aria-expanded", "true");
     state.apiModelQuery = "";
@@ -220,6 +227,9 @@ export function createCaptionModule({
   function openOllamaModelMenu({ focusSearch = true } = {}) {
     if (!refs.ollamaModelMenu) return;
     state.ollamaModelMenuOpen = true;
+    refs.ollamaModelPicker?.classList.add("menu-open");
+    if (refs.ollamaModelMenu.parentElement !== document.body) document.body.appendChild(refs.ollamaModelMenu);
+    refs.ollamaModelMenu.classList.add("select-menu-portal");
     refs.ollamaModelMenu.hidden = false;
     refs.ollamaModelMenuBtn?.setAttribute("aria-expanded", "true");
     state.ollamaModelQuery = "";
@@ -233,14 +243,24 @@ export function createCaptionModule({
     if (!picker || !menu) return;
     picker.classList.remove("drop-up");
     const pickerRect = picker.getBoundingClientRect();
-    const menuHeight = menu.offsetHeight || 260;
-    const panelRect = picker.closest(".utility-panel.active")?.getBoundingClientRect();
-    const boundaryTop = panelRect ? Math.max(0, panelRect.top) : 0;
-    const boundaryBottom = panelRect ? Math.min(window.innerHeight, panelRect.bottom) : window.innerHeight;
+    const viewportPadding = 8;
     const gap = 8;
-    const spaceBelow = boundaryBottom - pickerRect.bottom;
-    const spaceAbove = pickerRect.top - boundaryTop;
-    picker.classList.toggle("drop-up", spaceBelow < menuHeight + gap && spaceAbove > spaceBelow);
+    const maxMenuHeight = Math.min(280, Math.floor(window.innerHeight * 0.5));
+    const width = Math.min(pickerRect.width, window.innerWidth - (viewportPadding * 2));
+    const left = Math.min(Math.max(viewportPadding, pickerRect.left), window.innerWidth - width - viewportPadding);
+    const spaceBelow = window.innerHeight - pickerRect.bottom - gap - viewportPadding;
+    const spaceAbove = pickerRect.top - gap - viewportPadding;
+    const expectedHeight = Math.min(menu.scrollHeight || maxMenuHeight, maxMenuHeight);
+    const opensUp = spaceBelow < expectedHeight && spaceAbove > spaceBelow;
+    const availableHeight = Math.max(96, opensUp ? spaceAbove : spaceBelow);
+    const menuHeight = Math.min(expectedHeight, availableHeight);
+    picker.classList.toggle("drop-up", opensUp);
+    menu.style.width = `${Math.round(width)}px`;
+    menu.style.left = `${Math.round(left)}px`;
+    menu.style.maxHeight = `${Math.round(Math.min(maxMenuHeight, availableHeight))}px`;
+    menu.style.top = opensUp
+      ? `${Math.round(Math.max(viewportPadding, pickerRect.top - gap - menuHeight))}px`
+      : `${Math.round(pickerRect.bottom + gap)}px`;
   }
 
   function summarizeRemoteService(service, idleLabel) {
@@ -324,7 +344,9 @@ export function createCaptionModule({
 
     renderImageProcessStatus(ai.image_process);
 
-    if (ai.image_process?.running) {
+    if (ai.export?.running || ai.export?.status === "stopping") {
+      if (refs.aiStat) refs.aiStat.textContent = `导出 ${ai.export.done || 0}/${ai.export.total || 0}`;
+    } else if (ai.image_process?.running) {
       const modeLabel = ai.image_process.mode === "match_result" ? "匹配结果尺寸" : "图像处理";
       if (refs.aiStat) refs.aiStat.textContent = `${modeLabel} ${ai.image_process.done}/${ai.image_process.total}`;
     } else if (ai.batch.running) {
@@ -341,32 +363,56 @@ export function createCaptionModule({
       if (refs.aiStat) refs.aiStat.textContent = `AI 待命 · ${activeCaptionBackendLabel()}`;
     }
 
-    const statusLine = ai.image_process?.running
-      ? `${ai.image_process.mode === "match_result" ? "匹配结果尺寸中" : "图像处理中"} ${ai.image_process.done}/${ai.image_process.total}${ai.image_process.current ? ` · ${ai.image_process.current}` : ""}`
-      : ai.batch.running
-        ? `${ai.batch.backend === "api" ? "API" : ai.batch.backend === "ollama" ? "Ollama" : "本地"}批量进行中 ${ai.batch.done}/${ai.batch.total}${ai.batch.current ? ` · ${ai.batch.current}` : ""}`
-        : ai.installer.running
-          ? "正在安装本地 Qwen 依赖..."
-          : ai.ollama_service.status === "requesting"
-            ? ai.ollama_service.progress_msg || "Ollama 请求中..."
-            : ai.api_service.status === "requesting"
-              ? ai.api_service.progress_msg || "API 请求中..."
-              : ai.service.running
-                ? `${ai.service.status} · ${ai.service.progress_msg || "待命"}`
-                : "待命";
+    const imageProcessModeLabel = ai.image_process?.mode === "match_result" ? "匹配结果尺寸" : "图像处理";
+    const exportStatus = ai.export || {};
+    let statusLine = "待命";
+    if (exportStatus.running || exportStatus.status === "stopping") {
+      statusLine = `${exportStatus.status === "stopping" ? "正在停止导出" : "导出中"} ${exportStatus.done || 0}/${exportStatus.total || 0}${exportStatus.current ? ` · ${exportStatus.current}` : ""}`;
+    } else if (ai.image_process?.running) {
+      statusLine = `${imageProcessModeLabel}中 ${ai.image_process.done}/${ai.image_process.total}${ai.image_process.current ? ` · ${ai.image_process.current}` : ""}`;
+    } else if (ai.batch.running) {
+      statusLine = `${ai.batch.backend === "api" ? "API" : ai.batch.backend === "ollama" ? "Ollama" : "本地"}批量进行中 ${ai.batch.done}/${ai.batch.total}${ai.batch.current ? ` · ${ai.batch.current}` : ""}`;
+    } else if (ai.installer.running) {
+      statusLine = "正在安装本地 Qwen 依赖...";
+    } else if (ai.ollama_service.status === "requesting") {
+      statusLine = ai.ollama_service.progress_msg || "Ollama 请求中...";
+    } else if (ai.api_service.status === "requesting") {
+      statusLine = ai.api_service.progress_msg || "API 请求中...";
+    } else if (ai.service.running) {
+      statusLine = `${ai.service.status} · ${ai.service.progress_msg || "待命"}`;
+    } else if (exportStatus.status === "done") {
+      statusLine = `导出完成：${exportStatus.exported || 0} 项${exportStatus.result?.path ? ` · ${exportStatus.result.path}` : ""}`;
+    } else if (exportStatus.status === "stopped") {
+      statusLine = "导出已停止";
+    } else if (exportStatus.status === "error") {
+      statusLine = "导出失败，查看启动终端输出。";
+    } else if (ai.image_process?.status === "done") {
+      statusLine = `${imageProcessModeLabel}完成：${ai.image_process.processed || 0} 项${ai.image_process.result?.path ? ` · ${ai.image_process.result.path}` : ""}`;
+    } else if (ai.image_process?.status === "error") {
+      statusLine = `${imageProcessModeLabel}失败，查看启动终端输出。`;
+    }
     setAiStatusLine(statusLine);
 
-    const progress = ai.image_process?.running
-      ? ai.image_process.progress_pct || 0
-      : ai.batch.running
-        ? (ai.batch.total ? (ai.batch.done / ai.batch.total) * 100 : 0)
-        : ai.installer.running
-          ? Math.max(ai.installer.progress_pct || 0, 8)
-          : ai.api_service.status === "requesting" || ai.ollama_service.status === "requesting"
-            ? 45
-            : ["captioning", "loading", "starting", "busy"].includes(ai.service.status)
-              ? Math.max(ai.service.progress_pct || 0, 20)
-              : ai.service.progress_pct || 0;
+    let progress = ai.service.progress_pct || 0;
+    if (exportStatus.running || exportStatus.status === "stopping") {
+      progress = exportStatus.progress_pct || 0;
+    } else if (ai.image_process?.running) {
+      progress = ai.image_process.progress_pct || 0;
+    } else if (ai.batch.running) {
+      progress = ai.batch.total ? (ai.batch.done / ai.batch.total) * 100 : 0;
+    } else if (ai.installer.running) {
+      progress = Math.max(ai.installer.progress_pct || 0, 8);
+    } else if (ai.api_service.status === "requesting" || ai.ollama_service.status === "requesting") {
+      progress = 45;
+    } else if (["captioning", "loading", "starting", "busy"].includes(ai.service.status)) {
+      progress = Math.max(ai.service.progress_pct || 0, 20);
+    } else if (ai.image_process?.status === "done" || ai.image_process?.status === "error") {
+      progress = ai.image_process.progress_pct || (ai.image_process.status === "done" ? 100 : 0);
+    } else if (exportStatus.status === "done") {
+      progress = 100;
+    } else if (["stopped", "error"].includes(exportStatus.status)) {
+      progress = exportStatus.progress_pct || 0;
+    }
     const progressWidth = `${Math.max(0, Math.min(progress, 100))}%`;
     if (refs.aiProgressBar) refs.aiProgressBar.style.width = progressWidth;
     if (refs.topAiProgressBar) refs.topAiProgressBar.style.width = progressWidth;
@@ -510,7 +556,11 @@ export function createCaptionModule({
   }
 
   async function stopBatchCaption() {
-    await apiPost("/api/ai/batch/stop", {});
+    if (state.aiStatus?.export?.running || state.aiStatus?.export?.status === "stopping") {
+      await apiPost("/api/export/stop", {});
+    } else {
+      await apiPost("/api/ai/batch/stop", {});
+    }
     await pollAiStatus();
   }
 
@@ -532,8 +582,41 @@ export function createCaptionModule({
     renderViewer();
   }
 
+  async function downloadFinishedExport(exportInfo) {
+    const result = exportInfo.result || {};
+    const exportPath = result.path || "";
+    if (!state.exportDownloadRequested || !exportPath || state.lastExportDownloadPath === exportPath) return;
+    state.lastExportDownloadPath = exportPath;
+    const response = await fetch("/api/export/download");
+    if (!response.ok) {
+      let message = `下载导出 ZIP 失败 (${response.status})`;
+      try {
+        const data = await response.json();
+        message = data.error || message;
+      } catch (_) {
+        // Keep the HTTP status fallback.
+      }
+      throw new Error(message);
+    }
+    const blob = await response.blob();
+    const filename =
+      filenameFromDisposition(response.headers.get("Content-Disposition")) ||
+      result.filename ||
+      "dataset.zip";
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+    setAiStatusLine(`ZIP 已生成并开始下载：${filename}`);
+  }
+
   function hasActiveAiStatus(data) {
     return (
+      data.export?.running ||
       data.image_process?.running ||
       data.batch.running ||
       data.installer.running ||
@@ -586,6 +669,18 @@ export function createCaptionModule({
             skipDirtyCheck: true,
             suppressSelectionSync: state.captionDirty,
           });
+        }
+      }
+      const exportInfo = data.export || {};
+      const exportPath = exportInfo.result?.path || "";
+      const exportSignature = `${exportInfo.running}-${exportInfo.done}-${exportInfo.total}-${exportInfo.status}-${exportPath}`;
+      if (exportSignature !== state.lastExportSignature) {
+        state.lastExportSignature = exportSignature;
+        if (exportInfo.status === "done" && exportInfo.result?.format === "zip" && exportPath) {
+          await downloadFinishedExport(exportInfo);
+        }
+        if (["done", "stopped", "error"].includes(exportInfo.status)) {
+          state.exportDownloadRequested = false;
         }
       }
       if (hasActiveAiStatus(data)) {

@@ -2,43 +2,40 @@ export function createImageOpsModule({
   state,
   refs,
   apiPost,
-  apiPostDownload,
   pollAiStatus,
   renderViewer,
   refreshItems,
+  setAiStatusLine,
 }) {
   function renderImageProcessStatus(process) {
-    if (!refs.processStatus || !refs.processProgressBar) return;
     if (!process || process.status === "idle") {
-      refs.processStatus.textContent = "等待图像处理";
-      refs.processProgressBar.style.width = "0%";
       refs.processImagesBtn.disabled = false;
       if (refs.processMatchResultBtn) refs.processMatchResultBtn.disabled = false;
       return;
     }
 
     const pct = Math.max(0, Math.min(Number(process.progress_pct || 0), 100));
-    refs.processProgressBar.style.width = `${pct}%`;
+    if (refs.topAiProgressBar) refs.topAiProgressBar.style.width = `${pct}%`;
     refs.processImagesBtn.disabled = Boolean(process.running);
     if (refs.processMatchResultBtn) refs.processMatchResultBtn.disabled = Boolean(process.running);
     const processMode = process.mode === "match_result" ? "match_result" : "process";
     const modeLabel = processMode === "match_result" ? "匹配结果尺寸" : "图像处理";
 
     if (process.running) {
-      refs.processStatus.textContent = `${modeLabel}中 ${process.done || 0}/${process.total || 0}${process.current ? ` · ${process.current}` : ""}`;
+      setAiStatusLine(`${modeLabel}中 ${process.done || 0}/${process.total || 0}${process.current ? ` · ${process.current}` : ""}`);
       return;
     }
     if (process.status === "done") {
       const result = process.result || {};
       const loadNote = process.workspace_loaded ? "已加载为当前工作区" : "未切换当前工作区";
-      refs.processStatus.textContent = `${modeLabel}完成：${process.processed || 0} 项 · ${loadNote} · ${result.path || ""}`;
+      setAiStatusLine(`${modeLabel}完成：${process.processed || 0} 项 · ${loadNote} · ${result.path || ""}`);
       return;
     }
     if (process.status === "error") {
-      refs.processStatus.textContent = `${modeLabel}失败，查看启动终端输出。`;
+      setAiStatusLine(`${modeLabel}失败，查看启动终端输出。`);
       return;
     }
-    refs.processStatus.textContent = `${process.status || "处理中"} ${process.done || 0}/${process.total || 0}`;
+    setAiStatusLine(`${process.status || "处理中"} ${process.done || 0}/${process.total || 0}`);
   }
 
   function imageProcessPayload() {
@@ -53,16 +50,16 @@ export function createImageOpsModule({
   }
 
   async function processImages() {
-    refs.processStatus.textContent = "正在启动图像处理任务...";
-    refs.processProgressBar.style.width = "0%";
+    setAiStatusLine("正在启动图像处理任务...");
+    if (refs.topAiProgressBar) refs.topAiProgressBar.style.width = "0%";
     await apiPost("/api/images/process/start", imageProcessPayload());
     state.lastImageProcessSignature = "";
     await pollAiStatus({ scheduleNext: true });
   }
 
   async function processMatchResultSizes() {
-    refs.processStatus.textContent = "正在启动批量匹配结果尺寸...";
-    refs.processProgressBar.style.width = "0%";
+    setAiStatusLine("正在启动批量匹配结果尺寸...");
+    if (refs.topAiProgressBar) refs.topAiProgressBar.style.width = "0%";
     await apiPost("/api/images/match-result/start", {
       output_dir: "",
       project_name: refs.processProjectName.value.trim() || refs.exportProjectName.value.trim(),
@@ -112,26 +109,18 @@ export function createImageOpsModule({
       multiple: Number(refs.exportSizeMultiple.value || 16),
       process_images: refs.exportProcessImages.checked,
       include_controls: refs.exportIncludeControls.checked,
+      preserve_subfolders: refs.exportPreserveSubfolders.checked,
     };
   }
 
   async function exportDataset() {
-    refs.exportStatus.textContent = "正在导出数据集...";
-    const result = await apiPostDownload("/api/export/dataset", exportPayload());
-    if (result.type === "blob") {
-      const url = URL.createObjectURL(result.blob);
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = result.filename;
-      document.body.appendChild(anchor);
-      anchor.click();
-      anchor.remove();
-      URL.revokeObjectURL(url);
-      refs.exportStatus.textContent = `ZIP 已生成并开始下载：${result.filename}`;
-      return;
-    }
-    const exportInfo = result.data.export || {};
-    refs.exportStatus.textContent = `文件夹导出完成：${exportInfo.path || ""} · ${exportInfo.exported || 0} 项`;
+    setAiStatusLine("正在导出数据集...");
+    if (refs.topAiProgressBar) refs.topAiProgressBar.style.width = "0%";
+    state.exportDownloadRequested = true;
+    state.lastExportSignature = "";
+    state.lastExportDownloadPath = "";
+    await apiPost("/api/export/start", exportPayload());
+    await pollAiStatus({ scheduleNext: true });
   }
 
   return {

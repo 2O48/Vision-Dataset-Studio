@@ -4,6 +4,7 @@ import argparse
 import io
 import json
 import socket
+import subprocess
 import sys
 import threading
 import time
@@ -42,6 +43,7 @@ from dataset_image_processor import (
 from dataset_paths import cleanup_tmp, ensure_dataset_dirs, is_relative_to
 from dataset_projects import ProjectStore
 from dataset_workspace import DatasetWorkspace, IMAGE_EXTS, _resolve_user_path
+from server.export_jobs import ExportManager
 from server.image_process_jobs import ImageProcessManager
 from ollama_caption_client import OllamaCaptionClient
 from prompt_templates import PromptTemplateStore
@@ -97,6 +99,7 @@ def _store_cached_thumbnail(key: tuple[str, int, int, int], data: bytes):
 
 BATCH_MANAGER = BatchCaptionManager(WORKSPACE, CAPTION_CLIENT, API_CAPTION_CLIENT, OLLAMA_CAPTION_CLIENT)
 IMAGE_PROCESS_MANAGER = ImageProcessManager(WORKSPACE)
+EXPORT_MANAGER = ExportManager(WORKSPACE)
 
 
 def _list_child_directories(path_value: str) -> dict:
@@ -145,6 +148,16 @@ def _project_thumbnail_path(project_id: str) -> Path:
     if not is_relative_to(path, project_dir) or not path.is_file():
         raise FileNotFoundError("Project thumbnail not found.")
     return path
+
+
+def _open_in_file_manager(path: Path):
+    target = path.resolve()
+    if sys.platform.startswith("win"):
+        subprocess.Popen(["explorer.exe", f"/select,{target}"])
+    elif sys.platform == "darwin":
+        subprocess.Popen(["open", "-R", str(target)])
+    else:
+        subprocess.Popen(["xdg-open", str(target.parent)])
 
 
 def _tmp_cleanup_loop():
@@ -222,7 +235,7 @@ class AppHandler(BaseHTTPRequestHandler):
                 tag_query = query.get("tag", [""])[0]
                 detail = query.get("detail", ["0"])[0] in {"1", "true", "yes"}
                 data = WORKSPACE.list_items(filter_mode=filter_mode, tag_query=tag_query, detail=detail)
-                return self._send_json({"ok": True, **data})
+                return self._send_json({"ok": True, "workspace": WORKSPACE.get_workspace_summary(), **data})
             if path == "/api/item":
                 name = query.get("name", [""])[0]
                 if not name:
@@ -255,10 +268,20 @@ class AppHandler(BaseHTTPRequestHandler):
                         "installer": DEPENDENCY_INSTALLER.snapshot(),
                         "batch": BATCH_MANAGER.snapshot(),
                         "image_process": IMAGE_PROCESS_MANAGER.snapshot(),
+                        "export": EXPORT_MANAGER.snapshot(),
                     }
                 )
             if path == "/api/images/process/status":
                 return self._send_json({"ok": True, "image_process": IMAGE_PROCESS_MANAGER.snapshot()})
+            if path == "/api/export/status":
+                return self._send_json({"ok": True, "export": EXPORT_MANAGER.snapshot()})
+            if path == "/api/export/download":
+                export_path = EXPORT_MANAGER.download_path()
+                return self._send_bytes(
+                    export_path.read_bytes(),
+                    "application/zip",
+                    headers={"Content-Disposition": _download_content_disposition(export_path.name)},
+                )
             return self._error(f"Unknown route: {path}", status=404)
         except KeyError as exc:
             return self._error(f"Item not found: {exc}", status=404)
@@ -397,6 +420,31 @@ class AppHandler(BaseHTTPRequestHandler):
                     item = WORKSPACE.save_segments(name, segments)
                 return self._send_json({"ok": True, "item": item})
 
+            if path == "/api/item/rename":
+                result = WORKSPACE.rename_item(
+                    str(body.get("name", "") or ""),
+                    str(body.get("new_name", "") or ""),
+                )
+                return self._send_json({"ok": True, **result})
+
+            if path == "/api/item/move-folder":
+                result = WORKSPACE.move_item_to_folder(
+                    str(body.get("name", "") or ""),
+                    str(body.get("folder", "") or ""),
+                )
+                return self._send_json({"ok": True, **result})
+
+            if path == "/api/item/reveal":
+                name = str(body.get("name", "") or "")
+                item_path = WORKSPACE.primary_item_path(name)
+                _open_in_file_manager(item_path)
+                return self._send_json({"ok": True, "path": str(item_path)})
+
+            if path == "/api/item/trash":
+                name = str(body.get("name", "") or "")
+                result = WORKSPACE.trash_item_files(name)
+                return self._send_json({"ok": True, **result})
+
             if path == "/api/item/delete":
                 name = body.get("name", "")
                 result = WORKSPACE.delete_item(name)
@@ -418,6 +466,47 @@ class AppHandler(BaseHTTPRequestHandler):
                 )
                 return self._send_json({"ok": True, **result})
 
+            if path == "/api/batch/rename":
+                result = WORKSPACE.batch_rename_items(
+                    body.get("names", []),
+                    operation=str(body.get("operation", "") or ""),
+                    value=str(body.get("value", "") or ""),
+                    old_value=str(body.get("old_value", "") or ""),
+                    new_value=str(body.get("new_value", "") or ""),
+                )
+                return self._send_json({"ok": True, **result})
+
+            if path == "/api/batch/swap-control-result":
+                result = WORKSPACE.swap_control_result_pairs(
+                    control_dir=body.get("control_dir") or None,
+                    result_dir=body.get("result_dir") or None,
+                    suffix=body.get("suffix", "_swap"),
+                )
+                return self._send_json({"ok": True, **result})
+
+            if path == "/api/export/start":
+                names = body.get("names", [])
+                if names is not None and not isinstance(names, list):
+                    return self._error("names must be a list.")
+                EXPORT_MANAGER.start(
+                    options={
+                        "names": names or None,
+                        "format": str(body.get("format", "zip") or "zip"),
+                        "output_dir": str(body.get("output_dir", "") or ""),
+                        "project_name": str(body.get("project_name", "") or ""),
+                        "target_megapixels": float(body.get("target_megapixels", 4.0) or 4.0),
+                        "multiple": int(body.get("multiple", 16) or 16),
+                        "process_images": bool(body.get("process_images", True)),
+                        "include_controls": bool(body.get("include_controls", True)),
+                        "preserve_subfolders": bool(body.get("preserve_subfolders", False)),
+                    }
+                )
+                return self._send_json({"ok": True, "export": EXPORT_MANAGER.snapshot()})
+
+            if path == "/api/export/stop":
+                EXPORT_MANAGER.stop()
+                return self._send_json({"ok": True, "export": EXPORT_MANAGER.snapshot()})
+
             if path == "/api/export/dataset":
                 names = body.get("names", [])
                 if names is not None and not isinstance(names, list):
@@ -432,6 +521,7 @@ class AppHandler(BaseHTTPRequestHandler):
                     process_images=bool(body.get("process_images", True)),
                     include_controls=bool(body.get("include_controls", True)),
                     control_count=WORKSPACE.control_count,
+                    preserve_subfolders=bool(body.get("preserve_subfolders", False)),
                 )
                 if export_result["format"] == "zip":
                     filename = export_result.get("filename", "dataset.zip")
@@ -672,10 +762,12 @@ class AppHandler(BaseHTTPRequestHandler):
 
             if path == "/api/ai/batch/stop":
                 BATCH_MANAGER.stop()
+                EXPORT_MANAGER.stop()
                 load_cancelled = CAPTION_CLIENT.cancel_load()
                 return self._send_json({
                     "ok": True,
                     "batch": BATCH_MANAGER.snapshot(),
+                    "export": EXPORT_MANAGER.snapshot(),
                     "service": CAPTION_CLIENT.snapshot(),
                     "load_cancelled": load_cancelled,
                 })

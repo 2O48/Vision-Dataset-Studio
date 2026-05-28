@@ -23,6 +23,7 @@ export function createBootstrapModule({
   closeOllamaModelMenu,
   renderOllamaSuggestions,
   renderProjects,
+  applyProjectUiState,
   renderViewer,
   renderTags,
   renderQuickTags,
@@ -46,11 +47,13 @@ export function createBootstrapModule({
   saveProjectAsNew,
   refreshProjects,
   cleanupTmpNow,
-  saveCurrentCaption,
+  scheduleCaptionAutosave,
   translateCurrent,
   batchAdd,
   batchDelete,
   batchReplace,
+  batchRename,
+  swapControlResultPairs,
   deleteCurrent,
   mergeWorkspace,
   scaleViewerItem,
@@ -80,10 +83,129 @@ export function createBootstrapModule({
   toggleQuickTags,
   saveQuickTags,
   setCaptionEditorText,
+  normalizeCaptionText,
+  normalizeCaptionInputText,
   syncSegmentsFromText,
   syncCaptionDirty,
   restoreCaptionSettings,
 }) {
+  function enhanceSelectMenus() {
+    const viewportPadding = 8;
+    const menuGap = 6;
+
+    const positionMenu = (shell, button, menu) => {
+      const rect = button.getBoundingClientRect();
+      const maxMenuHeight = Math.min(260, Math.floor(window.innerHeight * 0.45));
+      const width = Math.min(rect.width, window.innerWidth - (viewportPadding * 2));
+      const left = Math.min(Math.max(viewportPadding, rect.left), window.innerWidth - width - viewportPadding);
+      const spaceBelow = window.innerHeight - rect.bottom - menuGap - viewportPadding;
+      const spaceAbove = rect.top - menuGap - viewportPadding;
+      const expectedHeight = Math.min(menu.scrollHeight || maxMenuHeight, maxMenuHeight);
+      const opensUp = spaceBelow < expectedHeight && spaceAbove > spaceBelow;
+      const availableHeight = Math.max(72, opensUp ? spaceAbove : spaceBelow);
+      const menuHeight = Math.min(expectedHeight, availableHeight);
+
+      shell.classList.toggle("drop-up", opensUp);
+      menu.style.width = `${Math.round(width)}px`;
+      menu.style.left = `${Math.round(left)}px`;
+      menu.style.maxHeight = `${Math.round(Math.min(maxMenuHeight, availableHeight))}px`;
+      menu.style.top = opensUp
+        ? `${Math.round(Math.max(viewportPadding, rect.top - menuGap - menuHeight))}px`
+        : `${Math.round(rect.bottom + menuGap)}px`;
+    };
+
+    const closeMenus = (except = null) => {
+      document.querySelectorAll(".custom-select.open").forEach((node) => {
+        if (node === except) return;
+        node.classList.remove("open");
+        node.querySelector(".custom-select-button")?.setAttribute("aria-expanded", "false");
+        const menu = node.customSelectMenu;
+        if (menu) menu.hidden = true;
+      });
+    };
+
+    if (!enhanceSelectMenus.bound) {
+      document.addEventListener("click", (event) => {
+        if (event.target.closest(".custom-select, .custom-select-menu")) return;
+        closeMenus();
+      });
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") closeMenus();
+      });
+      window.addEventListener("resize", () => closeMenus());
+      document.addEventListener("scroll", () => closeMenus(), true);
+      enhanceSelectMenus.bound = true;
+    }
+
+    document.querySelectorAll("select").forEach((select) => {
+      if (select.dataset.customSelectReady === "true") return;
+      select.dataset.customSelectReady = "true";
+      select.classList.add("native-select-hidden");
+
+      const shell = document.createElement("div");
+      shell.className = "custom-select";
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "custom-select-button";
+      button.setAttribute("aria-haspopup", "listbox");
+      button.setAttribute("aria-expanded", "false");
+      const label = document.createElement("span");
+      label.className = "custom-select-label";
+      const arrow = document.createElement("span");
+      arrow.className = "custom-select-arrow";
+      button.append(label, arrow);
+
+      const menu = document.createElement("div");
+      menu.className = "custom-select-menu select-menu-portal";
+      menu.setAttribute("role", "listbox");
+      menu.hidden = true;
+      shell.customSelectMenu = menu;
+      shell.append(button);
+      select.insertAdjacentElement("afterend", shell);
+      document.body.appendChild(menu);
+
+      const sync = () => {
+        const selected = select.selectedOptions?.[0] || select.options?.[select.selectedIndex] || select.options?.[0];
+        label.textContent = selected?.textContent?.trim() || "选择";
+        button.disabled = select.disabled;
+        button.setAttribute("aria-label", select.getAttribute("aria-label") || label.textContent);
+        menu.textContent = "";
+        Array.from(select.options).forEach((option) => {
+          const item = document.createElement("button");
+          item.type = "button";
+          item.className = "custom-select-option";
+          item.textContent = option.textContent;
+          item.disabled = option.disabled;
+          item.setAttribute("role", "option");
+          item.setAttribute("aria-selected", String(option.selected));
+          if (option.selected) item.classList.add("selected");
+          item.addEventListener("click", () => {
+            if (option.disabled) return;
+            select.value = option.value;
+            select.dispatchEvent(new Event("change", { bubbles: true }));
+            sync();
+            closeMenus();
+          });
+          menu.appendChild(item);
+        });
+      };
+
+      button.addEventListener("click", () => {
+        const willOpen = !shell.classList.contains("open");
+        closeMenus(shell);
+        sync();
+        shell.classList.toggle("open", willOpen);
+        button.setAttribute("aria-expanded", String(willOpen));
+        menu.hidden = !willOpen;
+        if (willOpen) positionMenu(shell, button, menu);
+      });
+      select.addEventListener("change", sync);
+      select.addEventListener("lora-select-sync", sync);
+      new MutationObserver(sync).observe(select, { childList: true, subtree: true, attributes: true });
+      sync();
+    });
+  }
+
   function restorePersistedSettings() {
     refs.controlCount.value = readStored(STORAGE_KEYS.controlCount, "1");
     refs.ignoreTokensInput.value = readStored(STORAGE_KEYS.ignoreTokens, "");
@@ -98,11 +220,15 @@ export function createBootstrapModule({
     refs.exportOutputDir.value = readStored(STORAGE_KEYS.exportOutputDir, "");
     refs.exportProcessImages.checked = readStored(STORAGE_KEYS.exportProcessImages, "true") !== "false";
     refs.exportIncludeControls.checked = readStored(STORAGE_KEYS.exportIncludeControls, "true") !== "false";
+    refs.exportPreserveSubfolders.checked = readStored(STORAGE_KEYS.exportPreserveSubfolders, "false") === "true";
     refs.viewerTargetPixels.value = readStored(STORAGE_KEYS.viewerTargetPixels, "4");
     refs.processProjectName.value = readStored(STORAGE_KEYS.processProjectName, "");
     refs.processIncludeControls.checked = readStored(STORAGE_KEYS.processIncludeControls, "true") !== "false";
     refs.processLoadWorkspace.checked = readStored(STORAGE_KEYS.processLoadWorkspace, "true") !== "false";
     refs.processOnlyMismatched.checked = readStored(STORAGE_KEYS.processOnlyMismatched, "true") !== "false";
+    if (refs.swapControlDir) refs.swapControlDir.value = readStored(STORAGE_KEYS.swapControlDir, "");
+    if (refs.swapResultDir) refs.swapResultDir.value = readStored(STORAGE_KEYS.swapResultDir, "");
+    if (refs.swapSuffix) refs.swapSuffix.value = readStored(STORAGE_KEYS.swapSuffix, "_swap") || "_swap";
     state.quickTags = readQuickTags();
     state.quickTagsCollapsed = readStored(STORAGE_KEYS.quickTagsCollapsed, "true") !== "false";
     state.quickTagsDirty = false;
@@ -140,11 +266,15 @@ export function createBootstrapModule({
     refs.exportOutputDir.addEventListener("change", () => saveStored(STORAGE_KEYS.exportOutputDir, refs.exportOutputDir.value.trim()));
     refs.exportProcessImages.addEventListener("change", () => saveStored(STORAGE_KEYS.exportProcessImages, refs.exportProcessImages.checked ? "true" : "false"));
     refs.exportIncludeControls.addEventListener("change", () => saveStored(STORAGE_KEYS.exportIncludeControls, refs.exportIncludeControls.checked ? "true" : "false"));
+    refs.exportPreserveSubfolders.addEventListener("change", () => saveStored(STORAGE_KEYS.exportPreserveSubfolders, refs.exportPreserveSubfolders.checked ? "true" : "false"));
     refs.viewerTargetPixels.addEventListener("change", () => saveStored(STORAGE_KEYS.viewerTargetPixels, refs.viewerTargetPixels.value));
     refs.processProjectName.addEventListener("change", () => saveStored(STORAGE_KEYS.processProjectName, refs.processProjectName.value.trim()));
     refs.processIncludeControls.addEventListener("change", () => saveStored(STORAGE_KEYS.processIncludeControls, refs.processIncludeControls.checked ? "true" : "false"));
     refs.processLoadWorkspace.addEventListener("change", () => saveStored(STORAGE_KEYS.processLoadWorkspace, refs.processLoadWorkspace.checked ? "true" : "false"));
     refs.processOnlyMismatched.addEventListener("change", () => saveStored(STORAGE_KEYS.processOnlyMismatched, refs.processOnlyMismatched.checked ? "true" : "false"));
+    refs.swapControlDir?.addEventListener("change", () => saveStored(STORAGE_KEYS.swapControlDir, refs.swapControlDir.value.trim()));
+    refs.swapResultDir?.addEventListener("change", () => saveStored(STORAGE_KEYS.swapResultDir, refs.swapResultDir.value.trim()));
+    refs.swapSuffix?.addEventListener("change", () => saveStored(STORAGE_KEYS.swapSuffix, refs.swapSuffix.value.trim() || "_swap"));
 
     refs.aiModel.addEventListener("change", () => {
       saveStored(STORAGE_KEYS.localModel, refs.aiModel.value);
@@ -291,20 +421,26 @@ export function createBootstrapModule({
   }
 
   function bindEvents() {
+    enhanceSelectMenus();
+
     function numericCssVar(name, fallback) {
       const value = window.getComputedStyle(refs.workbenchShell).getPropertyValue(name).trim();
       const parsed = Number.parseFloat(value);
       return Number.isFinite(parsed) ? parsed : fallback;
     }
 
+    function cssVarStorageKey(name) {
+      return `lora-ui.${name.replace(/^--/, "")}`;
+    }
+
     function setPanelWidthVar(name, value, min, max) {
       const clamped = Math.max(min, Math.min(max, value));
       refs.workbenchShell.style.setProperty(name, `${Math.round(clamped)}px`);
-      window.localStorage.setItem(`lora-ui.${name.replace(/^--/, "")}`, String(Math.round(clamped)));
+      window.localStorage.setItem(cssVarStorageKey(name), String(Math.round(clamped)));
     }
 
     function restorePanelWidthVar(name, fallback, min, max) {
-      const stored = Number.parseFloat(window.localStorage.getItem(`lora-ui.${name.replace(/^--/, "")}`) || "");
+      const stored = Number.parseFloat(window.localStorage.getItem(cssVarStorageKey(name)) || "");
       if (Number.isFinite(stored)) setPanelWidthVar(name, stored, min, max);
       else refs.workbenchShell.style.setProperty(name, `${fallback}px`);
     }
@@ -315,6 +451,7 @@ export function createBootstrapModule({
         event.preventDefault();
         const startX = event.clientX;
         const startWidth = numericCssVar(cssVar, fallback);
+        refs.workbenchShell.classList.add("manual-resizing");
         handle.classList.add("dragging");
         handle.setPointerCapture?.(event.pointerId);
         const onMove = (moveEvent) => {
@@ -323,6 +460,44 @@ export function createBootstrapModule({
         };
         const onUp = () => {
           handle.classList.remove("dragging");
+          refs.workbenchShell.classList.remove("manual-resizing");
+          document.removeEventListener("pointermove", onMove);
+          document.removeEventListener("pointerup", onUp);
+        };
+        document.addEventListener("pointermove", onMove);
+        document.addEventListener("pointerup", onUp, { once: true });
+      });
+    }
+
+    function setContentSizeVar(name, value, min, max) {
+      const clamped = Math.max(min, Math.min(max, value));
+      refs.workbenchShell.style.setProperty(name, `${Math.round(clamped)}px`);
+      window.localStorage.setItem(cssVarStorageKey(name), String(Math.round(clamped)));
+    }
+
+    function restoreContentSizeVar(name, fallback, min, max) {
+      const stored = Number.parseFloat(window.localStorage.getItem(cssVarStorageKey(name)) || "");
+      if (Number.isFinite(stored)) setContentSizeVar(name, stored, min, max);
+      else refs.workbenchShell.style.setProperty(name, `${fallback}px`);
+    }
+
+    function bindContentResizer(handle, { cssVar, axis, fallback, min, maxFor, direction = 1 }) {
+      if (!handle) return;
+      handle.addEventListener("pointerdown", (event) => {
+        event.preventDefault();
+        const start = axis === "y" ? event.clientY : event.clientX;
+        const startSize = numericCssVar(cssVar, fallback);
+        const max = Math.max(min, Number(maxFor?.()) || fallback);
+        refs.workbenchShell.classList.add("manual-resizing");
+        handle.classList.add("dragging");
+        handle.setPointerCapture?.(event.pointerId);
+        const onMove = (moveEvent) => {
+          const current = axis === "y" ? moveEvent.clientY : moveEvent.clientX;
+          setContentSizeVar(cssVar, startSize + (current - start) * direction, min, max);
+        };
+        const onUp = () => {
+          handle.classList.remove("dragging");
+          refs.workbenchShell.classList.remove("manual-resizing");
           document.removeEventListener("pointermove", onMove);
           document.removeEventListener("pointerup", onUp);
         };
@@ -335,6 +510,30 @@ export function createBootstrapModule({
     restorePanelWidthVar("--right-panel-width", 320, 280, 680);
     bindPanelResizer(refs.leftPanelResizer, { cssVar: "--left-panel-width", fallback: 300, min: 240, max: 620, direction: 1 });
     bindPanelResizer(refs.rightPanelResizer, { cssVar: "--right-panel-width", fallback: 320, min: 280, max: 680, direction: -1 });
+    restoreContentSizeVar("--thumb-list-width", 320, 240, Math.max(320, (refs.workbenchLayout?.clientWidth || 980) - 460));
+    restoreContentSizeVar("--viewer-panel-height", 520, 220, Math.max(320, (refs.workbenchLayout?.clientHeight || 820) - 220));
+    restoreContentSizeVar("--caption-panel-width", 560, 280, Math.max(280, (refs.workbenchLayout?.clientWidth || 980) - 409));
+    bindContentResizer(refs.listViewerResizer, {
+      cssVar: "--thumb-list-width",
+      axis: "x",
+      fallback: 320,
+      min: 240,
+      maxFor: () => (refs.workbenchLayout?.clientWidth || window.innerWidth) - 460,
+    });
+    bindContentResizer(refs.viewerEditorResizer, {
+      cssVar: "--viewer-panel-height",
+      axis: "y",
+      fallback: 520,
+      min: 220,
+      maxFor: () => (refs.workbenchLayout?.clientHeight || window.innerHeight) - 220,
+    });
+    bindContentResizer(refs.captionGlobalResizer, {
+      cssVar: "--caption-panel-width",
+      axis: "x",
+      fallback: 560,
+      min: 280,
+      maxFor: () => refs.captionGlobalResizer?.parentElement?.clientWidth - 409,
+    });
 
     refs.utilityActions.addEventListener("click", (event) => {
       const button = event.target.closest("button[data-panel]");
@@ -464,10 +663,10 @@ export function createBootstrapModule({
     });
 
     document.addEventListener("click", (event) => {
-      if (state.apiModelMenuOpen && !event.target.closest("#apiModelPicker")) {
+      if (state.apiModelMenuOpen && !event.target.closest("#apiModelPicker, #apiModelMenu")) {
         closeApiModelMenu();
       }
-      if (state.ollamaModelMenuOpen && !event.target.closest("#ollamaModelPicker")) {
+      if (state.ollamaModelMenuOpen && !event.target.closest("#ollamaModelPicker, #ollamaModelMenu")) {
         closeOllamaModelMenu();
       }
     });
@@ -481,10 +680,20 @@ export function createBootstrapModule({
     refs.quickTagToggleBtn.addEventListener("click", () => toggleQuickTags());
     refs.quickTagSaveBtn.addEventListener("click", saveQuickTags);
     refs.captionEditor?.addEventListener("input", () => {
-      state.currentText = refs.captionEditor.value;
+      const rawValue = refs.captionEditor.value;
+      const normalized = normalizeCaptionInputText(rawValue);
+      if (normalized !== rawValue) {
+        const start = refs.captionEditor.selectionStart;
+        const end = refs.captionEditor.selectionEnd;
+        refs.captionEditor.value = normalized;
+        refs.captionEditor.selectionStart = normalizeCaptionInputText(rawValue.slice(0, start)).length;
+        refs.captionEditor.selectionEnd = normalizeCaptionInputText(rawValue.slice(0, end)).length;
+      }
+      state.currentText = normalized;
       syncSegmentsFromText();
       syncCaptionDirty();
       renderTags();
+      scheduleCaptionAutosave?.();
     });
     refs.newTagInput.addEventListener("keydown", (event) => {
       if (event.key === "Enter") {
@@ -507,19 +716,23 @@ export function createBootstrapModule({
       row.querySelector(".saveTemplateBtn").addEventListener("click", () => {
         savePromptTemplateFor(targetId).catch(showError);
       });
-      row.querySelector(".deleteTemplateBtn").addEventListener("click", () => {
+      row.querySelector(".deleteTemplateBtn").addEventListener("click", async () => {
         const template = templateById(select.value);
         if (!template) return;
-        if (!window.confirm(`确定删除模板「${template.name}」？`)) return;
+        if (!(await window.appConfirm(`确定删除模板「${template.name}」？`))) return;
         deletePromptTemplate(template.id).catch(showError);
       });
     });
 
-    refs.saveTagsBtn.addEventListener("click", () => runWithStatus("正在保存 caption...", () => saveCurrentCaption()).catch(showError));
     refs.translateCurrentBtn.addEventListener("click", () => runWithStatus("正在翻译当前内容...", () => translateCurrent()).catch(showError));
     refs.batchAddBtn.addEventListener("click", () => runWithStatus("正在批量添加短语...", () => batchAdd()).catch(showError));
     refs.batchDeleteBtn.addEventListener("click", () => runWithStatus("正在批量删除短语...", () => batchDelete()).catch(showError));
     refs.batchReplaceBtn.addEventListener("click", () => runWithStatus("正在批量替换短语...", () => batchReplace()).catch(showError));
+    refs.batchRenameAddPrefixBtn?.addEventListener("click", () => runWithStatus("正在批量添加文件名前缀...", () => batchRename("add_prefix")).catch(showError));
+    refs.batchRenameAddSuffixBtn?.addEventListener("click", () => runWithStatus("正在批量添加文件名后缀...", () => batchRename("add_suffix")).catch(showError));
+    refs.batchRenameDeleteBtn?.addEventListener("click", () => runWithStatus("正在批量删除文件名文字...", () => batchRename("delete")).catch(showError));
+    refs.batchRenameReplaceBtn?.addEventListener("click", () => runWithStatus("正在批量替换文件名文字...", () => batchRename("replace")).catch(showError));
+    refs.swapPairsBtn?.addEventListener("click", () => runWithStatus("正在生成对调副本...", () => swapControlResultPairs()).catch(showError));
     refs.deleteCurrentBtn.addEventListener("click", () => runWithStatus("正在排除当前条目...", () => deleteCurrent()).catch(showError));
     refs.mergeWorkspaceBtn.addEventListener("click", () => runWithStatus("正在追加数据集...", () => mergeWorkspace()).catch(showError));
     refs.viewerScaleBtn.addEventListener("click", () => runWithStatus("正在缩放 Viewer 当前条目...", () => scaleViewerItem()).catch(showError));
@@ -586,6 +799,14 @@ export function createBootstrapModule({
       const data = await apiGet("/api/workspace");
       applyWorkspaceSummary(data.workspace);
       if (!restoreCurrentProjectFromLastWorkspace(data.workspace)) inferSingleProjectForCurrentWorkspace();
+      if (state.currentProjectId && applyProjectUiState) {
+        try {
+          const detail = await apiGet("/api/projects/detail", { id: state.currentProjectId });
+          applyProjectUiState(detail.workspace?.ui_state, detail.project?.name || state.currentProjectName);
+        } catch (error) {
+          console.warn(error);
+        }
+      }
       if (state.workspace?.counts?.all) {
         await refreshItems();
       }

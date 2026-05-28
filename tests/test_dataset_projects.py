@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from PIL import Image
 
@@ -76,6 +77,52 @@ class ProjectStoreTests(unittest.TestCase):
                 '{\n  "backend": "api"\n}',
             )
 
+    def test_overwrite_save_keeps_project_directory_in_place_and_cleans_tmp_dirs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = ProjectStore(root / "app" / "projects")
+            workspace = self._make_workspace(root)
+            saved = store.save_project(name="车机图标", workspace=workspace)
+            project_id = saved["project"]["id"]
+            project_dir = root / "app" / "projects" / project_id
+            stale_tmp = root / "app" / "projects" / f".tmp-{project_id}-stale"
+            stale_tmp.mkdir()
+            (stale_tmp / "old.txt").write_text("old", encoding="utf-8")
+
+            original_replace = Path.replace
+
+            def guarded_replace(path, target):
+                if Path(path).resolve() == project_dir.resolve():
+                    raise AssertionError("overwrite save should not rename the open project directory")
+                return original_replace(path, target)
+
+            reopened = DatasetWorkspace()
+            reopened.open_dirs(
+                control1_dir=saved["workspace"]["dirs"]["control1"],
+                result_dir=saved["workspace"]["dirs"]["result"],
+                control_count=1,
+            )
+            reopened.save_text("system/display_off", "second caption")
+            reopened.delete_item("system/display_on")
+
+            with mock.patch.object(Path, "replace", guarded_replace):
+                overwritten = store.save_project(
+                    name="车机图标",
+                    workspace=reopened,
+                    overwrite_id=project_id,
+                )
+
+            self.assertEqual(overwritten["project"]["id"], project_id)
+            self.assertEqual(overwritten["project"]["item_count"], 1)
+            self.assertTrue(project_dir.is_dir())
+            self.assertFalse(stale_tmp.exists())
+            self.assertFalse(list((root / "app" / "projects").glob(f".tmp-{project_id}-*")))
+            self.assertFalse((project_dir / "assets" / "result" / "system" / "display_on.png").exists())
+            self.assertEqual(
+                (project_dir / "assets" / "result" / "system" / "display_off.txt").read_text(encoding="utf-8"),
+                "second caption",
+            )
+
     def test_rename_clone_and_delete_project(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -115,6 +162,35 @@ class ProjectStoreTests(unittest.TestCase):
             self.assertEqual(saved["workspace"]["settings"]["control_count"], 0)
             self.assertNotIn("control1", saved["workspace"]["dirs"])
             self.assertIn("result", saved["workspace"]["dirs"])
+
+    def test_update_ui_state_preserves_common_caption_settings(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = ProjectStore(root / "app" / "projects")
+            workspace = self._make_workspace(root)
+            saved = store.save_project(name="标注配置项目", workspace=workspace)
+            project_id = saved["project"]["id"]
+
+            ui_state = {
+                "caption_settings": {
+                    "local_overwrite_mode": "skip",
+                    "local_caption_mode": "tag",
+                    "local_max_tokens": "1024",
+                    "local_prompt": "只输出短标签",
+                },
+                "template_selections": {
+                    "customPrompt": "template-tag",
+                },
+            }
+            updated = store.update_ui_state(project_id, ui_state)
+            reopened = store.get_project(project_id)
+
+            self.assertEqual(updated["workspace"]["ui_state"], ui_state)
+            self.assertEqual(reopened["workspace"]["ui_state"], ui_state)
+            self.assertEqual(
+                (root / "app" / "projects" / project_id / "state" / "caption_config.json").read_text(encoding="utf-8"),
+                '{\n  "local_overwrite_mode": "skip",\n  "local_caption_mode": "tag",\n  "local_max_tokens": "1024",\n  "local_prompt": "只输出短标签"\n}',
+            )
 
 
 if __name__ == "__main__":

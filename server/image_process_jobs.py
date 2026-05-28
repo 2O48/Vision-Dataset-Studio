@@ -36,7 +36,10 @@ class ImageProcessManager:
             }
         )
         self.logs = self.logs[-300:]
-        print(f"[{ts}] [image] [{level}] {message}", flush=True)
+        try:
+            print(f"[{ts}] [image] [{level}] {message}", flush=True)
+        except OSError:
+            pass
 
     def snapshot(self) -> dict:
         with self._lock:
