@@ -16,6 +16,7 @@ PROJECTS_DIR = APP_DATA_DIR / "projects"
 TRASH_DIR = APP_DATA_DIR / "trash"
 PROJECT_INDEX_FILE = APP_DATA_DIR / "projects_index.json"
 LEGACY_PROJECTS_DIR = LEGACY_APP_DATA_DIR / "projects"
+LEGACY_MIGRATION_MARKER = ".legacy_lora_dataset_edit_migrated.json"
 SCHEMA_VERSION = 2
 
 
@@ -206,12 +207,44 @@ def _sync_directory_contents(source: Path, target: Path) -> None:
                 pass
 
 
+def _copy_missing_file(source: Path, target: Path) -> None:
+    if not source.is_file() or target.exists():
+        return
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source, target)
+
+
+def _merge_legacy_project_tree(source_root: Path, target_root: Path) -> None:
+    if not source_root.is_dir():
+        return
+    target_root.mkdir(parents=True, exist_ok=True)
+    for source_path in sorted(source_root.iterdir()):
+        target_path = target_root / source_path.name
+        if target_path.exists():
+            continue
+        if source_path.is_dir():
+            shutil.copytree(source_path, target_path)
+        elif source_path.is_file():
+            _copy_missing_file(source_path, target_path)
+
+
+def _normalize_workspace_payload(project_dir: Path, meta: dict, workspace: dict) -> dict:
+    current = dict(workspace) if isinstance(workspace, dict) else {}
+    settings = current.get("settings", {}) if isinstance(current.get("settings"), dict) else {}
+    control_count = int(settings.get("control_count", meta.get("control_count", 1)))
+    current["project_id"] = str(meta.get("id") or current.get("project_id") or project_dir.name)
+    current["project_name"] = str(meta.get("name") or current.get("project_name") or project_dir.name)
+    current["dirs"] = _workspace_dirs(project_dir, control_count)
+    return current
+
+
 class ProjectStore:
     def __init__(self, projects_dir: Path = PROJECTS_DIR, legacy_projects_dir: Path | None = None):
         self.projects_dir = projects_dir
         self.app_dir = self.projects_dir.parent
         self.trash_dir = self.app_dir / "trash"
         self.index_file = self.app_dir / "projects_index.json"
+        self.legacy_migration_marker = self.app_dir / LEGACY_MIGRATION_MARKER
         if legacy_projects_dir is not None:
             self.legacy_projects_dir: Path | None = legacy_projects_dir
             self.legacy_app_dir: Path | None = legacy_projects_dir.parent
@@ -222,18 +255,40 @@ class ProjectStore:
             self.legacy_projects_dir = None
             self.legacy_app_dir = None
 
+    def _write_legacy_migration_marker(self, legacy_app_dir: Path) -> None:
+        _write_json(
+            self.legacy_migration_marker,
+            {
+                "source": str(legacy_app_dir),
+                "migrated_at": _now(),
+            },
+        )
+
     def _migrate_legacy_app_dir(self) -> None:
         legacy_app_dir = self.legacy_app_dir
-        if not legacy_app_dir or legacy_app_dir == self.app_dir or not legacy_app_dir.exists():
+        if (
+            not legacy_app_dir
+            or legacy_app_dir == self.app_dir
+            or not legacy_app_dir.exists()
+            or self.legacy_migration_marker.exists()
+        ):
             return
         if not self.app_dir.exists():
             self.app_dir.parent.mkdir(parents=True, exist_ok=True)
             try:
                 legacy_app_dir.replace(self.app_dir)
+                self._write_legacy_migration_marker(legacy_app_dir)
                 return
             except OSError:
                 pass
-        shutil.copytree(legacy_app_dir, self.app_dir, dirs_exist_ok=True)
+        self.app_dir.mkdir(parents=True, exist_ok=True)
+        self.projects_dir.mkdir(parents=True, exist_ok=True)
+        self.trash_dir.mkdir(parents=True, exist_ok=True)
+        _merge_legacy_project_tree(legacy_app_dir / "projects", self.projects_dir)
+        _merge_legacy_project_tree(legacy_app_dir / "trash", self.trash_dir)
+        if not self.index_file.exists():
+            _copy_missing_file(legacy_app_dir / "projects_index.json", self.index_file)
+        self._write_legacy_migration_marker(legacy_app_dir)
 
     def ensure(self) -> None:
         self._migrate_legacy_app_dir()
@@ -294,7 +349,8 @@ class ProjectStore:
         if not path.is_dir():
             raise FileNotFoundError(f"Project not found: {project_id}")
         meta = _read_json(path / "project.json", {})
-        workspace = _read_json(path / "workspace.json", {})
+        workspace = _normalize_workspace_payload(path, meta, _read_json(path / "workspace.json", {}))
+        _write_json(path / "workspace.json", workspace)
         manifest = _read_json(path / "manifest.json", {"items": []})
         return {"project": meta, "workspace": workspace, "manifest": manifest, "path": str(path)}
 

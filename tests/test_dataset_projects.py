@@ -212,6 +212,40 @@ class ProjectStoreTests(unittest.TestCase):
             self.assertFalse((legacy_projects_dir / project_id).exists())
             reopened = migrated_store.get_project(project_id)
             self.assertEqual(reopened["project"]["name"], "迁移项目")
+            self.assertEqual(
+                reopened["workspace"]["dirs"]["result"],
+                str((new_projects_dir / project_id / "assets" / "result").resolve()),
+            )
+
+    def test_legacy_migration_keeps_existing_new_project_versions(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            legacy_projects_dir = root / ".lora_dataset_edit" / "projects"
+            new_projects_dir = root / ".vision_dataset_studio" / "projects"
+            project_id = "20260528-120000-same-project"
+            legacy_project_dir = legacy_projects_dir / project_id
+            new_project_dir = new_projects_dir / project_id
+            legacy_only_project_dir = legacy_projects_dir / "20260528-120001-legacy-only"
+
+            for project_dir, name in (
+                (legacy_project_dir, "旧项目"),
+                (new_project_dir, "新项目"),
+                (legacy_only_project_dir, "仅旧目录项目"),
+            ):
+                project_dir.mkdir(parents=True, exist_ok=True)
+                (project_dir / "project.json").write_text(
+                    f'{{"id":"{project_dir.name}","name":"{name}","control_count":1}}',
+                    encoding="utf-8",
+                )
+                (project_dir / "workspace.json").write_text('{"settings":{"control_count":1},"dirs":{}}', encoding="utf-8")
+                (project_dir / "manifest.json").write_text('{"items":[]}', encoding="utf-8")
+
+            migrated_store = ProjectStore(new_projects_dir, legacy_projects_dir=legacy_projects_dir)
+            projects = {row["id"]: row for row in migrated_store.list_projects()}
+
+            self.assertEqual(projects[project_id]["name"], "新项目")
+            self.assertIn("20260528-120001-legacy-only", projects)
+            self.assertTrue((new_projects_dir / "20260528-120001-legacy-only").is_dir())
 
 
 if __name__ == "__main__":

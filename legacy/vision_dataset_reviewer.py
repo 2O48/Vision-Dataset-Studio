@@ -2249,7 +2249,7 @@ class App(tk.Tk):
 
         threading.Thread(target=run, daemon=True).start()
 
-if __name__ == '__main__':
+def main():
     app = App()
     def _on_close():
         # 主窗口关闭时才停止服务进程
@@ -2263,3 +2263,7 @@ if __name__ == '__main__':
         app.destroy()
     app.protocol('WM_DELETE_WINDOW', _on_close)
     app.mainloop()
+
+
+if __name__ == '__main__':
+    main()
