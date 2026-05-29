@@ -53,6 +53,7 @@ from qwen_models import list_qwen_model_configs
 INDEX_FILE = BASE_DIR / "web_index.html"
 APP_JS_FILE = BASE_DIR / "web_app.js"
 STYLES_FILE = BASE_DIR / "web_styles.css"
+FAVICON_FILE = BASE_DIR / "favicon.png"
 PROMPT_TEMPLATES_FILE = BASE_DIR / "prompt_templates.json"
 THUMB_CACHE_MAX_ITEMS = 256
 
@@ -65,7 +66,7 @@ DEPENDENCY_INSTALLER = DependencyInstaller()
 PROMPT_TEMPLATES = PromptTemplateStore(PROMPT_TEMPLATES_FILE)
 PROJECT_STORE = ProjectStore()
 THUMB_CACHE_LOCK = threading.RLock()
-THUMB_CACHE: OrderedDict[tuple[str, int, int, int], bytes] = OrderedDict()
+THUMB_CACHE: OrderedDict[tuple[str, int, int, int, str], bytes] = OrderedDict()
 
 
 def _download_content_disposition(filename: str) -> str:
@@ -75,12 +76,12 @@ def _download_content_disposition(filename: str) -> str:
     return f'attachment; filename="{fallback}"; filename*=UTF-8\'\'{encoded}'
 
 
-def _thumbnail_cache_key(path: Path, width: int, height: int) -> tuple[str, int, int, int]:
+def _thumbnail_cache_key(path: Path, width: int, height: int, cache_buster: str = "") -> tuple[str, int, int, int, str]:
     stat = path.stat()
-    return (str(path), int(stat.st_mtime_ns), int(width), int(height))
+    return (str(path), int(stat.st_mtime_ns), int(width), int(height), str(cache_buster or ""))
 
 
-def _get_cached_thumbnail(key: tuple[str, int, int, int]) -> Optional[bytes]:
+def _get_cached_thumbnail(key: tuple[str, int, int, int, str]) -> Optional[bytes]:
     with THUMB_CACHE_LOCK:
         data = THUMB_CACHE.get(key)
         if data is None:
@@ -89,7 +90,7 @@ def _get_cached_thumbnail(key: tuple[str, int, int, int]) -> Optional[bytes]:
         return data
 
 
-def _store_cached_thumbnail(key: tuple[str, int, int, int], data: bytes):
+def _store_cached_thumbnail(key: tuple[str, int, int, int, str], data: bytes):
     with THUMB_CACHE_LOCK:
         THUMB_CACHE[key] = data
         THUMB_CACHE.move_to_end(key)
@@ -216,6 +217,8 @@ class AppHandler(BaseHTTPRequestHandler):
                 return self._send_text_file(target, "text/javascript; charset=utf-8")
             if path == "/styles.css":
                 return self._send_text_file(STYLES_FILE, "text/css; charset=utf-8")
+            if path == "/favicon.png":
+                return self._send_text_file(FAVICON_FILE, "image/png")
             if path == "/api/workspace":
                 return self._send_json({"ok": True, "workspace": WORKSPACE.get_workspace_summary()})
             if path == "/api/workspace/browse":
@@ -233,8 +236,10 @@ class AppHandler(BaseHTTPRequestHandler):
             if path == "/api/items":
                 filter_mode = query.get("filter", ["all"])[0]
                 tag_query = query.get("tag", [""])[0]
+                search_mode = query.get("search_mode", ["all"])[0]
+                match_mode = query.get("match_mode", ["contains"])[0]
                 detail = query.get("detail", ["0"])[0] in {"1", "true", "yes"}
-                data = WORKSPACE.list_items(filter_mode=filter_mode, tag_query=tag_query, detail=detail)
+                data = WORKSPACE.list_items(filter_mode=filter_mode, tag_query=tag_query, search_mode=search_mode, match_mode=match_mode, detail=detail)
                 return self._send_json({"ok": True, "workspace": WORKSPACE.get_workspace_summary(), **data})
             if path == "/api/item":
                 name = query.get("name", [""])[0]
@@ -424,6 +429,18 @@ class AppHandler(BaseHTTPRequestHandler):
                 result = WORKSPACE.rename_item(
                     str(body.get("name", "") or ""),
                     str(body.get("new_name", "") or ""),
+                )
+                return self._send_json({"ok": True, **result})
+
+            if path == "/api/item/clone":
+                result = WORKSPACE.clone_item(str(body.get("name", "") or ""))
+                return self._send_json({"ok": True, **result})
+
+            if path == "/api/item/swap-roles":
+                result = WORKSPACE.swap_item_roles(
+                    str(body.get("name", "") or ""),
+                    str(body.get("source_role", "") or ""),
+                    str(body.get("target_role", "") or ""),
                 )
                 return self._send_json({"ok": True, **result})
 
@@ -813,7 +830,7 @@ class AppHandler(BaseHTTPRequestHandler):
             }.get(suffix, "application/octet-stream")
             return self._send_bytes(path.read_bytes(), content_type)
 
-        cache_key = _thumbnail_cache_key(path, max(width, 32), max(height, 32))
+        cache_key = _thumbnail_cache_key(path, max(width, 32), max(height, 32), query.get("refresh", [""])[0])
         cached = _get_cached_thumbnail(cache_key)
         if cached is not None:
             return self._send_bytes(cached, "image/jpeg")

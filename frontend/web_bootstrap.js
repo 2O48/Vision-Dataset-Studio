@@ -662,15 +662,106 @@ export function createBootstrapModule({
       renderFilters();
       refreshItems().catch(showError);
     });
-    refs.tagSearch.addEventListener("change", () => {
+    const syncTagSearchClear = () => {
+      if (refs.tagSearchClear) refs.tagSearchClear.hidden = !refs.tagSearch.value.trim();
+    };
+    const syncTagSearchMode = () => {
+      state.listSearchMode = state.listSearchMode === "name" ? "name" : "phrase";
+      state.listSearchMatchMode = state.listSearchMatchMode === "exact" ? "exact" : "contains";
+      if (refs.tagSearch) {
+        refs.tagSearch.placeholder = state.listSearchMode === "name"
+          ? "搜索图片名称 / 子文件夹"
+          : "搜索 caption 短语";
+      }
+      refs.tagSearchModeGroup?.querySelectorAll("button[data-search-mode]").forEach((button) => {
+        const isActive = button.dataset.searchMode === state.listSearchMode;
+        button.classList.toggle("active", isActive);
+        button.setAttribute("aria-pressed", String(isActive));
+      });
+      refs.tagSearchMatchGroup?.querySelectorAll("button[data-search-match]").forEach((button) => {
+        const isActive = button.dataset.searchMatch === state.listSearchMatchMode;
+        button.classList.toggle("active", isActive);
+        button.setAttribute("aria-pressed", String(isActive));
+      });
+    };
+    let tagSearchDebounceTimer = 0;
+    const clearTagSearchDebounce = () => {
+      if (!tagSearchDebounceTimer) return;
+      window.clearTimeout(tagSearchDebounceTimer);
+      tagSearchDebounceTimer = 0;
+    };
+    const applyTagSearch = (options = {}) => {
+      clearTagSearchDebounce();
       state.segmentQuery = refs.tagSearch.value.trim();
-      refreshItems().catch(showError);
+      syncTagSearchClear();
+      refreshItems(options).catch(showError);
+    };
+    const scheduleTagSearch = () => {
+      clearTagSearchDebounce();
+      tagSearchDebounceTimer = window.setTimeout(() => {
+        tagSearchDebounceTimer = 0;
+        applyTagSearch({ skipDirtyCheck: true, suppressSelectionSync: true });
+      }, 1000);
+    };
+    let tagSearchClearPointerHandled = false;
+    const clearTagSearch = (event) => {
+      event?.preventDefault();
+      event?.stopPropagation();
+      refs.tagSearch.value = "";
+      refs.tagSearch.focus();
+      applyTagSearch({ skipDirtyCheck: true, suppressSelectionSync: true });
+    };
+    syncTagSearchMode();
+    syncTagSearchClear();
+    refs.tagSearch.addEventListener("input", () => {
+      syncTagSearchClear();
+      scheduleTagSearch();
+    });
+    refs.tagSearch.addEventListener("change", () => {
+      applyTagSearch();
     });
     refs.tagSearch.addEventListener("keyup", (event) => {
+      syncTagSearchClear();
       if (event.key === "Enter") {
-        state.segmentQuery = refs.tagSearch.value.trim();
-        refreshItems().catch(showError);
+        applyTagSearch();
       }
+    });
+    refs.tagSearchClear?.addEventListener("pointerdown", (event) => {
+      tagSearchClearPointerHandled = true;
+      clearTagSearch(event);
+    });
+    refs.tagSearchClear?.addEventListener("click", (event) => {
+      if (tagSearchClearPointerHandled) {
+        tagSearchClearPointerHandled = false;
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+      clearTagSearch(event);
+    });
+    refs.tagSearchModeGroup?.addEventListener("click", (event) => {
+      const button = event.target.closest("button[data-search-mode]");
+      if (!button) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const nextMode = button.dataset.searchMode === "name" ? "name" : "phrase";
+      if (nextMode === state.listSearchMode) return;
+      state.listSearchMode = nextMode;
+      saveStored(STORAGE_KEYS.listSearchMode, state.listSearchMode);
+      syncTagSearchMode();
+      refreshItems({ skipDirtyCheck: true, suppressSelectionSync: true }).catch(showError);
+    });
+    refs.tagSearchMatchGroup?.addEventListener("click", (event) => {
+      const button = event.target.closest("button[data-search-match]");
+      if (!button) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const nextMode = button.dataset.searchMatch === "exact" ? "exact" : "contains";
+      if (nextMode === state.listSearchMatchMode) return;
+      state.listSearchMatchMode = nextMode;
+      saveStored(STORAGE_KEYS.listSearchMatchMode, state.listSearchMatchMode);
+      syncTagSearchMode();
+      refreshItems({ skipDirtyCheck: true, suppressSelectionSync: true }).catch(showError);
     });
     refs.listThumbModeSelect?.addEventListener("change", () => {
       state.listThumbMode = refs.listThumbModeSelect.value === "combined" ? "combined" : "result";

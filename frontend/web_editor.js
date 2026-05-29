@@ -118,9 +118,41 @@ export function createEditorModule({
     }
   }
 
+  function appendInlineSearchHighlightedText(parent, text, query) {
+    const value = `${text ?? ""}`;
+    const needle = `${query ?? ""}`.trim();
+    if (!needle) {
+      parent.textContent = value;
+      return;
+    }
+    const lowerValue = value.toLowerCase();
+    const lowerNeedle = needle.toLowerCase();
+    let index = 0;
+    let matchIndex = lowerValue.indexOf(lowerNeedle);
+    if (matchIndex < 0) {
+      parent.textContent = value;
+      return;
+    }
+    parent.textContent = "";
+    while (matchIndex >= 0) {
+      if (matchIndex > index) {
+        parent.appendChild(document.createTextNode(value.slice(index, matchIndex)));
+      }
+      const mark = document.createElement("span");
+      mark.className = "search-hit";
+      mark.textContent = value.slice(matchIndex, matchIndex + needle.length);
+      parent.appendChild(mark);
+      index = matchIndex + needle.length;
+      matchIndex = lowerValue.indexOf(lowerNeedle, index);
+    }
+    if (index < value.length) {
+      parent.appendChild(document.createTextNode(value.slice(index)));
+    }
+  }
+
   function updateCaptionSearchHighlight() {
     if (!refs.captionHighlight || !refs.captionEditor) return;
-    const query = `${state.segmentQuery || ""}`.trim();
+    const query = state.listSearchMode === "name" ? "" : `${state.segmentQuery || ""}`.trim();
     refs.captionHighlight.textContent = "";
     refs.captionHighlight.classList.toggle("active", Boolean(query));
     refs.captionEditor.classList.toggle("search-active", Boolean(query));
@@ -131,13 +163,20 @@ export function createEditorModule({
     refs.captionHighlight.scrollLeft = refs.captionEditor.scrollLeft;
   }
 
+  function segmentMatchesListSearch(segment, query) {
+    const value = `${segment || ""}`.trim().toLowerCase();
+    const needle = `${query || ""}`.trim().toLowerCase();
+    if (!needle) return false;
+    return state.listSearchMatchMode === "exact" ? value === needle : value.includes(needle);
+  }
+
   function renderTags() {
     refs.tagChips.innerHTML = "";
-    const searchQuery = `${state.segmentQuery || ""}`.trim().toLowerCase();
+    const searchQuery = state.listSearchMode === "name" ? "" : `${state.segmentQuery || ""}`.trim().toLowerCase();
     updateCaptionSearchHighlight();
     state.currentSegments.forEach((segment, index) => {
       const row = document.createElement("div");
-      row.className = `chip${searchQuery && segment.toLowerCase().includes(searchQuery) ? " search-match" : ""}`;
+      row.className = `chip${segmentMatchesListSearch(segment, searchQuery) ? " search-match" : ""}`;
       const input = document.createElement("input");
       input.className = "chip-input";
       input.value = segment;
@@ -489,10 +528,10 @@ export function createEditorModule({
     const button = document.createElement("button");
     button.type = "button";
     button.draggable = false;
-    button.className = `global-tag-row${state.segmentQuery.toLowerCase() === segment.toLowerCase() ? " active" : ""}`;
+    button.className = `global-tag-row${state.listSearchMode !== "name" && state.segmentQuery.toLowerCase() === segment.toLowerCase() ? " active" : ""}`;
     button.title = "拖到左侧 Caption 中追加";
     const name = document.createElement("span");
-    name.textContent = segment;
+    appendInlineSearchHighlightedText(name, segment, state.globalTagQuery);
     const count = document.createElement("span");
     count.textContent = `${row.count}`;
     button.appendChild(name);
@@ -558,7 +597,7 @@ export function createEditorModule({
     const overscan = globalTagScrolling ? GLOBAL_TAG_SCROLL_OVERSCAN : GLOBAL_TAG_IDLE_OVERSCAN;
     const start = Math.max(0, Math.floor(list.scrollTop / rowStep) - overscan);
     const end = Math.min(rows.length, Math.ceil((list.scrollTop + viewportHeight) / rowStep) + overscan);
-    const active = state.segmentQuery.toLowerCase();
+    const active = state.listSearchMode === "name" ? "" : state.segmentQuery.toLowerCase();
     const signature = `${start}:${end}:${rows.length}:${active}:${globalTagScrolling ? "scroll" : "idle"}`;
     if (signature === globalTagViewportSignature) return;
     globalTagViewportSignature = signature;

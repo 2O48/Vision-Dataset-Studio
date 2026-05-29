@@ -40,6 +40,8 @@ const state = {
   itemFolderFilter: "",
   visibleItems: [],
   segmentQuery: "",
+  listSearchMode: readStored(STORAGE_KEYS.listSearchMode, "phrase"),
+  listSearchMatchMode: readStored(STORAGE_KEYS.listSearchMatchMode, "contains"),
   utilityPanel: readStored(STORAGE_KEYS.utilityPanel, "workspace"),
   utilityOpen: false,
   captionSettingsOpen: false,
@@ -163,6 +165,9 @@ const refs = {
   filterGroup: document.querySelector("#filterGroup"),
   listThumbModeSelect: document.querySelector("#listThumbModeSelect"),
   tagSearch: document.querySelector("#tagSearch"),
+  tagSearchModeGroup: document.querySelector("#tagSearchModeGroup"),
+  tagSearchMatchGroup: document.querySelector("#tagSearchMatchGroup"),
+  tagSearchClear: document.querySelector("#tagSearchClear"),
   itemList: document.querySelector("#itemList"),
   itemFolderFilters: document.querySelector("#itemFolderFilters"),
   listStats: document.querySelector("#listStats"),
@@ -629,7 +634,21 @@ const editorModule = createEditorModule({
   syncCaptionDirty,
   onGlobalTagClick: (segment) => {
     state.segmentQuery = segment;
+    state.listSearchMode = "phrase";
+    saveStored(STORAGE_KEYS.listSearchMode, state.listSearchMode);
     refs.tagSearch.value = segment;
+    refs.tagSearch.dispatchEvent(new Event("input", { bubbles: true }));
+    refs.tagSearchModeGroup?.querySelectorAll("button[data-search-mode]").forEach((button) => {
+      const isActive = button.dataset.searchMode === state.listSearchMode;
+      button.classList.toggle("active", isActive);
+      button.setAttribute("aria-pressed", String(isActive));
+    });
+    refs.tagSearchMatchGroup?.querySelectorAll("button[data-search-match]").forEach((button) => {
+      const isActive = button.dataset.searchMatch === state.listSearchMatchMode;
+      button.classList.toggle("active", isActive);
+      button.setAttribute("aria-pressed", String(isActive));
+    });
+    refs.tagSearch.placeholder = "搜索 caption 短语";
     refreshItems().catch(showError);
   },
 });

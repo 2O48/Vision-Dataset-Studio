@@ -125,6 +125,14 @@
   background: transparent;
 }
 
+*::-webkit-scrollbar-button {
+  width: 8px;
+  height: 8px;
+  border: 0;
+  background-color: transparent;
+  background-image: none;
+}
+
 *::-webkit-scrollbar-thumb {
   min-height: 44px;
   border: 2px solid transparent;
@@ -355,11 +363,11 @@ button {
   width: min(420px, 100%);
   padding: 20px;
   border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
+  border-radius: 36px;
   background: var(--paper-strong);
   box-shadow: var(--shadow);
   opacity: 0;
-  transform: translateY(10px) scale(0.96);
+  transform: translateY(12px) scale(0.8);
   transition:
     opacity 180ms cubic-bezier(0.16, 1, 0.3, 1),
     transform 220ms cubic-bezier(0.16, 1, 0.3, 1);
@@ -369,11 +377,23 @@ button {
 .dialog-backdrop.dialog-open .dialog-panel {
   opacity: 1;
   transform: translateY(0) scale(1);
+  animation: dialogPanelSpringIn 450ms cubic-bezier(0.3, 1.6, 0.4, 1) both;
 }
 
 .dialog-backdrop.dialog-closing .dialog-panel {
   opacity: 0;
   transform: translateY(8px) scale(0.97);
+}
+
+@keyframes dialogPanelSpringIn {
+  0% {
+    opacity: 0;
+    transform: translateY(12px) scale(0.8);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 .dialog-panel h2 {
@@ -465,9 +485,10 @@ button {
   text-align: left;
 }
 
-.item-context-menu button:hover {
-  border-color: var(--control-border);
-  background: var(--control-bg-strong);
+.item-context-menu button:hover,
+.item-context-menu button:focus-visible {
+  border-color: var(--accent);
+  background: rgba(47, 111, 115, 0.1);
 }
 
 .item-context-menu svg {
@@ -571,20 +592,19 @@ button {
 }
 
 .custom-select-arrow {
-  width: 8px;
-  height: 8px;
+  width: 18px;
+  height: 18px;
   justify-self: center;
-  margin-top: -3px;
-  border-right: 2px solid currentColor;
-  border-bottom: 2px solid currentColor;
   color: var(--ink-soft);
-  transform: rotate(45deg);
-  transition: transform 160ms ease, margin 160ms ease;
+  background: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 256 256'%3E%3Cpolyline points='208 96 128 176 48 96' fill='none' stroke='black' stroke-linecap='round' stroke-linejoin='round' stroke-width='16'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 256 256'%3E%3Cpolyline points='208 96 128 176 48 96' fill='none' stroke='black' stroke-linecap='round' stroke-linejoin='round' stroke-width='16'/%3E%3C/svg%3E") center / contain no-repeat;
+  transform: rotate(0deg);
+  transition: transform 160ms ease;
 }
 
 .custom-select.open .custom-select-arrow {
-  margin-top: 3px;
-  transform: rotate(225deg);
+  transform: rotate(180deg);
 }
 
 .custom-select-button:hover,
@@ -1186,6 +1206,98 @@ textarea:focus {
   gap: 12px;
 }
 
+.list-search-input-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.list-search-control {
+  position: relative;
+  flex: 999 1 150px;
+  min-width: 0;
+}
+
+.list-search-control input {
+  display: block;
+}
+
+.list-search-input-wrap input {
+  padding-right: 40px;
+}
+
+.list-search-clear {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ink-faint);
+  box-shadow: none;
+  transform: translateY(-50%);
+}
+
+.list-search-clear:hover {
+  background: var(--control-bg);
+  color: var(--ink-soft);
+  transform: translateY(-50%);
+}
+
+.list-search-clear[hidden] {
+  display: none;
+}
+
+.list-search-clear svg {
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
+}
+
+.list-search-toggle-cluster {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.list-search-mode-toggle {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--control-border);
+  border-radius: 999px;
+  background: var(--control-bg);
+  color: var(--ink-soft);
+}
+
+.list-search-mode-toggle button {
+  min-height: 24px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.list-search-mode-toggle button.active {
+  background: var(--ink);
+  color: var(--ink-contrast);
+}
+
 .list-thumb-mode-select {
   width: auto;
   min-width: 132px;
@@ -1225,7 +1337,11 @@ textarea:focus {
   border-radius: var(--radius-lg);
   background: var(--green-surface);
   cursor: pointer;
-  transition: transform 160ms ease, border-color 160ms ease, background 160ms ease, box-shadow 160ms ease;
+  transition:
+    transform 160ms ease,
+    border-color 160ms ease,
+    background 160ms ease,
+    box-shadow 160ms ease;
 }
 
 .item-card.active {
@@ -1346,10 +1462,17 @@ textarea:focus {
   flex-wrap: wrap;
   gap: 5px;
   margin-top: 6px;
+  max-height: 160px;
+  opacity: 1;
+  overflow: hidden;
+  transition: opacity 160ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .item-card.renaming .item-flags {
-  display: none;
+  max-height: 0;
+  margin-top: 0;
+  opacity: 0;
+  pointer-events: none;
 }
 
 .flag {
@@ -1552,10 +1675,24 @@ textarea:focus {
   overflow: hidden;
   border-radius: var(--radius-lg);
   background: var(--green-surface);
+  transition: border-color 160ms ease, background 160ms ease, opacity 160ms ease;
 }
 
 .image-card.emphasis {
   border-color: rgba(47, 111, 115, 0.28);
+}
+
+.image-card.role-draggable {
+  cursor: grab;
+}
+
+.image-card.role-dragging {
+  opacity: 0.58;
+}
+
+.image-card.role-drop-target {
+  background: rgba(47, 111, 115, 0.16);
+  border-color: rgba(47, 111, 115, 0.46);
 }
 
 .image-meta {
@@ -1724,16 +1861,23 @@ textarea:focus {
   margin: 0;
   padding: 0;
   border: none;
+  border-radius: 0;
   background: transparent;
   color: inherit;
   line-height: 1.2;
+  overflow: visible;
 }
 
 .chip-x {
+  display: grid;
+  place-items: center;
+  align-self: stretch;
+  min-width: 30px;
+  margin: -8px -8px -8px 0;
   border: 0;
   background: transparent;
   color: var(--danger);
-  padding: 0;
+  padding: 0 8px;
 }
 
 .inline-form {
@@ -2477,13 +2621,13 @@ textarea:focus {
 
 .model-picker-button::before {
   content: "";
-  width: 9px;
-  height: 9px;
-  margin-top: -3px;
-  border-right: 2px solid currentColor;
-  border-bottom: 2px solid currentColor;
-  transform: rotate(45deg);
-  transition: transform 160ms ease, margin 160ms ease;
+  width: 18px;
+  height: 18px;
+  background: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 256 256'%3E%3Cpolyline points='208 96 128 176 48 96' fill='none' stroke='black' stroke-linecap='round' stroke-linejoin='round' stroke-width='16'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 256 256'%3E%3Cpolyline points='208 96 128 176 48 96' fill='none' stroke='black' stroke-linecap='round' stroke-linejoin='round' stroke-width='16'/%3E%3C/svg%3E") center / contain no-repeat;
+  transform: rotate(0deg);
+  transition: transform 160ms ease;
 }
 
 .model-picker-button:hover,
@@ -2495,8 +2639,7 @@ textarea:focus {
 }
 
 .model-picker.drop-up .model-picker-button::before {
-  margin-top: 3px;
-  transform: rotate(225deg);
+  transform: rotate(180deg);
 }
 
 .model-picker-menu {
@@ -2576,9 +2719,16 @@ textarea:focus {
 }
 
 .folder-browser-actions {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  display: flex;
+  flex-wrap: wrap;
   gap: 10px;
+}
+
+.folder-browser-actions .button-primary,
+.folder-browser-actions .button-ghost {
+  flex: 1 0 max-content;
+  min-width: max-content;
+  white-space: nowrap;
 }
 
 .browser-targets {
@@ -2761,7 +2911,29 @@ textarea:focus {
 }
 
 .batch-grid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+}
+
+.batch-grid > :not(.span-2) {
+  flex: 1 1 148px;
+  min-width: 0;
+}
+
+.batch-grid > .span-2 {
+  flex: 1 0 100%;
+}
+
+.batch-grid > .button-primary:not(.span-2),
+.batch-grid > .button-ghost:not(.span-2) {
+  flex: 1 0 max-content;
+  min-width: max-content;
+}
+
+.batch-grid > .button-primary,
+.batch-grid > .button-ghost {
+  white-space: nowrap;
 }
 
 .span-2 {

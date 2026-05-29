@@ -19,6 +19,11 @@ export function createBrowserModule({
   setAiStatusLine,
 }) {
   const ITEM_DRAG_TYPE = "application/x-vds-item-name";
+  const VIEWER_ROLE_DRAG_TYPE = "application/x-vds-viewer-role";
+  const ITEM_CARD_SIZE_ANIMATION = {
+    duration: 320,
+    easing: "cubic-bezier(0.16, 1, 0.3, 1)",
+  };
   const itemContextMenu = document.querySelector("#itemContextMenu");
   let itemContextTarget = null;
   let itemContextCloseTimer = 0;
@@ -369,6 +374,16 @@ export function createBrowserModule({
     setAiStatusLine(`已在文件管理器中定位：${data.path || item.name}`);
   }
 
+  async function cloneItemFiles(item) {
+    if (!item?.name) return;
+    if (item.name === state.selectedName && !(await confirmDiscardCaptionChanges())) return;
+    const data = await apiPost("/api/item/clone", { name: item.name });
+    if (data.workspace) applyWorkspaceSummary(data.workspace);
+    setAiStatusLine(`已克隆：${displayItemName(item.name)} -> ${displayItemName(data.new_name || "")}`);
+    await refreshItems({ skipDirtyCheck: true, suppressSelectionSync: true });
+    await selectItem(data.new_name || item.name, true, { skipDirtyCheck: true });
+  }
+
   async function trashItemFiles(item) {
     if (!item?.name) return;
     if (item.name === state.selectedName && !(await confirmDiscardCaptionChanges())) return;
@@ -403,6 +418,8 @@ export function createBrowserModule({
       const action = button.dataset.action;
       if (action === "rename") {
         beginInlineItemRename(item, title).catch(showError || console.error);
+      } else if (action === "clone") {
+        cloneItemFiles(item).catch(showError || console.error);
       } else if (action === "reveal") {
         revealItemInFileManager(item).catch(showError || console.error);
       } else if (action === "trash") {
@@ -420,6 +437,40 @@ export function createBrowserModule({
     document.addEventListener("scroll", closeItemContextMenu, true);
   }
 
+  function animateItemCardSize(card, mutate) {
+    if (!card) {
+      mutate();
+      return;
+    }
+    const startHeight = card.getBoundingClientRect().height;
+    card._sizeAnimation?.cancel();
+    card._sizeAnimation = null;
+    card.style.height = "";
+    card.style.overflow = "";
+    mutate();
+    const endHeight = card.getBoundingClientRect().height;
+    if (!Number.isFinite(startHeight) || !Number.isFinite(endHeight) || Math.abs(startHeight - endHeight) < 1) {
+      return;
+    }
+
+    const cleanup = () => {
+      if (card._sizeAnimation !== animation) return;
+      card._sizeAnimation = null;
+      card.style.height = "";
+      card.style.overflow = "";
+    };
+
+    card.style.overflow = "hidden";
+    card.style.height = `${endHeight}px`;
+    const animation = card.animate(
+      [{ height: `${startHeight}px` }, { height: `${endHeight}px` }],
+      ITEM_CARD_SIZE_ANIMATION,
+    );
+    card._sizeAnimation = animation;
+    animation.addEventListener("finish", cleanup, { once: true });
+    animation.addEventListener("cancel", cleanup, { once: true });
+  }
+
   async function beginInlineItemRename(item, title) {
     if (!item?.name) return;
     if (title?.querySelector(".item-rename-input")) {
@@ -434,16 +485,21 @@ export function createBrowserModule({
     input.value = currentBase;
     input.setAttribute("aria-label", "重命名图片名称");
     input.rows = 2;
-    title.textContent = "";
-    title.appendChild(input);
-    title.closest(".item-card")?.classList.add("renaming");
+    const card = title.closest(".item-card");
+    animateItemCardSize(card, () => {
+      title.textContent = "";
+      title.appendChild(input);
+      card?.classList.add("renaming");
+    });
     input.focus();
     input.select();
 
     let committed = false;
     const restore = () => {
-      title.closest(".item-card")?.classList.remove("renaming");
-      title.textContent = originalText;
+      animateItemCardSize(title.closest(".item-card"), () => {
+        title.closest(".item-card")?.classList.remove("renaming");
+        title.textContent = originalText;
+      });
     };
     const commit = async () => {
       if (committed) return;
@@ -607,7 +663,7 @@ export function createBrowserModule({
       right.className = "item-card-main";
       const title = document.createElement("div");
       title.className = "item-title";
-      appendHighlightedText(title, displayItemListName(item.name), state.segmentQuery);
+      appendHighlightedText(title, displayItemListName(item.name), state.listSearchMode === "name" ? state.segmentQuery : "");
       right.appendChild(title);
 
       const flags = document.createElement("div");
@@ -703,8 +759,96 @@ export function createBrowserModule({
     refs.currentMeta.append(statusLine, resolutionLine);
   }
 
+  function clearViewerRoleDragClasses() {
+    refs.viewerGrid.querySelectorAll(".role-dragging, .role-drop-target").forEach((node) => {
+      node.classList.remove("role-dragging", "role-drop-target");
+    });
+  }
+
+  function canSwapViewerRoles(sourceRole, targetRole) {
+    const item = state.currentItem;
+    return Boolean(
+      item
+      && sourceRole
+      && targetRole
+      && sourceRole !== targetRole
+      && item.exists?.[sourceRole]
+      && item.exists?.[targetRole],
+    );
+  }
+
+  async function swapViewerItemRoles(sourceRole, targetRole) {
+    if (!canSwapViewerRoles(sourceRole, targetRole)) {
+      setAiStatusLine("需要两张已存在的图片才能对调控制图/结果图。");
+      return;
+    }
+    if (!(await confirmDiscardCaptionChanges())) return;
+    const name = state.currentItem.name;
+    const data = await apiPost("/api/item/swap-roles", {
+      name,
+      source_role: sourceRole,
+      target_role: targetRole,
+    });
+    if (data.workspace) applyWorkspaceSummary(data.workspace);
+    if (data.item) state.currentItem = data.item;
+    setAiStatusLine(`已对调：${ROLE_LABELS[sourceRole] || sourceRole} <-> ${ROLE_LABELS[targetRole] || targetRole}`);
+    await refreshItems({ skipDirtyCheck: true });
+  }
+
+  function ensureViewerRoleDragEvents() {
+    if (!refs.viewerGrid || state.viewerRoleDragBound) return;
+    state.viewerRoleDragBound = true;
+    refs.viewerGrid.addEventListener("dragstart", (event) => {
+      const card = event.target.closest(".image-card");
+      const role = card?.dataset.role || "";
+      if (!card || !state.currentItem?.exists?.[role]) {
+        event.preventDefault();
+        return;
+      }
+      event.dataTransfer?.setData(VIEWER_ROLE_DRAG_TYPE, role);
+      event.dataTransfer?.setData("text/plain", role);
+      if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
+      state.viewerRoleDragging = role;
+      card.classList.add("role-dragging");
+    });
+    refs.viewerGrid.addEventListener("dragend", () => {
+      state.viewerRoleDragging = "";
+      clearViewerRoleDragClasses();
+    });
+    refs.viewerGrid.addEventListener("dragover", (event) => {
+      const card = event.target.closest(".image-card");
+      if (!card || !Array.from(event.dataTransfer?.types || []).includes(VIEWER_ROLE_DRAG_TYPE)) return;
+      const sourceRole = state.viewerRoleDragging || "";
+      const targetRole = card.dataset.role || "";
+      if (!canSwapViewerRoles(sourceRole, targetRole)) return;
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+      refs.viewerGrid.querySelectorAll(".role-drop-target").forEach((node) => {
+        if (node !== card) node.classList.remove("role-drop-target");
+      });
+      card.classList.add("role-drop-target");
+    });
+    refs.viewerGrid.addEventListener("dragleave", (event) => {
+      const card = event.target.closest(".image-card");
+      if (!card || card.contains(event.relatedTarget)) return;
+      card.classList.remove("role-drop-target");
+    });
+    refs.viewerGrid.addEventListener("drop", (event) => {
+      const card = event.target.closest(".image-card");
+      if (!card) return;
+      const sourceRole = event.dataTransfer?.getData(VIEWER_ROLE_DRAG_TYPE) || "";
+      const targetRole = card.dataset.role || "";
+      state.viewerRoleDragging = "";
+      clearViewerRoleDragClasses();
+      if (!canSwapViewerRoles(sourceRole, targetRole)) return;
+      event.preventDefault();
+      swapViewerItemRoles(sourceRole, targetRole).catch(showError || console.error);
+    });
+  }
+
   function renderViewer() {
     const item = state.currentItem;
+    ensureViewerRoleDragEvents();
     ensureViewerResizeObserver();
     refs.viewerGrid.dataset.mode = state.viewMode;
     refs.viewerGrid.dataset.imageMode = state.viewerImageMode || "fit";
@@ -730,6 +874,8 @@ export function createBrowserModule({
     refs.viewerGrid.querySelectorAll(".image-card").forEach((card) => {
       const role = card.dataset.role;
       card.style.display = visibleRoles.includes(role) ? "flex" : "none";
+      card.draggable = Boolean(item?.exists?.[role]);
+      card.classList.toggle("role-draggable", Boolean(item?.exists?.[role]));
       const stage = card.querySelector(".image-stage");
       const resLabel = card.querySelector(".res-label");
       if (!item || !item.exists[role]) {
@@ -745,6 +891,7 @@ export function createBrowserModule({
       const img = document.createElement("img");
       img.src = imageUrl(role, item.name);
       img.alt = item.name;
+      img.draggable = false;
       img.title = state.viewerImageMode === "actual" ? "点击切换为完整显示" : "点击切换为 100% 大小";
       img.addEventListener("load", () => updateViewerImageFit(img));
       img.addEventListener("click", () => {
@@ -777,7 +924,12 @@ export function createBrowserModule({
 
   async function refreshItems(options = {}) {
     const { skipDirtyCheck = false, suppressSelectionSync = false } = options;
-    const data = await apiGet("/api/items", { filter: state.filter, tag: state.segmentQuery });
+    const data = await apiGet("/api/items", {
+      filter: state.filter,
+      tag: state.segmentQuery,
+      search_mode: state.listSearchMode === "name" ? "name" : "phrase",
+      match_mode: state.listSearchMatchMode === "exact" ? "exact" : "contains",
+    });
     if (data.workspace) state.workspace = data.workspace;
     state.items = data.items;
     state.itemStats = data.stats;
@@ -957,6 +1109,9 @@ export function createBrowserModule({
     }
     refs.controlCount.dataset.previousCount = String(count);
     renderFilters();
+    if (state.items.length) {
+      renderItemList();
+    }
     if (state.currentItem) {
       renderViewer();
     }

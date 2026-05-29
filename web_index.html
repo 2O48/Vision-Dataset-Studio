@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Vision Dataset Studio</title>
+  <link rel="icon" type="image/png" href="/favicon.png">
   <script>
     (() => {
       const mode = window.localStorage.getItem("vds-ui.theme-mode") || window.localStorage.getItem("lora-ui.theme-mode") || "auto";
@@ -435,10 +436,27 @@
           </div>
           <label class="stacked-label list-search-field">
             <span class="list-search-head">
-              <span>短语 / 名称搜索</span>
+              <span>搜索</span>
               <span id="listStats">0 项</span>
             </span>
-            <input id="tagSearch" placeholder="输入 tag / caption / 子文件夹 / 图片名称">
+            <span class="list-search-input-wrap">
+              <span class="list-search-control">
+                <input id="tagSearch" placeholder="搜索 caption 短语">
+                <button class="list-search-clear" id="tagSearchClear" type="button" aria-label="清空搜索" hidden>
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" aria-hidden="true"><rect width="256" height="256" fill="none"/><path d="M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm37.66,130.34a8,8,0,0,1-11.32,11.32L128,139.31l-26.34,26.35a8,8,0,0,1-11.32-11.32L116.69,128,90.34,101.66a8,8,0,0,1,11.32-11.32L128,116.69l26.34-26.35a8,8,0,0,1,11.32,11.32L139.31,128Z"/></svg>
+                </button>
+              </span>
+              <span class="list-search-toggle-cluster">
+                <span class="list-search-mode-toggle" id="tagSearchModeGroup" role="group" aria-label="缩略图搜索模式">
+                  <button class="active" data-search-mode="phrase" type="button" aria-pressed="true">短语</button>
+                  <button data-search-mode="name" type="button" aria-pressed="false">名称</button>
+                </span>
+                <span class="list-search-mode-toggle" id="tagSearchMatchGroup" role="group" aria-label="缩略图搜索匹配方式">
+                  <button class="active" data-search-match="contains" type="button" aria-pressed="true">包含</button>
+                  <button data-search-match="exact" type="button" aria-pressed="false">精确</button>
+                </span>
+              </span>
+            </span>
           </label>
         </div>
 
@@ -753,6 +771,10 @@
     <button type="button" data-action="rename">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" aria-hidden="true"><rect width="256" height="256" fill="none"/><path d="M92.69,216H48a8,8,0,0,1-8-8V163.31a8,8,0,0,1,2.34-5.65L165.66,34.34a8,8,0,0,1,11.31,0L221.66,79a8,8,0,0,1,0,11.31L98.34,213.66A8,8,0,0,1,92.69,216Z" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/><line x1="136" y1="64" x2="192" y2="120" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/></svg>
       <span>重命名</span>
+    </button>
+    <button type="button" data-action="clone">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" aria-hidden="true"><rect width="256" height="256" fill="none"/><polyline points="168 168 216 168 216 40 88 40 88 88" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/><rect x="40" y="88" width="128" height="128" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/></svg>
+      <span>克隆</span>
     </button>
     <button type="button" data-action="reveal">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" aria-hidden="true"><rect width="256" height="256" fill="none"/><path d="M32,208V64a8,8,0,0,1,8-8H93.33a8,8,0,0,1,4.8,1.6L128,80h72a8,8,0,0,1,8,8v24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/><path d="M32,208l30.18-90.53A8,8,0,0,1,69.77,112H232a8,8,0,0,1,7.59,10.53L211.09,208Z" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/></svg>

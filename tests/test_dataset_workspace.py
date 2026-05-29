@@ -62,6 +62,12 @@ class DatasetWorkspaceTextTests(unittest.TestCase):
             self.assertEqual(detail["items"][0]["text"], "A girl near window,\nsoft light")
             summary = workspace.list_items(tag_query="soft")
             self.assertEqual(summary["items"][0]["search_matches"]["segments"], ["soft light"])
+            self.assertEqual(workspace.list_items(tag_query="sample", search_mode="phrase")["items"], [])
+            self.assertEqual([item["name"] for item in workspace.list_items(tag_query="sample", search_mode="name")["items"]], ["sample"])
+            self.assertEqual(workspace.list_items(tag_query="soft", search_mode="name")["items"], [])
+            self.assertEqual(workspace.list_items(tag_query="soft", search_mode="phrase", match_mode="exact")["items"], [])
+            exact = workspace.list_items(tag_query="soft light", search_mode="phrase", match_mode="exact")
+            self.assertEqual([item["name"] for item in exact["items"]], ["sample"])
 
     def test_workspace_search_matches_nested_item_name(self):
         workspace = DatasetWorkspace()
@@ -78,6 +84,14 @@ class DatasetWorkspaceTextTests(unittest.TestCase):
             self.assertEqual(
                 [item["name"] for item in workspace.list_items(tag_query="sample_pose")["items"]],
                 ["style/sample_pose"],
+            )
+            self.assertEqual(
+                [item["name"] for item in workspace.list_items(tag_query="sample_pose", search_mode="name", match_mode="exact")["items"]],
+                ["style/sample_pose"],
+            )
+            self.assertEqual(
+                workspace.list_items(tag_query="sample", search_mode="name", match_mode="exact")["items"],
+                [],
             )
             data = workspace.list_items(tag_query="style/sample")
             self.assertTrue(data["items"][0]["search_matches"]["name"])
@@ -148,6 +162,49 @@ class DatasetWorkspaceTextTests(unittest.TestCase):
 
             with self.assertRaises(ValueError):
                 workspace.rename_item("sample", "other/name")
+
+    def test_clone_item_increments_name_and_copies_files(self):
+        workspace = DatasetWorkspace()
+        with tempfile.TemporaryDirectory() as control_dir, tempfile.TemporaryDirectory() as result_dir:
+            control_path = Path(control_dir)
+            result_path = Path(result_dir)
+            Image.new("RGB", (32, 32), (10, 20, 30)).save(control_path / "icon09.png")
+            Image.new("RGB", (32, 32), (30, 20, 10)).save(result_path / "icon09.png")
+            (result_path / "icon09.txt").write_text("caption text", encoding="utf-8")
+            Image.new("RGB", (32, 32), (1, 2, 3)).save(result_path / "plain.png")
+
+            workspace.open_dirs(control1_dir=str(control_path), result_dir=str(result_path), control_count=1)
+            numbered = workspace.clone_item("icon09")
+            plain = workspace.clone_item("plain")
+
+            self.assertEqual(numbered["new_name"], "icon10")
+            self.assertEqual(plain["new_name"], "plain_1")
+            self.assertTrue((control_path / "icon10.png").exists())
+            self.assertTrue((result_path / "icon10.png").exists())
+            self.assertEqual((result_path / "icon10.txt").read_text(encoding="utf-8"), "caption text")
+            self.assertTrue((result_path / "plain_1.png").exists())
+            self.assertIn("icon10", workspace.file_names)
+            self.assertEqual(workspace.get_item("icon10")["text"], "caption text")
+
+    def test_swap_item_roles_exchanges_local_images(self):
+        workspace = DatasetWorkspace()
+        with tempfile.TemporaryDirectory() as control_dir, tempfile.TemporaryDirectory() as result_dir:
+            control_path = Path(control_dir)
+            result_path = Path(result_dir)
+            Image.new("RGB", (16, 16), (255, 0, 0)).save(control_path / "sample.png")
+            Image.new("RGB", (16, 16), (0, 0, 255)).save(result_path / "sample.bmp")
+
+            workspace.open_dirs(control1_dir=str(control_path), result_dir=str(result_path), control_count=1)
+            result = workspace.swap_item_roles("sample", "control1", "result")
+
+            self.assertEqual(result["item"]["paths"]["control1"], str(control_path / "sample.bmp"))
+            self.assertEqual(result["item"]["paths"]["result"], str(result_path / "sample.png"))
+            self.assertFalse((control_path / "sample.png").exists())
+            self.assertFalse((result_path / "sample.bmp").exists())
+            with Image.open(control_path / "sample.bmp") as image:
+                self.assertEqual(image.getpixel((0, 0)), (0, 0, 255))
+            with Image.open(result_path / "sample.png") as image:
+                self.assertEqual(image.getpixel((0, 0)), (255, 0, 0))
 
     def test_move_item_to_folder_changes_parent_only(self):
         workspace = DatasetWorkspace()
