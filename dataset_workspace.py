@@ -689,6 +689,16 @@ class DatasetWorkspace:
             raise ValueError("New file name is reserved by Windows.")
         return raw
 
+    def _increment_clone_basename(self, basename: str) -> str:
+        raw = self._clean_rename_basename(basename)
+        matches = list(re.finditer(r"\d+", raw))
+        if not matches:
+            return f"{raw}_1"
+        match = matches[-1]
+        number = match.group(0)
+        incremented = str(int(number) + 1).zfill(len(number))
+        return f"{raw[:match.start()]}{incremented}{raw[match.end():]}"
+
     def _clean_relative_folder(self, value: str) -> str:
         raw = str(value or "").strip().replace("\\", "/")
         if not raw:
@@ -808,6 +818,8 @@ class DatasetWorkspace:
         *,
         filter_mode: str = "all",
         tag_query: str = "",
+        search_mode: str = "all",
+        match_mode: str = "contains",
         detail: bool = False,
     ) -> dict:
         with self._lock:
@@ -832,17 +844,44 @@ class DatasetWorkspace:
                 names = [name for name in names if name in self._resolution_mismatch]
 
             tag_query = (tag_query or "").strip().lower()
+            search_mode = (search_mode or "all").strip().lower()
+            if search_mode not in {"all", "phrase", "name"}:
+                search_mode = "all"
+            match_mode = (match_mode or "contains").strip().lower()
+            if match_mode not in {"contains", "exact"}:
+                match_mode = "contains"
+
+            def matches_search(value: str) -> bool:
+                normalized = str(value or "").replace("\\", "/").strip().lower()
+                if match_mode == "exact":
+                    parts = [part for part in normalized.split("/") if part]
+                    basename = parts[-1] if parts else normalized
+                    return normalized == tag_query or basename == tag_query
+                return tag_query in normalized
+
+            def matches_phrase(text: str) -> bool:
+                content = str(text or "").strip().lower()
+                segments = [segment.strip().lower() for segment in _parse_caption_segments(text)]
+                if match_mode == "exact":
+                    return content == tag_query or any(segment == tag_query for segment in segments)
+                return tag_query in content or any(tag_query in segment for segment in segments)
+
             if tag_query:
                 names = [
                     name
                     for name in names
-                    if tag_query in str(name).replace("\\", "/").lower()
-                    or tag_query in self.txt_content.get(name, "").lower()
-                    or any(tag_query in segment.lower() for segment in _parse_caption_segments(self.txt_content.get(name, "")))
+                    if (
+                        search_mode in {"all", "name"}
+                        and matches_search(name)
+                    )
+                    or (
+                        search_mode in {"all", "phrase"}
+                        and matches_phrase(self.txt_content.get(name, ""))
+                    )
                 ]
 
             items = [
-                self._serialize_item(name) if detail else self._serialize_item_summary(name, search_query=tag_query)
+                self._serialize_item(name) if detail else self._serialize_item_summary(name, search_query=tag_query, search_mode=search_mode, match_mode=match_mode)
                 for name in names
             ]
             global_segments = self.get_global_segments()
@@ -853,22 +892,33 @@ class DatasetWorkspace:
                 "global_tags": global_segments,
             }
 
-    def _item_search_matches(self, name: str, search_query: str) -> dict:
+    def _item_search_matches(self, name: str, search_query: str, search_mode: str = "all", match_mode: str = "contains") -> dict:
         query = (search_query or "").strip().lower()
         if not query:
             return {}
+        search_mode = (search_mode or "all").strip().lower()
+        if search_mode not in {"all", "phrase", "name"}:
+            search_mode = "all"
+        match_mode = (match_mode or "contains").strip().lower()
+        if match_mode not in {"contains", "exact"}:
+            match_mode = "contains"
         text = self.txt_content.get(name, "")
+        normalized_name = str(name).replace("\\", "/").strip().lower()
+        name_parts = [part for part in normalized_name.split("/") if part]
+        basename = name_parts[-1] if name_parts else normalized_name
         segments = [
             segment
             for segment in _parse_caption_segments(text)
-            if query in segment.lower()
+            if (segment.strip().lower() == query if match_mode == "exact" else query in segment.lower())
         ]
-        return {
-            "name": query in str(name).replace("\\", "/").lower(),
-            "segments": segments,
-        }
+        matches = {}
+        if search_mode in {"all", "name"}:
+            matches["name"] = normalized_name == query or basename == query if match_mode == "exact" else query in normalized_name
+        if search_mode in {"all", "phrase"}:
+            matches["segments"] = segments
+        return matches
 
-    def _serialize_item_summary(self, name: str, search_query: str = "") -> dict:
+    def _serialize_item_summary(self, name: str, search_query: str = "", search_mode: str = "all", match_mode: str = "contains") -> dict:
         control1_path = self.files["control1"].get(name)
         control2_path = self.files["control2"].get(name)
         control3_path = self.files["control3"].get(name)
@@ -886,7 +936,7 @@ class DatasetWorkspace:
                 "resolution_mismatch": name in self._resolution_mismatch,
             },
         }
-        matches = self._item_search_matches(name, search_query)
+        matches = self._item_search_matches(name, search_query, search_mode=search_mode, match_mode=match_mode)
         if matches:
             item["search_matches"] = matches
         return item
@@ -1297,6 +1347,188 @@ class DatasetWorkspace:
                 "new_name": new_name,
                 "renamed": [{"from": str(source), "to": str(target)} for source, target in rename_pairs],
                 "item": self._serialize_item(new_name),
+                "workspace": self.get_workspace_summary(),
+            }
+
+    def _clone_name_candidate(self, name: str, basename: str) -> str:
+        old_name_path = Path(str(name).replace("\\", "/"))
+        parent = old_name_path.parent.as_posix()
+        return basename if parent in {"", "."} else f"{parent}/{basename}"
+
+    def _clone_txt_target(self, name: str, basename: str) -> Optional[Path]:
+        txt_source = self.txt_files.get(name)
+        if txt_source:
+            return txt_source.with_name(f"{basename}{txt_source.suffix}")
+
+        content = self.txt_content.get(name, "")
+        result_root = self.dirs.get("result")
+        if not content.strip() or not result_root:
+            return None
+
+        old_name_path = Path(str(name).replace("\\", "/"))
+        parent = old_name_path.parent.as_posix()
+        target_dir = result_root if parent in {"", "."} else result_root.joinpath(*parent.split("/"))
+        return target_dir / f"{basename}.txt"
+
+    def _clone_targets_available(self, name: str, basename: str) -> bool:
+        candidate_name = self._clone_name_candidate(name, basename)
+        if candidate_name in self.file_names:
+            return False
+        for role in IMAGE_ROLES:
+            source = self.files[role].get(name)
+            if source and source.with_name(f"{basename}{source.suffix}").exists():
+                return False
+        txt_target = self._clone_txt_target(name, basename)
+        return not (txt_target and txt_target.exists())
+
+    def clone_item(self, name: str) -> dict:
+        with self._lock:
+            if name not in self.file_names:
+                raise KeyError(name)
+
+            old_name_path = Path(str(name).replace("\\", "/"))
+            candidate_basename = self._increment_clone_basename(old_name_path.name)
+            while not self._clone_targets_available(name, candidate_basename):
+                candidate_basename = self._increment_clone_basename(candidate_basename)
+            new_name = self._clone_name_candidate(name, candidate_basename)
+
+            copy_pairs: list[tuple[Path, Path]] = []
+            for role in IMAGE_ROLES:
+                source = self.files[role].get(name)
+                if not source:
+                    continue
+                copy_pairs.append((source, source.with_name(f"{candidate_basename}{source.suffix}")))
+
+            txt_target = self._clone_txt_target(name, candidate_basename)
+            txt_content = self.txt_content.get(name, "")
+            txt_source = self.txt_files.get(name)
+            if txt_target and txt_content.strip():
+                copy_pairs.append((txt_source, txt_target) if txt_source else (txt_target, txt_target))
+
+            copied: list[Path] = []
+            try:
+                for source, target in copy_pairs:
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    if target.exists():
+                        raise FileExistsError(f"Target file already exists: {target}")
+                    if source == target:
+                        self._write_text_file(target, txt_content)
+                    else:
+                        if not source.exists():
+                            raise FileNotFoundError(f"Source file does not exist: {source}")
+                        shutil.copy2(source, target)
+                        if target == txt_target and txt_content != self._read_text_file(target):
+                            self._write_text_file(target, txt_content)
+                    copied.append(target)
+            except Exception:
+                for path in reversed(copied):
+                    try:
+                        path.unlink(missing_ok=True)
+                    except Exception:
+                        pass
+                raise
+
+            self.file_names.append(new_name)
+            for role in IMAGE_ROLES:
+                source = self.files[role].get(name)
+                if source:
+                    self.files[role][new_name] = source.with_name(f"{candidate_basename}{source.suffix}")
+            if txt_target and txt_content.strip():
+                self.txt_files[new_name] = txt_target
+                self.txt_content[new_name] = txt_content
+            elif name in self.caption_deleted:
+                self.caption_deleted.add(new_name)
+            if name in self.caption_overrides and txt_content.strip():
+                self.caption_overrides[new_name] = txt_content
+            self.excluded_names.discard(new_name)
+
+            self._image_sizes.clear()
+            self._resolution_mismatch.clear()
+            self._resolution_index_ready = False
+            self._mark_global_segments_dirty()
+            self.file_names = sorted(self.file_names, key=_natural_key)
+            self._save_workspace_state()
+            self._ensure_resolution_index()
+            return {
+                "old_name": name,
+                "new_name": new_name,
+                "copied": [{"from": str(source), "to": str(target)} for source, target in copy_pairs],
+                "item": self._serialize_item(new_name),
+                "workspace": self.get_workspace_summary(),
+            }
+
+    def swap_item_roles(self, name: str, source_role: str, target_role: str) -> dict:
+        with self._lock:
+            if name not in self.file_names:
+                raise KeyError(name)
+            if source_role not in IMAGE_ROLES or target_role not in IMAGE_ROLES:
+                raise ValueError("Unsupported image role.")
+            if source_role == target_role:
+                return {
+                    "name": name,
+                    "source_role": source_role,
+                    "target_role": target_role,
+                    "swapped": [],
+                    "item": self._serialize_item(name),
+                    "workspace": self.get_workspace_summary(),
+                }
+
+            source_path = self.files[source_role].get(name)
+            target_path = self.files[target_role].get(name)
+            if not source_path or not source_path.exists():
+                raise FileNotFoundError(f"Source role image does not exist: {source_role}")
+            if not target_path or not target_path.exists():
+                raise FileNotFoundError(f"Target role image does not exist: {target_role}")
+            if source_path == target_path:
+                raise ValueError("Source and target roles point to the same file.")
+
+            next_source_path = source_path.with_suffix(target_path.suffix)
+            next_target_path = target_path.with_suffix(source_path.suffix)
+            occupied = {source_path, target_path}
+            for path in {next_source_path, next_target_path}:
+                if path not in occupied and path.exists():
+                    raise FileExistsError(f"Target file already exists: {path}")
+
+            temp_path = source_path.with_name(f".vds_role_swap_{uuid.uuid4().hex}{source_path.suffix}")
+            moved: list[tuple[Path, Path]] = []
+            try:
+                source_path.rename(temp_path)
+                moved.append((source_path, temp_path))
+                if target_path != next_source_path:
+                    next_source_path.parent.mkdir(parents=True, exist_ok=True)
+                    target_path.rename(next_source_path)
+                    moved.append((target_path, next_source_path))
+                next_target_path.parent.mkdir(parents=True, exist_ok=True)
+                temp_path.rename(next_target_path)
+                moved.append((temp_path, next_target_path))
+            except Exception:
+                for original, current in reversed(moved):
+                    try:
+                        if current.exists() and not original.exists():
+                            original.parent.mkdir(parents=True, exist_ok=True)
+                            current.rename(original)
+                    except Exception:
+                        pass
+                raise
+
+            self.files[source_role][name] = next_source_path
+            self.files[target_role][name] = next_target_path
+            for key in list(self._image_sizes.keys()):
+                if key[1] == name:
+                    self._image_sizes.pop(key, None)
+            self._resolution_mismatch.discard(name)
+            self._resolution_index_ready = False
+            self._save_workspace_state()
+            self._ensure_resolution_index()
+            return {
+                "name": name,
+                "source_role": source_role,
+                "target_role": target_role,
+                "swapped": [
+                    {"role": source_role, "path": str(next_source_path)},
+                    {"role": target_role, "path": str(next_target_path)},
+                ],
+                "item": self._serialize_item(name),
                 "workspace": self.get_workspace_summary(),
             }
 

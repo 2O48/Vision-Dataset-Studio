@@ -62,6 +62,8 @@ export function createProjectsModule({
       selected_name: state.selectedName || "",
       filter: state.filter || "all",
       segment_query: refs.tagSearch?.value.trim() || state.segmentQuery || "",
+      list_search_mode: state.listSearchMode === "name" ? "name" : "phrase",
+      list_search_match_mode: state.listSearchMatchMode === "exact" ? "exact" : "contains",
       utility_panel: state.utilityPanel || "projects",
       view_mode: state.viewMode || "two",
       workspace_browser_target: state.browserTarget || "control1",
@@ -189,6 +191,23 @@ export function createProjectsModule({
     state.filter = uiState.filter || "all";
     state.segmentQuery = uiState.segment_query || "";
     if (refs.tagSearch) refs.tagSearch.value = state.segmentQuery;
+    state.listSearchMode = uiState.list_search_mode === "name" ? "name" : "phrase";
+    saveStored(STORAGE_KEYS.listSearchMode, state.listSearchMode);
+    state.listSearchMatchMode = uiState.list_search_match_mode === "exact" ? "exact" : "contains";
+    saveStored(STORAGE_KEYS.listSearchMatchMode, state.listSearchMatchMode);
+    refs.tagSearchModeGroup?.querySelectorAll("button[data-search-mode]").forEach((button) => {
+      const isActive = button.dataset.searchMode === state.listSearchMode;
+      button.classList.toggle("active", isActive);
+      button.setAttribute("aria-pressed", String(isActive));
+    });
+    refs.tagSearchMatchGroup?.querySelectorAll("button[data-search-match]").forEach((button) => {
+      const isActive = button.dataset.searchMatch === state.listSearchMatchMode;
+      button.classList.toggle("active", isActive);
+      button.setAttribute("aria-pressed", String(isActive));
+    });
+    if (refs.tagSearch) {
+      refs.tagSearch.placeholder = state.listSearchMode === "name" ? "搜索图片名称 / 子文件夹" : "搜索 caption 短语";
+    }
     state.browserTarget = uiState.workspace_browser_target || state.browserTarget;
     saveStored(STORAGE_KEYS.workspaceBrowserTarget, state.browserTarget);
     state.utilityPanel = uiState.utility_panel || state.utilityPanel;

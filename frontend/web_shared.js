@@ -17,6 +17,8 @@ export const STORAGE_KEYS = {
   utilityPanel: storageKey("utility-panel"),
   viewMode: storageKey("view-mode"),
   listThumbMode: storageKey("list-thumb-mode"),
+  listSearchMode: storageKey("list-search-mode"),
+  listSearchMatchMode: storageKey("list-search-match-mode"),
   controlCount: storageKey("control-count"),
   ignoreTokens: storageKey("ignore-tokens"),
   autoOpenLastWorkspace: storageKey("auto-open-last-workspace"),
