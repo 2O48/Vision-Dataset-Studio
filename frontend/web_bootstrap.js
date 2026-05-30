@@ -39,6 +39,7 @@ export function createBootstrapModule({
   setWorkspaceBrowserTarget,
   applyWorkspaceSummary,
   refreshItems,
+  selectItem,
   selectRelativeItem,
   shouldIgnoreListArrowNavigation,
   loadWorkspace,
@@ -505,6 +506,14 @@ export function createBootstrapModule({
     function setContentSizeVar(name, value, min, max) {
       const clamped = Math.max(min, Math.min(max, value));
       refs.workbenchShell.style.setProperty(name, `${Math.round(clamped)}px`);
+      if (name === "--thumb-list-width") {
+        refs.workbenchLayout?.style.removeProperty("--split-list-card-width");
+        refs.workbenchLayout?.style.removeProperty("--split-list-card-target-width");
+        const listCard = refs.listPanelShell?.closest(".list-card");
+        listCard?.style.removeProperty("--split-list-gap");
+        listCard?.style.removeProperty("--split-list-panel-width");
+        listCard?.style.removeProperty("--split-list-shell-target-width");
+      }
       window.localStorage.setItem(cssVarStorageKey(name), String(Math.round(clamped)));
     }
 
@@ -521,14 +530,20 @@ export function createBootstrapModule({
       handle.addEventListener("pointerdown", (event) => {
         event.preventDefault();
         const start = axis === "y" ? event.clientY : event.clientX;
-        const startSize = numericCssVar(cssVar, fallback);
-        const max = Math.max(min, Number(maxFor?.()) || fallback);
+        const rawMax = Number(maxFor?.()) || fallback;
+        const isSplitThumbResize = cssVar === "--thumb-list-width" && state.splitListOpen;
+        const splitListCardWidth = refs.listPanelShell?.closest(".list-card")?.getBoundingClientRect().width;
+        const startSize = isSplitThumbResize && Number.isFinite(splitListCardWidth)
+          ? (splitListCardWidth + 13) / 2
+          : numericCssVar(cssVar, fallback);
+        const max = Math.max(min, isSplitThumbResize ? (rawMax + 13) / 2 : rawMax);
         refs.workbenchShell.classList.add("manual-resizing");
         handle.classList.add("dragging");
         handle.setPointerCapture?.(event.pointerId);
         const onMove = (moveEvent) => {
           const current = axis === "y" ? moveEvent.clientY : moveEvent.clientX;
-          setContentSizeVar(cssVar, startSize + (current - start) * direction, min, max);
+          const deltaScale = isSplitThumbResize ? 0.5 : 1;
+          setContentSizeVar(cssVar, startSize + (current - start) * direction * deltaScale, min, max);
         };
         const onUp = () => {
           handle.classList.remove("dragging");
@@ -657,120 +672,211 @@ export function createBootstrapModule({
     refs.openCaptionSettingsBtn?.addEventListener("click", () => toggleCaptionSettingsPanel());
     refs.closeCaptionSettingsBtn?.addEventListener("click", () => toggleCaptionSettingsPanel(false));
 
-    refs.filterGroup.addEventListener("click", (event) => {
-      const button = event.target.closest("button[data-filter]");
-      if (!button) return;
-      state.filter = button.dataset.filter;
-      renderFilters();
-      refreshItems().catch(showError);
+    refs.toggleSplitListBtn?.addEventListener("click", () => {
+      (async () => {
+        const wasOpen = Boolean(state.splitListOpen);
+        const wasSecondarySelection = state.selectedPanel === "secondary";
+        if (!wasOpen && state.selectedPanel === "primary" && state.selectedName) {
+          state.primarySelectedName = state.selectedName;
+        }
+        state.splitListOpen = !state.splitListOpen;
+        saveStored(STORAGE_KEYS.splitListOpen, state.splitListOpen ? "1" : "0");
+        if (wasOpen && wasSecondarySelection) {
+          state.selectedPanel = "primary";
+          const primaryName = state.primarySelectedName || state.visibleItems?.[0]?.name || state.items?.[0]?.name || "";
+          if (primaryName && state.items.some((item) => item.name === primaryName)) {
+            await selectItem(primaryName, true, { skipDirtyCheck: true, panelId: "primary" });
+          } else {
+            state.selectedName = primaryName;
+          }
+        }
+        renderFilters();
+        renderViewer();
+        await refreshItems({ skipDirtyCheck: true, suppressSelectionSync: true });
+      })().catch(showError);
     });
-    const syncTagSearchClear = () => {
-      if (refs.tagSearchClear) refs.tagSearchClear.hidden = !refs.tagSearch.value.trim();
+    const panelControls = {
+      primary: {
+        filterGroup: refs.filterGroup,
+        searchInput: refs.tagSearch,
+        clearButton: refs.tagSearchClear,
+        searchModeGroup: refs.tagSearchModeGroup,
+        searchMatchGroup: refs.tagSearchMatchGroup,
+        thumbModeSelect: refs.listThumbModeSelect,
+      },
+      secondary: {
+        filterGroup: refs.secondaryFilterGroup,
+        searchInput: refs.secondaryTagSearch,
+        clearButton: refs.secondaryTagSearchClear,
+        searchModeGroup: refs.secondaryTagSearchModeGroup,
+        searchMatchGroup: refs.secondaryTagSearchMatchGroup,
+        thumbModeSelect: refs.secondaryListThumbModeSelect,
+      },
     };
-    const syncTagSearchMode = () => {
-      state.listSearchMode = state.listSearchMode === "name" ? "name" : "phrase";
-      state.listSearchMatchMode = state.listSearchMatchMode === "exact" ? "exact" : "contains";
-      if (refs.tagSearch) {
-        refs.tagSearch.placeholder = state.listSearchMode === "name"
-          ? "搜索图片名称 / 子文件夹"
-          : "搜索 caption 短语";
+    const panelSearchMode = (panelId) => panelId === "secondary" ? state.secondaryListSearchMode : state.listSearchMode;
+    const setPanelSearchMode = (panelId, value) => {
+      if (panelId === "secondary") {
+        state.secondaryListSearchMode = value === "name" ? "name" : "phrase";
+        saveStored(STORAGE_KEYS.secondaryListSearchMode, state.secondaryListSearchMode);
+      } else {
+        state.listSearchMode = value === "name" ? "name" : "phrase";
+        saveStored(STORAGE_KEYS.listSearchMode, state.listSearchMode);
       }
-      refs.tagSearchModeGroup?.querySelectorAll("button[data-search-mode]").forEach((button) => {
-        const isActive = button.dataset.searchMode === state.listSearchMode;
+    };
+    const panelSearchMatchMode = (panelId) => panelId === "secondary" ? state.secondaryListSearchMatchMode : state.listSearchMatchMode;
+    const setPanelSearchMatchMode = (panelId, value) => {
+      if (panelId === "secondary") {
+        state.secondaryListSearchMatchMode = value === "exact" ? "exact" : "contains";
+        saveStored(STORAGE_KEYS.secondaryListSearchMatchMode, state.secondaryListSearchMatchMode);
+      } else {
+        state.listSearchMatchMode = value === "exact" ? "exact" : "contains";
+        saveStored(STORAGE_KEYS.listSearchMatchMode, state.listSearchMatchMode);
+      }
+    };
+    const setPanelQuery = (panelId, value) => {
+      if (panelId === "secondary") state.secondarySegmentQuery = value || "";
+      else state.segmentQuery = value || "";
+    };
+    const panelQuery = (panelId) => panelId === "secondary" ? (state.secondarySegmentQuery || "") : (state.segmentQuery || "");
+    const syncSearchClear = (panelId) => {
+      const controls = panelControls[panelId];
+      if (controls?.clearButton && controls.searchInput) controls.clearButton.hidden = !controls.searchInput.value.trim();
+    };
+    const syncSearchMode = (panelId) => {
+      const controls = panelControls[panelId];
+      if (!controls) return;
+      const mode = panelSearchMode(panelId) === "name" ? "name" : "phrase";
+      const matchMode = panelSearchMatchMode(panelId) === "exact" ? "exact" : "contains";
+      if (controls.searchInput) {
+        controls.searchInput.placeholder = mode === "name" ? "搜索图片名称 / 子文件夹" : "搜索 caption 短语";
+      }
+      controls.searchModeGroup?.querySelectorAll("button[data-search-mode]").forEach((button) => {
+        const isActive = button.dataset.searchMode === mode;
         button.classList.toggle("active", isActive);
         button.setAttribute("aria-pressed", String(isActive));
       });
-      refs.tagSearchMatchGroup?.querySelectorAll("button[data-search-match]").forEach((button) => {
-        const isActive = button.dataset.searchMatch === state.listSearchMatchMode;
+      controls.searchMatchGroup?.querySelectorAll("button[data-search-match]").forEach((button) => {
+        const isActive = button.dataset.searchMatch === matchMode;
         button.classList.toggle("active", isActive);
         button.setAttribute("aria-pressed", String(isActive));
       });
     };
-    let tagSearchDebounceTimer = 0;
-    const clearTagSearchDebounce = () => {
-      if (!tagSearchDebounceTimer) return;
-      window.clearTimeout(tagSearchDebounceTimer);
-      tagSearchDebounceTimer = 0;
+    const debounceTimers = { primary: 0, secondary: 0 };
+    const clearDebounce = (panelId) => {
+      if (!debounceTimers[panelId]) return;
+      window.clearTimeout(debounceTimers[panelId]);
+      debounceTimers[panelId] = 0;
     };
-    const applyTagSearch = (options = {}) => {
-      clearTagSearchDebounce();
-      state.segmentQuery = refs.tagSearch.value.trim();
-      syncTagSearchClear();
+    const applySearch = (panelId, options = {}) => {
+      clearDebounce(panelId);
+      const input = panelControls[panelId]?.searchInput;
+      setPanelQuery(panelId, input?.value.trim() || "");
+      syncSearchClear(panelId);
       refreshItems(options).catch(showError);
     };
-    const scheduleTagSearch = () => {
-      clearTagSearchDebounce();
-      tagSearchDebounceTimer = window.setTimeout(() => {
-        tagSearchDebounceTimer = 0;
-        applyTagSearch({ skipDirtyCheck: true, suppressSelectionSync: true });
+    const scheduleSearch = (panelId) => {
+      clearDebounce(panelId);
+      debounceTimers[panelId] = window.setTimeout(() => {
+        debounceTimers[panelId] = 0;
+        applySearch(panelId, { skipDirtyCheck: true, suppressSelectionSync: true });
       }, 1000);
     };
-    let tagSearchClearPointerHandled = false;
-    const clearTagSearch = (event) => {
-      event?.preventDefault();
-      event?.stopPropagation();
-      refs.tagSearch.value = "";
-      refs.tagSearch.focus();
-      applyTagSearch({ skipDirtyCheck: true, suppressSelectionSync: true });
-    };
-    syncTagSearchMode();
-    syncTagSearchClear();
-    refs.tagSearch.addEventListener("input", () => {
-      syncTagSearchClear();
-      scheduleTagSearch();
+    Object.entries(panelControls).forEach(([panelId, controls]) => {
+      if (controls.searchInput) controls.searchInput.value = panelQuery(panelId);
+      syncSearchMode(panelId);
+      syncSearchClear(panelId);
     });
-    refs.tagSearch.addEventListener("change", () => {
-      applyTagSearch();
+    Object.entries(panelControls).forEach(([panelId, controls]) => {
+      const group = controls.filterGroup;
+      if (!group) return;
+      group.addEventListener("click", (event) => {
+        const button = event.target.closest("button[data-filter]");
+        if (!button) return;
+        if (panelId === "secondary") state.secondaryFilter = button.dataset.filter;
+        else state.filter = button.dataset.filter;
+        renderFilters();
+        refreshItems().catch(showError);
+      });
     });
-    refs.tagSearch.addEventListener("keyup", (event) => {
-      syncTagSearchClear();
-      if (event.key === "Enter") {
-        applyTagSearch();
-      }
+    Object.entries(panelControls).forEach(([panelId, controls]) => {
+      const input = controls.searchInput;
+      if (!input) return;
+      input.addEventListener("input", () => {
+        syncSearchClear(panelId);
+        scheduleSearch(panelId);
+      });
+      input.addEventListener("change", () => {
+        applySearch(panelId);
+      });
+      input.addEventListener("keyup", (event) => {
+        syncSearchClear(panelId);
+        if (event.key === "Enter") {
+          applySearch(panelId);
+        }
+      });
     });
-    refs.tagSearchClear?.addEventListener("pointerdown", (event) => {
-      tagSearchClearPointerHandled = true;
-      clearTagSearch(event);
-    });
-    refs.tagSearchClear?.addEventListener("click", (event) => {
-      if (tagSearchClearPointerHandled) {
-        tagSearchClearPointerHandled = false;
+    Object.entries(panelControls).forEach(([panelId, controls]) => {
+      let pointerHandled = false;
+      controls.clearButton?.addEventListener("pointerdown", (event) => {
+        pointerHandled = true;
         event.preventDefault();
         event.stopPropagation();
-        return;
-      }
-      clearTagSearch(event);
+        if (controls.searchInput) controls.searchInput.value = "";
+        controls.searchInput?.focus();
+        applySearch(panelId, { skipDirtyCheck: true, suppressSelectionSync: true });
+      });
+      controls.clearButton?.addEventListener("click", (event) => {
+        if (pointerHandled) {
+          pointerHandled = false;
+          event.preventDefault();
+          event.stopPropagation();
+          return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        if (controls.searchInput) controls.searchInput.value = "";
+        controls.searchInput?.focus();
+        applySearch(panelId, { skipDirtyCheck: true, suppressSelectionSync: true });
+      });
     });
-    refs.tagSearchModeGroup?.addEventListener("click", (event) => {
-      const button = event.target.closest("button[data-search-mode]");
-      if (!button) return;
-      event.preventDefault();
-      event.stopPropagation();
-      const nextMode = button.dataset.searchMode === "name" ? "name" : "phrase";
-      if (nextMode === state.listSearchMode) return;
-      state.listSearchMode = nextMode;
-      saveStored(STORAGE_KEYS.listSearchMode, state.listSearchMode);
-      syncTagSearchMode();
-      refreshItems({ skipDirtyCheck: true, suppressSelectionSync: true }).catch(showError);
+    Object.entries(panelControls).forEach(([panelId, controls]) => {
+      controls.searchModeGroup?.addEventListener("click", (event) => {
+        const button = event.target.closest("button[data-search-mode]");
+        if (!button) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const nextMode = button.dataset.searchMode === "name" ? "name" : "phrase";
+        if (nextMode === panelSearchMode(panelId)) return;
+        setPanelSearchMode(panelId, nextMode);
+        syncSearchMode(panelId);
+        refreshItems({ skipDirtyCheck: true, suppressSelectionSync: true }).catch(showError);
+      });
+      controls.searchMatchGroup?.addEventListener("click", (event) => {
+        const button = event.target.closest("button[data-search-match]");
+        if (!button) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const nextMode = button.dataset.searchMatch === "exact" ? "exact" : "contains";
+        if (nextMode === panelSearchMatchMode(panelId)) return;
+        setPanelSearchMatchMode(panelId, nextMode);
+        syncSearchMode(panelId);
+        refreshItems({ skipDirtyCheck: true, suppressSelectionSync: true }).catch(showError);
+      });
     });
-    refs.tagSearchMatchGroup?.addEventListener("click", (event) => {
-      const button = event.target.closest("button[data-search-match]");
-      if (!button) return;
-      event.preventDefault();
-      event.stopPropagation();
-      const nextMode = button.dataset.searchMatch === "exact" ? "exact" : "contains";
-      if (nextMode === state.listSearchMatchMode) return;
-      state.listSearchMatchMode = nextMode;
-      saveStored(STORAGE_KEYS.listSearchMatchMode, state.listSearchMatchMode);
-      syncTagSearchMode();
-      refreshItems({ skipDirtyCheck: true, suppressSelectionSync: true }).catch(showError);
-    });
-    refs.listThumbModeSelect?.addEventListener("change", () => {
-      state.listThumbMode = refs.listThumbModeSelect.value === "combined" ? "combined" : "result";
-      saveStored(STORAGE_KEYS.listThumbMode, state.listThumbMode);
-      renderFilters();
-      renderViewer();
-      refreshItems({ skipDirtyCheck: true, suppressSelectionSync: true }).catch(showError);
+    Object.entries(panelControls).forEach(([panelId, controls]) => {
+      controls.thumbModeSelect?.addEventListener("change", () => {
+        const nextMode = controls.thumbModeSelect.value === "combined" ? "combined" : "result";
+        if (panelId === "secondary") {
+          state.secondaryListThumbMode = nextMode;
+          saveStored(STORAGE_KEYS.secondaryListThumbMode, state.secondaryListThumbMode);
+        } else {
+          state.listThumbMode = nextMode;
+          saveStored(STORAGE_KEYS.listThumbMode, state.listThumbMode);
+        }
+        renderFilters();
+        renderViewer();
+        refreshItems({ skipDirtyCheck: true, suppressSelectionSync: true }).catch(showError);
+      });
     });
 
     refs.viewModeGroup.addEventListener("click", (event) => {
@@ -790,7 +896,8 @@ export function createBootstrapModule({
         return;
       }
       if (shouldIgnoreListArrowNavigation(event.target)) return;
-      if (!state.items.length) return;
+      const activeItems = state.selectedPanel === "secondary" && state.splitListOpen ? state.secondaryVisibleItems : state.visibleItems;
+      if (!activeItems?.length) return;
       if (event.key === "ArrowDown") {
         event.preventDefault();
         selectRelativeItem(1).catch(showError);

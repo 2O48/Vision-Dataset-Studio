@@ -5,8 +5,8 @@ from unittest import mock
 
 from PIL import Image
 
-from dataset_projects import ProjectStore
-from dataset_workspace import DatasetWorkspace
+from core.dataset_projects import ProjectStore
+from core.dataset_workspace import DatasetWorkspace
 
 
 class ProjectStoreTests(unittest.TestCase):

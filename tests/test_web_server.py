@@ -1,6 +1,6 @@
 import unittest
 
-from caption_workflow import (
+from server.caption_workflow import (
     VALIDATION_EXISTING_CAPTION,
     apply_caption_result,
     build_modify_prompt,

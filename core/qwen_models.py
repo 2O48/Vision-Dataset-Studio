@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-BASE_DIR = Path(__file__).parent.resolve()
+BASE_DIR = Path(__file__).resolve().parent.parent
 PROJECT_MODELS_DIR = BASE_DIR / "models"
 LEGACY_COMFYUI_LLM_DIR = Path.home() / "ComfyUI" / "models" / "LLM"
 LEGACY_HF_HUB_DIR = PROJECT_MODELS_DIR / "huggingface" / "hub"

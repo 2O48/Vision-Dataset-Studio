@@ -1,8 +1,8 @@
 import unittest
 
-from api_caption_client import _prompt_with_image_name_context as api_prompt_with_context
-from caption_service import _prompt_with_image_name_context as local_prompt_with_context
-from ollama_caption_client import _prompt_with_image_name_context as ollama_prompt_with_context
+from captioning.api_caption_client import _prompt_with_image_name_context as api_prompt_with_context
+from captioning.caption_service import _prompt_with_image_name_context as local_prompt_with_context
+from captioning.ollama_caption_client import _prompt_with_image_name_context as ollama_prompt_with_context
 
 
 class CaptionFileNameContextTests(unittest.TestCase):

@@ -33,16 +33,24 @@
 
 ```text
 README.md                       完整功能说明
-USAGE.md                        当前快速使用说明
+docs/USAGE.md                   当前快速使用说明
 install.sh                      Linux / WSL 预安装脚本
 install.bat                     Windows 预安装脚本
 start.sh                        推荐 Linux / WSL 启动脚本
 run.sh                          固定 127.0.0.1:8100 启动脚本
 run.bat                         Windows 启动脚本
 web_server.py                   Web 服务入口
-web_index.html                  页面结构
-web_app.js                      前端逻辑
-web_styles.css                  页面样式
+server/                         后端入口与后台任务
+core/                           数据集、项目、导出、图像处理等核心逻辑
+captioning/                     本地 / API / Ollama 标注逻辑
+frontend/index.html             页面结构
+frontend/app.js                 前端入口
+frontend/styles.css             页面样式
+frontend/web_*.js               前端功能模块
+scripts/                        启动 / 安装脚本真实实现
+requirements/                   Python 依赖清单
+config/                         环境文件与模板示例
+tools/bootstrap_env.py          虚拟环境维护工具
 ```
 
 ## 3. 首次安装环境
@@ -257,15 +265,14 @@ models/Qwen3.5-4B
 
 ```text
 *.py
-*.html
-*.js
-*.css
+frontend/
 *.sh
 *.bat
 *.yml
 README.md
-USAGE.md
-prompt_templates.example.json
+docs/
+requirements/
+config/prompt_templates.example.json
 ```
 
 按需保留：
@@ -292,7 +299,7 @@ __pycache__/
 如果接收者会通过 Codex 启动，可以让他对 Codex 说：
 
 ```text
-请阅读 USAGE.md，帮我创建环境并启动这个项目。
+请阅读 docs/USAGE.md，帮我创建环境并启动这个项目。
 ```
 
 ## 10. 常见问题

@@ -16,7 +16,9 @@
 - 旧版 Tkinter 入口已归档到 `legacy/`。
 - 已将 `web_server.py` 中的任务逻辑拆到独立模块，并将前端辅助模块统一收拢到 `frontend/` 目录。
 - 已将后端入口与任务调度实现归档到 `server/`，根目录保留兼容启动/导入包装。
-- 当前 `web_app.js` 只保留入口和装配，前端辅助模块包括：
+- 已将数据集、项目、导出、图像处理、模板等核心逻辑收拢到 `core/`。
+- 已将本地 Qwen、OpenAI 兼容 API、Ollama 标注相关逻辑收拢到 `captioning/`。
+- 当前 `frontend/app.js` 只保留入口和装配，前端辅助模块包括：
   - `frontend/web_shared.js`
   - `frontend/web_projects.js`
   - `frontend/web_workspace.js`
@@ -33,8 +35,6 @@
 - server/caption_workflow.py
 - server/image_process_jobs.py
 - web_server.py
-- caption_workflow.py
-- image_process_jobs.py
 - frontend/
 - frontend/web_shared.js
 - frontend/web_caption.js
@@ -45,14 +45,17 @@
 - frontend/web_browser.js
 - frontend/web_shell.js
 - frontend/web_bootstrap.js
-- web_app.js
-- web_index.html
-- dataset_workspace.py
-- dataset_projects.py
-- dataset_image_processor.py
-- dataset_exporter.py
+- frontend/app.js
+- frontend/index.html
+- frontend/styles.css
+- core/dataset_workspace.py
+- core/dataset_projects.py
+- core/dataset_image_processor.py
+- core/dataset_exporter.py
+- captioning/caption_client.py
+- captioning/caption_service.py
 - start.sh
-- bootstrap_env.py
+- tools/bootstrap_env.py
 
 归档代码：
 - legacy/vision_dataset_reviewer.py
@@ -65,7 +68,7 @@
 
 - 从“整块 tag”改成“自然语言 caption + 可拆分短语”模式。
 - 每个短语都能单独编辑、删除、替换。
-- 相关逻辑主要在 dataset_workspace.py。
+- 相关逻辑主要在 core/dataset_workspace.py。
 
 2. Viewer 与 Caption 编辑
 
@@ -195,7 +198,7 @@
 
 2. 环境脚本
 
-- bootstrap_env.py 已实现跨平台 venv 逻辑。
+- tools/bootstrap_env.py 已实现跨平台 venv 逻辑。
 - 已补充常见错误诊断，包括：
   - Python 缺失
   - Python 版本不匹配
@@ -235,4 +238,4 @@
 
 下轮继续时，可以直接告诉模型：
 
-“读取项目根目录 PROJECT_CONTEXT_SUMMARY.txt，然后继续收尾未完成项。优先处理本地 Qwen 旧缓存 / 旧目录清理策略，以及图像处理更细的批次筛选。” 
+“读取 docs/PROJECT_CONTEXT_SUMMARY.txt，然后继续收尾未完成项。优先处理本地 Qwen 旧缓存 / 旧目录清理策略，以及图像处理更细的批次筛选。” 

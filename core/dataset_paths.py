@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 
 
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(__file__).resolve().parent.parent
 DATASETS_DIR = BASE_DIR / "datasets"
 PROJECTS_DIR = DATASETS_DIR / "projects"
 TMP_DIR = DATASETS_DIR / "tmp"

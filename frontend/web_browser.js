@@ -27,11 +27,166 @@ export function createBrowserModule({
     duration: 320,
     easing: "cubic-bezier(0.16, 1, 0.3, 1)",
   };
+  const SPLIT_LIST_ANIMATION_MS = 500;
+  const SPLIT_LIST_GAP = 10;
+  const SPLIT_LIST_COLLAPSED_ICON = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" aria-hidden="true"><rect width="256" height="256" fill="none"/><rect x="48" y="48" width="160" height="160" rx="8" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/><line x1="128" y1="48" x2="128" y2="208" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/><line x1="128" y1="80" x2="208" y2="80" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/><line x1="128" y1="112" x2="208" y2="112" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/><line x1="128" y1="144" x2="208" y2="144" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/><line x1="128" y1="176" x2="208" y2="176" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/></svg>';
+  const SPLIT_LIST_EXPANDED_ICON = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" aria-hidden="true"><rect width="256" height="256" fill="none"/><path fill="currentColor" d="M200,40H56A16,16,0,0,0,40,56V200a16,16,0,0,0,16,16H200a16,16,0,0,0,16-16V56A16,16,0,0,0,200,40ZM56,56h72V200H56Z"/></svg>';
   const itemContextMenu = document.querySelector("#itemContextMenu");
   let itemContextTarget = null;
   let itemContextCloseTimer = 0;
+  let splitListRenderTimer = 0;
   let itemThumbObserver = null;
   let imagePreview = null;
+
+  function listPanels() {
+    return [
+      {
+        id: "primary",
+        itemList: refs.itemList,
+        folderFilters: refs.itemFolderFilters,
+        listStats: refs.listStats,
+      },
+      ...(state.splitListOpen && refs.secondaryItemList
+        ? [{
+            id: "secondary",
+            itemList: refs.secondaryItemList,
+            folderFilters: refs.secondaryItemFolderFilters,
+            listStats: refs.secondaryListStats,
+          }]
+        : []),
+    ].filter((panel) => panel.itemList);
+  }
+
+  function activeListPanelId() {
+    return state.selectedPanel === "secondary" && state.splitListOpen ? "secondary" : "primary";
+  }
+
+  function panelItems(panelId = "primary") {
+    return panelId === "secondary" ? (state.secondaryItems || []) : (state.items || []);
+  }
+
+  function setPanelItems(panelId, items) {
+    if (panelId === "secondary") state.secondaryItems = items || [];
+    else state.items = items || [];
+  }
+
+  function panelVisibleItems(panelId = "primary") {
+    return panelId === "secondary" ? (state.secondaryVisibleItems || []) : (state.visibleItems || []);
+  }
+
+  function setPanelVisibleItems(panelId, items) {
+    if (panelId === "secondary") state.secondaryVisibleItems = items || [];
+    else state.visibleItems = items || [];
+  }
+
+  function panelFilter(panelId = "primary") {
+    return panelId === "secondary" ? (state.secondaryFilter || "all") : (state.filter || "all");
+  }
+
+  function setPanelFilter(panelId, value) {
+    if (panelId === "secondary") state.secondaryFilter = value || "all";
+    else state.filter = value || "all";
+  }
+
+  function panelFolderFilter(panelId = "primary") {
+    return panelId === "secondary" ? (state.secondaryItemFolderFilter || "") : (state.itemFolderFilter || "");
+  }
+
+  function setPanelFolderFilter(panelId, value) {
+    if (panelId === "secondary") state.secondaryItemFolderFilter = value || "";
+    else state.itemFolderFilter = value || "";
+  }
+
+  function panelSegmentQuery(panelId = "primary") {
+    return panelId === "secondary" ? (state.secondarySegmentQuery || "") : (state.segmentQuery || "");
+  }
+
+  function setPanelSegmentQuery(panelId, value) {
+    if (panelId === "secondary") state.secondarySegmentQuery = value || "";
+    else state.segmentQuery = value || "";
+  }
+
+  function panelSearchMode(panelId = "primary") {
+    return panelId === "secondary" ? (state.secondaryListSearchMode || "phrase") : (state.listSearchMode || "phrase");
+  }
+
+  function setPanelSearchMode(panelId, value) {
+    if (panelId === "secondary") state.secondaryListSearchMode = value === "name" ? "name" : "phrase";
+    else state.listSearchMode = value === "name" ? "name" : "phrase";
+  }
+
+  function panelSearchMatchMode(panelId = "primary") {
+    return panelId === "secondary" ? (state.secondaryListSearchMatchMode || "contains") : (state.listSearchMatchMode || "contains");
+  }
+
+  function setPanelSearchMatchMode(panelId, value) {
+    if (panelId === "secondary") state.secondaryListSearchMatchMode = value === "exact" ? "exact" : "contains";
+    else state.listSearchMatchMode = value === "exact" ? "exact" : "contains";
+  }
+
+  function panelThumbMode(panelId = "primary") {
+    return panelId === "secondary" ? (state.secondaryListThumbMode || "result") : (state.listThumbMode || "result");
+  }
+
+  function setPanelThumbMode(panelId, value) {
+    if (panelId === "secondary") state.secondaryListThumbMode = value === "combined" ? "combined" : "result";
+    else state.listThumbMode = value === "combined" ? "combined" : "result";
+  }
+
+  function syncSplitListUi() {
+    const listCard = refs.listPanelShell?.closest(".list-card");
+    const isOpen = Boolean(state.splitListOpen);
+    if (listCard) {
+      if (splitListRenderTimer) {
+        window.clearTimeout(splitListRenderTimer);
+        splitListRenderTimer = 0;
+      }
+      if (isOpen) {
+        if (!listCard.classList.contains("split-rendered")) {
+          const shellRect = refs.listPanelShell?.getBoundingClientRect();
+          const cardRect = listCard.getBoundingClientRect();
+          const workbenchLayout = listCard.closest(".workbench-layout");
+          if (shellRect?.width) {
+            const shellTargetWidth = shellRect.width * 2 + 1 + SPLIT_LIST_GAP * 2;
+            listCard.style.setProperty("--split-list-gap", `${SPLIT_LIST_GAP}px`);
+            listCard.style.setProperty("--split-list-panel-width", `${shellRect.width}px`);
+            listCard.style.setProperty("--split-list-shell-target-width", `${shellTargetWidth}px`);
+            if (cardRect?.width) {
+              const cardInlinePadding = Math.max(0, cardRect.width - shellRect.width);
+              workbenchLayout?.style.setProperty("--split-list-card-width", `${cardRect.width}px`);
+              workbenchLayout?.style.setProperty("--split-list-card-target-width", `${shellTargetWidth + cardInlinePadding}px`);
+            }
+          } else if (cardRect?.width) {
+            workbenchLayout?.style.setProperty("--split-list-card-width", `${cardRect.width}px`);
+            workbenchLayout?.style.setProperty("--split-list-card-target-width", `${cardRect.width * 2 - 13}px`);
+          }
+        }
+        if (!listCard.classList.contains("split-rendered")) {
+          listCard.classList.add("split-rendered");
+        }
+        if (!listCard.classList.contains("split-open")) {
+          window.requestAnimationFrame(() => {
+            if (state.splitListOpen) listCard.classList.add("split-open");
+          });
+        }
+      } else if (listCard.classList.contains("split-rendered") || listCard.classList.contains("split-open")) {
+        listCard.classList.remove("split-open");
+        splitListRenderTimer = window.setTimeout(() => {
+          if (!state.splitListOpen) listCard.classList.remove("split-rendered");
+          splitListRenderTimer = 0;
+        }, SPLIT_LIST_ANIMATION_MS);
+      }
+    }
+    if (refs.secondaryListPanel) {
+      refs.secondaryListPanel.setAttribute("aria-hidden", String(!isOpen));
+    }
+    if (refs.toggleSplitListBtn) {
+      refs.toggleSplitListBtn.innerHTML = isOpen ? SPLIT_LIST_EXPANDED_ICON : SPLIT_LIST_COLLAPSED_ICON;
+      refs.toggleSplitListBtn.setAttribute("aria-pressed", String(isOpen));
+      refs.toggleSplitListBtn.setAttribute("aria-label", isOpen ? "收起双栏缩略图列表" : "展开双栏缩略图列表");
+      refs.toggleSplitListBtn.title = isOpen ? "收起双栏缩略图列表" : "展开双栏缩略图列表";
+    }
+  }
 
   function currentIssueCount() {
     return state.items.reduce((total, item) => {
@@ -86,7 +241,7 @@ export function createBrowserModule({
           }
         }
       },
-      { root: refs.itemList, rootMargin: "0px", threshold: 0.01 },
+      { root: null, rootMargin: "120px", threshold: 0.01 },
     );
     return itemThumbObserver;
   }
@@ -131,6 +286,10 @@ export function createBrowserModule({
       if (event.dataTransfer) event.dataTransfer.effectAllowed = "copyMove";
       slot.closest(".item-card")?.classList.add("dragging");
     });
+    if (canDropItemOnControlRole(role)) {
+      slot.classList.add("item-thumb-drop");
+      bindItemControlDropTarget(slot, item, role);
+    }
     const observer = ensureItemThumbObserver();
     if (observer) {
       observer.observe(slot);
@@ -145,47 +304,62 @@ export function createBrowserModule({
     return roleIndex >= 0 && activeControlCount() >= roleIndex + 1;
   }
 
+  function droppedImageFile(dataTransfer) {
+    return Array.from(dataTransfer?.files || []).find((entry) => (
+      entry.type.startsWith("image/")
+      || /\.(avif|bmp|gif|jpe?g|png|tiff?|webp)$/i.test(entry.name)
+    ));
+  }
+
   function dragEventHasControlImagePayload(event) {
     const types = Array.from(event.dataTransfer?.types || []);
     return types.includes(ITEM_DRAG_TYPE) || types.includes("Files");
   }
 
-  function createItemControlDropSlot(item, role) {
-    const placeholder = document.createElement("div");
-    placeholder.className = "item-thumb-empty item-thumb-drop";
-    placeholder.dataset.dropRole = role;
-    placeholder.dataset.dropName = item.name;
-    placeholder.textContent = (ROLE_LABELS[role] || role).replace(/\s+/g, "");
-    placeholder.title = `拖入图片作为${ROLE_LABELS[role] || role}`;
-    if (!canDropItemOnControlRole(role)) return placeholder;
-
-    placeholder.addEventListener("dragover", (event) => {
+  function bindItemControlDropTarget(target, item, role) {
+    if (!target || !item || !canDropItemOnControlRole(role)) return;
+    target.dataset.dropRole = role;
+    target.dataset.dropName = item.name;
+    target.title = `拖入图片替换${ROLE_LABELS[role] || role}`;
+    target.addEventListener("dragover", (event) => {
       if (!dragEventHasControlImagePayload(event)) return;
       event.preventDefault();
-      placeholder.classList.add("drag-over");
+      target.classList.add("drag-over");
       if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
     });
-    placeholder.addEventListener("dragleave", (event) => {
-      if (placeholder.contains(event.relatedTarget)) return;
-      placeholder.classList.remove("drag-over");
+    target.addEventListener("dragleave", (event) => {
+      if (target.contains(event.relatedTarget)) return;
+      target.classList.remove("drag-over");
     });
-    placeholder.addEventListener("drop", (event) => {
+    target.addEventListener("drop", (event) => {
       const sourceName = event.dataTransfer?.getData(ITEM_DRAG_TYPE) || "";
       const sourceRole = event.dataTransfer?.getData(ITEM_ROLE_DRAG_TYPE) || "result";
-      const file = Array.from(event.dataTransfer?.files || []).find((entry) => entry.type.startsWith("image/") || /\.(avif|bmp|gif|jpe?g|png|tiff?|webp)$/i.test(entry.name));
+      const file = droppedImageFile(event.dataTransfer);
       if (!sourceName && !file) return;
       event.preventDefault();
       event.stopPropagation();
-      placeholder.classList.remove("drag-over");
+      target.classList.remove("drag-over");
       if (sourceName) assignItemControlImage(sourceName, item.name, role, sourceRole).catch(showError || console.error);
       else uploadControlImageFile(file, item.name, role).catch(showError || console.error);
     });
+  }
+
+  function createItemControlDropSlot(item, role) {
+    const placeholder = document.createElement("div");
+    placeholder.className = "item-thumb-empty item-thumb-drop";
+    placeholder.textContent = (ROLE_LABELS[role] || role).replace(/\s+/g, "");
+    bindItemControlDropTarget(placeholder, item, role);
     return placeholder;
   }
 
   function activeControlCount() {
-    const rawCount = refs.controlCount?.value ?? state.workspace?.settings?.control_count ?? 1;
+    const rawCount = state.workspace?.settings?.control_count ?? refs.controlCount?.value ?? 1;
     const count = Number(rawCount);
+    return Math.max(0, Math.min(3, Number.isFinite(count) ? count : 1));
+  }
+
+  function formControlCount() {
+    const count = Number(refs.controlCount?.value ?? 1);
     return Math.max(0, Math.min(3, Number.isFinite(count) ? count : 1));
   }
 
@@ -216,24 +390,40 @@ export function createBrowserModule({
   }
 
   function renderFilterSummary() {
-    if (!refs.listThumbModeSelect) return;
     const showCombined = activeControlCount() > 0;
     if (!showCombined && state.listThumbMode === "combined") {
       state.listThumbMode = "result";
       saveStored(STORAGE_KEYS.listThumbMode, state.listThumbMode);
     }
-    const currentValue = state.listThumbMode === "combined" && showCombined ? "combined" : "result";
-    refs.listThumbModeSelect.replaceChildren(
-      new Option("仅结果图", "result"),
-      ...(showCombined ? [new Option("控制图与结果图", "combined")] : []),
-    );
-    refs.listThumbModeSelect.value = currentValue;
+    const selects = [
+      ["primary", refs.listThumbModeSelect],
+      ["secondary", refs.secondaryListThumbModeSelect],
+    ];
+    for (const [panelId, select] of selects.filter(([, select]) => Boolean(select))) {
+      if (!showCombined && panelThumbMode(panelId) === "combined") {
+        setPanelThumbMode(panelId, "result");
+        saveStored(panelId === "secondary" ? STORAGE_KEYS.secondaryListThumbMode : STORAGE_KEYS.listThumbMode, "result");
+      }
+      const currentValue = panelThumbMode(panelId) === "combined" && showCombined ? "combined" : "result";
+      select.replaceChildren(
+        new Option("仅结果图", "result"),
+        ...(showCombined ? [new Option("控制图与结果图", "combined")] : []),
+      );
+      select.value = currentValue;
+    }
   }
 
   function renderFilters() {
-    refs.filterGroup.querySelectorAll("button").forEach((button) => {
-      button.classList.toggle("active", button.dataset.filter === state.filter);
-    });
+    syncSplitListUi();
+    const groups = [
+      ["primary", refs.filterGroup],
+      ["secondary", refs.secondaryFilterGroup],
+    ];
+    for (const [panelId, group] of groups.filter(([, group]) => Boolean(group))) {
+      group.querySelectorAll("button").forEach((button) => {
+        button.classList.toggle("active", button.dataset.filter === panelFilter(panelId));
+      });
+    }
     renderFilterSummary();
   }
 
@@ -258,8 +448,8 @@ export function createBrowserModule({
     return parts.length ? parts[parts.length - 1] : "";
   }
 
-  function displayItemListName(name) {
-    return state.itemFolderFilter ? displayItemBasename(name) : displayItemName(name);
+  function displayItemListName(name, panelId = "primary") {
+    return panelFolderFilter(panelId) ? displayItemBasename(name) : displayItemName(name);
   }
 
   function appendHighlightedText(parent, text, query) {
@@ -300,14 +490,15 @@ export function createBrowserModule({
     return parts.join("/");
   }
 
-  function itemFolders() {
-    return [...new Set(state.items.map((item) => itemFolder(item.name)).filter(Boolean))]
+  function itemFolders(panelId = "primary") {
+    return [...new Set(panelItems(panelId).map((item) => itemFolder(item.name)).filter(Boolean))]
       .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
   }
 
-  function filteredItems() {
-    const folder = state.itemFolderFilter || "";
-    return folder ? state.items.filter((item) => itemFolder(item.name) === folder) : [...state.items];
+  function filteredItems(panelId = "primary") {
+    const folder = panelFolderFilter(panelId);
+    const items = panelItems(panelId);
+    return folder ? items.filter((item) => itemFolder(item.name) === folder) : [...items];
   }
 
   function batchSelection() {
@@ -316,7 +507,8 @@ export function createBrowserModule({
   }
 
   function visibleItemNameSet() {
-    return new Set((state.visibleItems || []).map((item) => item.name));
+    const active = activeListPanelId();
+    return new Set(panelVisibleItems(active).map((item) => item.name));
   }
 
   function selectedBatchNames() {
@@ -369,27 +561,28 @@ export function createBrowserModule({
     }
   }
 
-  function renderFolderFilters() {
-    if (!refs.itemFolderFilters) return;
-    const folders = itemFolders();
-    if (state.itemFolderFilter && !folders.includes(state.itemFolderFilter)) {
-      state.itemFolderFilter = "";
+  function renderFolderFilters(panel) {
+    if (!panel?.folderFilters) return;
+    const panelId = panel.id || "primary";
+    const folders = itemFolders(panelId);
+    if (panelFolderFilter(panelId) && !folders.includes(panelFolderFilter(panelId))) {
+      setPanelFolderFilter(panelId, "");
     }
-    refs.itemFolderFilters.textContent = "";
+    panel.folderFilters.textContent = "";
 
     const allButton = document.createElement("button");
     allButton.type = "button";
-    allButton.className = `folder-filter-chip all${state.itemFolderFilter ? "" : " active"}`;
+    allButton.className = `folder-filter-chip all${panelFolderFilter(panelId) ? "" : " active"}`;
     allButton.textContent = "全部";
     allButton.addEventListener("click", () => {
-      state.itemFolderFilter = "";
+      setPanelFolderFilter(panelId, "");
       renderItemList();
-      const next = state.visibleItems[0];
-      if (next && !state.visibleItems.some((item) => item.name === state.selectedName)) {
-        selectItem(next.name, false).catch(showError || console.error);
+      const next = panelVisibleItems(panelId)[0];
+      if (next && !panelVisibleItems(panelId).some((item) => item.name === state.selectedName)) {
+        selectItem(next.name, false, { panelId }).catch(showError || console.error);
       }
     });
-    refs.itemFolderFilters.appendChild(allButton);
+    panel.folderFilters.appendChild(allButton);
 
     if (!folders.length) return;
 
@@ -398,15 +591,15 @@ export function createBrowserModule({
     for (const folder of folders) {
       const button = document.createElement("button");
       button.type = "button";
-      button.className = `folder-filter-chip${state.itemFolderFilter === folder ? " active" : ""}`;
+      button.className = `folder-filter-chip${panelFolderFilter(panelId) === folder ? " active" : ""}`;
       button.dataset.folder = folder;
       button.textContent = folder;
       button.addEventListener("click", () => {
-        state.itemFolderFilter = folder;
+        setPanelFolderFilter(panelId, folder);
         renderItemList();
-        const next = state.visibleItems[0];
-        if (next && !state.visibleItems.some((item) => item.name === state.selectedName)) {
-          selectItem(next.name, false).catch(showError || console.error);
+        const next = panelVisibleItems(panelId)[0];
+        if (next && !panelVisibleItems(panelId).some((item) => item.name === state.selectedName)) {
+          selectItem(next.name, false, { panelId }).catch(showError || console.error);
         }
       });
       button.addEventListener("dragover", (event) => {
@@ -427,7 +620,7 @@ export function createBrowserModule({
       });
       group.appendChild(button);
     }
-    refs.itemFolderFilters.appendChild(group);
+    panel.folderFilters.appendChild(group);
   }
 
   async function moveItemToFolder(name, folder) {
@@ -436,10 +629,10 @@ export function createBrowserModule({
     if (!(await confirmDiscardCaptionChanges())) return;
     const data = await apiPost("/api/item/move-folder", { name, folder });
     if (data.workspace) applyWorkspaceSummary(data.workspace);
-    state.itemFolderFilter = folder;
+    setPanelFolderFilter(activeListPanelId(), folder);
     setAiStatusLine(`已移动到子文件夹：${folder}`);
     await refreshItems({ skipDirtyCheck: true, suppressSelectionSync: true });
-    await selectItem(data.new_name || name, true, { skipDirtyCheck: true });
+    await selectItem(data.new_name || name, true, { skipDirtyCheck: true, panelId: activeListPanelId() });
   }
 
   function closeItemContextMenu() {
@@ -527,7 +720,7 @@ export function createBrowserModule({
     if (data.workspace) applyWorkspaceSummary(data.workspace);
     setAiStatusLine(`已克隆：${displayItemName(item.name)} -> ${displayItemName(data.new_name || "")}`);
     await refreshItems({ skipDirtyCheck: true, suppressSelectionSync: true });
-    await selectItem(data.new_name || item.name, true, { skipDirtyCheck: true });
+    await selectItem(data.new_name || item.name, true, { skipDirtyCheck: true, panelId: activeListPanelId() });
   }
 
   async function cloneBatchItems(names) {
@@ -544,7 +737,7 @@ export function createBrowserModule({
     setAiStatusLine(`已克隆 ${targets.length} 项`);
     await refreshItems({ skipDirtyCheck: true, suppressSelectionSync: true });
     const nextName = created[created.length - 1] || targets[0];
-    if (nextName) await selectItem(nextName, true, { skipDirtyCheck: true });
+    if (nextName) await selectItem(nextName, true, { skipDirtyCheck: true, panelId: activeListPanelId() });
   }
 
   async function trashItemFiles(item) {
@@ -556,9 +749,9 @@ export function createBrowserModule({
     if (data.workspace) applyWorkspaceSummary(data.workspace);
     setAiStatusLine(`已移到系统回收站：${displayItemName(item.name)}`);
     await refreshItems({ skipDirtyCheck: true, suppressSelectionSync: true });
-    const next = state.visibleItems[0];
+    const next = panelVisibleItems(activeListPanelId())[0];
     if (next) {
-      await selectItem(next.name, true, { skipDirtyCheck: true });
+      await selectItem(next.name, true, { skipDirtyCheck: true, panelId: activeListPanelId() });
     } else {
       state.selectedName = "";
       state.currentItem = null;
@@ -583,9 +776,9 @@ export function createBrowserModule({
     clearBatchSelection();
     setAiStatusLine(`已移到系统回收站：${targets.length} 项`);
     await refreshItems({ skipDirtyCheck: true, suppressSelectionSync: true });
-    const next = state.visibleItems[0];
+    const next = panelVisibleItems(activeListPanelId())[0];
     if (next) {
-      await selectItem(next.name, true, { skipDirtyCheck: true });
+      await selectItem(next.name, true, { skipDirtyCheck: true, panelId: activeListPanelId() });
     } else {
       state.selectedName = "";
       state.currentItem = null;
@@ -627,12 +820,13 @@ export function createBrowserModule({
     document.addEventListener("keydown", (event) => {
       if (event.key === "Escape") closeItemContextMenu();
       const isSelectAll = (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a";
-      if (!isSelectAll || shouldIgnoreListArrowNavigation(event.target) || !state.visibleItems?.length) return;
+      const activeItems = panelVisibleItems(activeListPanelId());
+      if (!isSelectAll || shouldIgnoreListArrowNavigation(event.target) || !activeItems.length) return;
       event.preventDefault();
-      state.visibleItems.forEach((item) => batchSelection().add(item.name));
-      state.batchSelectionAnchor = state.visibleItems[0]?.name || "";
+      activeItems.forEach((item) => batchSelection().add(item.name));
+      state.batchSelectionAnchor = activeItems[0]?.name || "";
       renderItemList();
-      setAiStatusLine(`已选择当前列表 ${state.visibleItems.length} 项`);
+      setAiStatusLine(`已选择当前列表 ${activeItems.length} 项`);
     });
     window.addEventListener("resize", closeItemContextMenu);
     document.addEventListener("scroll", closeItemContextMenu, true);
@@ -755,29 +949,34 @@ export function createBrowserModule({
 
   function scrollSelectedItemIntoView(block = "center") {
     if (!state.selectedName) return;
-    const activeCard = refs.itemList.querySelector(`.item-card[data-name="${CSS.escape(state.selectedName)}"]`);
-    if (!activeCard) return;
-    if (block === "nearest") {
-      const listRect = refs.itemList.getBoundingClientRect();
-      const cardRect = activeCard.getBoundingClientRect();
-      const clippedTop = cardRect.top < listRect.top;
-      const clippedBottom = cardRect.bottom > listRect.bottom;
-      if (!clippedTop && !clippedBottom) return;
-      if (clippedTop) {
-        refs.itemList.scrollTop -= listRect.top - cardRect.top;
-      } else {
-        refs.itemList.scrollTop += cardRect.bottom - listRect.bottom;
+    for (const panel of listPanels()) {
+      if (panel.id !== activeListPanelId()) continue;
+      const activeCard = panel.itemList.querySelector(`.item-card[data-name="${CSS.escape(state.selectedName)}"]`);
+      if (!activeCard) continue;
+      if (block === "nearest") {
+        const listRect = panel.itemList.getBoundingClientRect();
+        const cardRect = activeCard.getBoundingClientRect();
+        const clippedTop = cardRect.top < listRect.top;
+        const clippedBottom = cardRect.bottom > listRect.bottom;
+        if (!clippedTop && !clippedBottom) continue;
+        if (clippedTop) {
+          panel.itemList.scrollTop -= listRect.top - cardRect.top;
+        } else {
+          panel.itemList.scrollTop += cardRect.bottom - listRect.bottom;
+        }
+        continue;
       }
-      return;
+      activeCard.scrollIntoView({ block, inline: "nearest" });
     }
-    activeCard.scrollIntoView({ block, inline: "nearest" });
   }
 
   function updateItemCardActiveState() {
-    refs.itemList.querySelectorAll(".item-card").forEach((card) => {
-      card.classList.toggle("active", card.dataset.name === state.selectedName);
-      card.classList.toggle("multi-selected", batchSelection().has(card.dataset.name));
-    });
+    for (const panel of listPanels()) {
+      panel.itemList.querySelectorAll(".item-card").forEach((card) => {
+        card.classList.toggle("active", panel.id === activeListPanelId() && card.dataset.name === state.selectedName);
+        card.classList.toggle("multi-selected", batchSelection().has(card.dataset.name));
+      });
+    }
   }
 
   function updateViewerImageFit(img) {
@@ -1155,7 +1354,7 @@ export function createBrowserModule({
     if (data.workspace) applyWorkspaceSummary(data.workspace);
     state.imageRefreshToken = `${Date.now()}-assign-${targetRole}-${targetName}`;
     await refreshItems({ skipDirtyCheck: true });
-    setAiStatusLine?.(`已把 ${sourceName} 添加为 ${targetName} 的 ${ROLE_LABELS[targetRole] || targetRole}`);
+    setAiStatusLine?.(`已把 ${sourceName} 设置为 ${targetName} 的 ${ROLE_LABELS[targetRole] || targetRole}`);
   }
 
   function arrayBufferToBase64(buffer) {
@@ -1179,128 +1378,138 @@ export function createBrowserModule({
     if (data.workspace) applyWorkspaceSummary(data.workspace);
     state.imageRefreshToken = `${Date.now()}-upload-${targetRole}-${targetName}`;
     await refreshItems({ skipDirtyCheck: true });
-    setAiStatusLine?.(`已把 ${file.name || "拖入图片"} 添加为 ${targetName} 的 ${ROLE_LABELS[targetRole] || targetRole}`);
+    setAiStatusLine?.(`已把 ${file.name || "拖入图片"} 设置为 ${targetName} 的 ${ROLE_LABELS[targetRole] || targetRole}`);
   }
 
   function renderItemList() {
     ensureItemContextMenuEvents();
-    renderFolderFilters();
-    const items = filteredItems();
-    state.visibleItems = items;
+    const scrollTops = new Map(listPanels().map((panel) => [panel.id, panel.itemList.scrollTop]));
+    setPanelVisibleItems("primary", filteredItems("primary"));
+    setPanelVisibleItems("secondary", filteredItems("secondary"));
     pruneBatchSelection();
     disconnectItemThumbObserver();
-    refs.itemList.textContent = "";
-    refs.listStats.textContent = state.itemFolderFilter ? `${items.length}/${state.items.length} 项` : `${items.length} 项`;
     renderWorkspaceSummary();
-    if (refs.metricFiltered) refs.metricFiltered.textContent = `${items.length || 0}`;
+    if (refs.metricFiltered) refs.metricFiltered.textContent = `${panelVisibleItems("primary").length || 0}`;
 
-    for (const item of items) {
-      const thumbRoles = state.listThumbMode === "combined" && activeControlCount() > 0
-        ? [...activeControlRoles(), "result"]
-        : ["result"];
-      const card = document.createElement("article");
-      card.className = `item-card${item.name === state.selectedName ? " active" : ""}${batchSelection().has(item.name) ? " multi-selected" : ""}${thumbRoles.length > 1 ? " multi-thumb" : ""}`;
-      card.dataset.name = item.name;
-      card.draggable = true;
-      card.title = "双击重命名图片";
-      card.addEventListener("dragstart", (event) => {
-        if (event.target.closest(".item-rename-input")) {
-          event.preventDefault();
-          return;
-        }
-        event.dataTransfer?.setData(ITEM_DRAG_TYPE, item.name);
-        event.dataTransfer?.setData(ITEM_ROLE_DRAG_TYPE, "result");
-        event.dataTransfer?.setData("text/plain", item.name);
-        if (event.dataTransfer) event.dataTransfer.effectAllowed = "copyMove";
-        card.classList.add("dragging");
-      });
-      card.addEventListener("dragend", () => {
-        card.classList.remove("dragging");
-        refs.itemFolderFilters?.querySelectorAll(".drag-over").forEach((node) => node.classList.remove("drag-over"));
-        refs.itemList?.querySelectorAll(".item-thumb-drop.drag-over").forEach((node) => node.classList.remove("drag-over"));
-        clearViewerRoleDragClasses();
-      });
-      const thumbs = document.createElement("div");
-      thumbs.className = thumbRoles.length > 1 ? "item-thumb-grid" : "item-thumb-single";
-      thumbs.style.setProperty("--thumb-count", String(thumbRoles.length));
-      for (const role of thumbRoles) {
-        if (item.exists[role]) {
-          thumbs.appendChild(createItemThumbSlot(item, role));
-        } else {
-          thumbs.appendChild(
-            thumbRoles.length > 1 && canDropItemOnControlRole(role)
-              ? createItemControlDropSlot(item, role)
-              : (() => {
-                  const placeholder = document.createElement("div");
-                  placeholder.className = "item-thumb-empty";
-                  placeholder.textContent = thumbRoles.length > 1 ? (ROLE_LABELS[role] || role).replace(/\s+/g, "") : "无结果";
-                  return placeholder;
-                })(),
-          );
-        }
-      }
-      card.appendChild(thumbs);
+    for (const panel of listPanels()) {
+      const panelId = panel.id || "primary";
+      const items = panelVisibleItems(panelId);
+      renderFolderFilters(panel);
+      panel.itemList.textContent = "";
+      if (panel.listStats) panel.listStats.textContent = panelFolderFilter(panelId) ? `${items.length}/${panelItems(panelId).length} 项` : `${items.length} 项`;
 
-      const right = document.createElement("div");
-      right.className = "item-card-main";
-      const title = document.createElement("div");
-      title.className = "item-title";
-      appendHighlightedText(title, displayItemListName(item.name), state.listSearchMode === "name" ? state.segmentQuery : "");
-      right.appendChild(title);
-
-      const flags = document.createElement("div");
-      flags.className = "item-flags";
-      for (const [text, cls] of itemFlag(item)) {
-        const flag = document.createElement("span");
-        flag.className = `flag ${cls}`;
-        flag.textContent = text;
-        flags.appendChild(flag);
-      }
-      right.appendChild(flags);
-      card.appendChild(right);
-      card.addEventListener("click", (event) => {
-        if (event.target.closest(".item-rename-input")) return;
-        if (event.shiftKey) {
-          event.preventDefault();
-          const count = addBatchSelectionRange(item.name);
-          updateItemCardActiveState();
-          setAiStatusLine(`已选择 ${count} 项`);
-          return;
-        }
-        if (event.ctrlKey || event.metaKey) {
-          event.preventDefault();
-          if (!batchSelection().size && state.selectedName && state.selectedName !== item.name) {
-            batchSelection().add(state.selectedName);
+      for (const item of items) {
+        const thumbRoles = panelThumbMode(panelId) === "combined" && activeControlCount() > 0
+          ? [...activeControlRoles(), "result"]
+          : ["result"];
+        const card = document.createElement("article");
+        card.className = `item-card${panelId === activeListPanelId() && item.name === state.selectedName ? " active" : ""}${batchSelection().has(item.name) ? " multi-selected" : ""}${thumbRoles.length > 1 ? " multi-thumb" : ""}`;
+        card.dataset.name = item.name;
+        card.draggable = true;
+        card.title = "双击重命名图片";
+        card.addEventListener("dragstart", (event) => {
+          if (event.target.closest(".item-rename-input")) {
+            event.preventDefault();
+            return;
           }
-          toggleBatchSelection(item.name);
+          event.dataTransfer?.setData(ITEM_DRAG_TYPE, item.name);
+          event.dataTransfer?.setData(ITEM_ROLE_DRAG_TYPE, "result");
+          event.dataTransfer?.setData("text/plain", item.name);
+          if (event.dataTransfer) event.dataTransfer.effectAllowed = "copyMove";
+          card.classList.add("dragging");
+        });
+        card.addEventListener("dragend", () => {
+          card.classList.remove("dragging");
+          for (const currentPanel of listPanels()) {
+            currentPanel.folderFilters?.querySelectorAll(".drag-over").forEach((node) => node.classList.remove("drag-over"));
+            currentPanel.itemList?.querySelectorAll(".item-thumb-drop.drag-over").forEach((node) => node.classList.remove("drag-over"));
+          }
+          clearViewerRoleDragClasses();
+        });
+        const thumbs = document.createElement("div");
+        thumbs.className = thumbRoles.length > 1 ? "item-thumb-grid" : "item-thumb-single";
+        thumbs.style.setProperty("--thumb-count", String(thumbRoles.length));
+        for (const role of thumbRoles) {
+          if (item.exists[role]) {
+            thumbs.appendChild(createItemThumbSlot(item, role));
+          } else {
+            thumbs.appendChild(
+              thumbRoles.length > 1 && canDropItemOnControlRole(role)
+                ? createItemControlDropSlot(item, role)
+                : (() => {
+                    const placeholder = document.createElement("div");
+                    placeholder.className = "item-thumb-empty";
+                    placeholder.textContent = thumbRoles.length > 1 ? (ROLE_LABELS[role] || role).replace(/\s+/g, "") : "无结果";
+                    return placeholder;
+                  })(),
+            );
+          }
+        }
+        card.appendChild(thumbs);
+
+        const right = document.createElement("div");
+        right.className = "item-card-main";
+        const title = document.createElement("div");
+        title.className = "item-title";
+        appendHighlightedText(title, displayItemListName(item.name, panelId), panelSearchMode(panelId) === "name" ? panelSegmentQuery(panelId) : "");
+        right.appendChild(title);
+
+        const flags = document.createElement("div");
+        flags.className = "item-flags";
+        for (const [text, cls] of itemFlag(item)) {
+          const flag = document.createElement("span");
+          flag.className = `flag ${cls}`;
+          flag.textContent = text;
+          flags.appendChild(flag);
+        }
+        right.appendChild(flags);
+        card.appendChild(right);
+        card.addEventListener("click", (event) => {
+          if (event.target.closest(".item-rename-input")) return;
+          state.selectedPanel = panelId;
+          if (event.shiftKey) {
+            event.preventDefault();
+            const count = addBatchSelectionRange(item.name);
+            updateItemCardActiveState();
+            setAiStatusLine(`已选择 ${count} 项`);
+            return;
+          }
+          if (event.ctrlKey || event.metaKey) {
+            event.preventDefault();
+            if (!batchSelection().size && state.selectedName && state.selectedName !== item.name) {
+              batchSelection().add(state.selectedName);
+            }
+            toggleBatchSelection(item.name);
+            state.batchSelectionAnchor = item.name;
+            updateItemCardActiveState();
+            setAiStatusLine(`已选择 ${selectedBatchNames().length} 项`);
+            return;
+          }
+          if (selectedBatchNames().length) {
+            clearBatchSelection();
+            updateItemCardActiveState();
+          }
           state.batchSelectionAnchor = item.name;
-          updateItemCardActiveState();
-          setAiStatusLine(`已选择 ${selectedBatchNames().length} 项`);
-          return;
-        }
-        if (selectedBatchNames().length) {
-          clearBatchSelection();
-          updateItemCardActiveState();
-        }
-        state.batchSelectionAnchor = item.name;
-        if (event.detail > 1) {
+          if (event.detail > 1) {
+            event.preventDefault();
+            beginInlineItemRename(item, title).catch(showError || console.error);
+            return;
+          }
+          selectItem(item.name, false, { panelId }).catch(showError || console.error);
+        });
+        card.addEventListener("dblclick", (event) => {
+          if (event.target.closest(".item-rename-input")) return;
           event.preventDefault();
+          event.stopPropagation();
           beginInlineItemRename(item, title).catch(showError || console.error);
-          return;
-        }
-        selectItem(item.name, false).catch(showError || console.error);
-      });
-      card.addEventListener("dblclick", (event) => {
-        if (event.target.closest(".item-rename-input")) return;
-        event.preventDefault();
-        event.stopPropagation();
-        beginInlineItemRename(item, title).catch(showError || console.error);
-      });
-      card.addEventListener("contextmenu", (event) => {
-        if (event.target.closest(".item-rename-input")) return;
-        openItemContextMenu(event, item, title);
-      });
-      refs.itemList.appendChild(card);
+        });
+        card.addEventListener("contextmenu", (event) => {
+          if (event.target.closest(".item-rename-input")) return;
+          openItemContextMenu(event, item, title);
+        });
+        panel.itemList.appendChild(card);
+      }
+      panel.itemList.scrollTop = scrollTops.get(panelId) || 0;
     }
 
     scrollSelectedItemIntoView("nearest");
@@ -1308,8 +1517,9 @@ export function createBrowserModule({
 
   function renderSelectionSummary() {
     const item = state.currentItem;
-    const selectedIndex = item ? state.items.findIndex((candidate) => candidate.name === item.name) + 1 : 0;
-    refs.focusStat.textContent = selectedIndex > 0 ? `${selectedIndex}/${state.items.length || 0}` : `0/${state.items.length || 0}`;
+    const activeItems = panelItems(activeListPanelId());
+    const selectedIndex = item ? activeItems.findIndex((candidate) => candidate.name === item.name) + 1 : 0;
+    refs.focusStat.textContent = selectedIndex > 0 ? `${selectedIndex}/${activeItems.length || 0}` : `0/${activeItems.length || 0}`;
     if (refs.overviewCurrentName) refs.overviewCurrentName.textContent = item ? item.name : "未选择图片";
     if (refs.overviewCurrentMeta) {
       refs.overviewCurrentMeta.textContent = item
@@ -1386,7 +1596,6 @@ export function createBrowserModule({
     return Boolean(
       state.currentItem
       && canDropItemOnControlRole(targetRole)
-      && !state.currentItem.exists?.[targetRole],
     );
   }
 
@@ -1433,7 +1642,7 @@ export function createBrowserModule({
       const types = Array.from(event.dataTransfer?.types || []);
       if (!card) return;
       const targetRole = card.dataset.role || "";
-      if (types.includes(ITEM_DRAG_TYPE) && canAssignListItemToViewerControl(targetRole)) {
+      if ((types.includes(ITEM_DRAG_TYPE) || types.includes("Files")) && canAssignListItemToViewerControl(targetRole)) {
         event.preventDefault();
         if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
         refs.viewerGrid.querySelectorAll(".role-drop-target").forEach((node) => {
@@ -1463,12 +1672,18 @@ export function createBrowserModule({
       const sourceName = event.dataTransfer?.getData(ITEM_DRAG_TYPE) || "";
       const sourceItemRole = event.dataTransfer?.getData(ITEM_ROLE_DRAG_TYPE) || "result";
       const sourceRole = event.dataTransfer?.getData(VIEWER_ROLE_DRAG_TYPE) || "";
+      const file = droppedImageFile(event.dataTransfer);
       const targetRole = card.dataset.role || "";
       state.viewerRoleDragging = "";
       clearViewerRoleDragClasses();
       if (sourceName && canAssignListItemToViewerControl(targetRole)) {
         event.preventDefault();
         assignItemControlImage(sourceName, state.currentItem.name, targetRole, sourceItemRole).catch(showError || console.error);
+        return;
+      }
+      if (file && canAssignListItemToViewerControl(targetRole)) {
+        event.preventDefault();
+        uploadControlImageFile(file, state.currentItem.name, targetRole).catch(showError || console.error);
         return;
       }
       if (!canSwapViewerRoles(sourceRole, targetRole)) return;
@@ -1557,23 +1772,31 @@ export function createBrowserModule({
 
   async function refreshItems(options = {}) {
     const { skipDirtyCheck = false, suppressSelectionSync = false } = options;
-    const data = await apiGet("/api/items", {
-      filter: state.filter,
-      tag: state.segmentQuery,
-      search_mode: state.listSearchMode === "name" ? "name" : "phrase",
-      match_mode: state.listSearchMatchMode === "exact" ? "exact" : "contains",
+    const loadPanelItems = async (panelId) => apiGet("/api/items", {
+      filter: panelFilter(panelId),
+      tag: panelSegmentQuery(panelId),
+      search_mode: panelSearchMode(panelId) === "name" ? "name" : "phrase",
+      match_mode: panelSearchMatchMode(panelId) === "exact" ? "exact" : "contains",
     });
+    const data = await loadPanelItems("primary");
     if (data.workspace) state.workspace = data.workspace;
-    state.items = data.items;
+    setPanelItems("primary", data.items || []);
     state.itemStats = data.stats;
     state.globalSegments = data.global_segments || data.global_tags || [];
+    if (state.splitListOpen) {
+      const secondaryData = await loadPanelItems("secondary");
+      setPanelItems("secondary", secondaryData.items || []);
+    }
     renderFilters();
     renderItemList();
     renderGlobalTags();
     renderWorkspaceSummary();
 
-    if (!state.items.length || !state.visibleItems.length) {
+    const activeVisibleItems = panelVisibleItems(activeListPanelId());
+    if (!activeVisibleItems.length) {
       state.selectedName = "";
+      if (activeListPanelId() === "secondary") state.secondarySelectedName = "";
+      else state.primarySelectedName = "";
       state.currentItem = null;
       setCaptionEditorText("", { markSaved: true });
       renderViewer();
@@ -1585,18 +1808,21 @@ export function createBrowserModule({
       return;
     }
 
-    const stillExists = state.visibleItems.some((item) => item.name === state.selectedName);
-    const nextName = stillExists ? state.selectedName : state.visibleItems[0].name;
-    await selectItem(nextName, !stillExists, { skipDirtyCheck });
+    const stillExists = activeVisibleItems.some((item) => item.name === state.selectedName);
+    const nextName = stillExists ? state.selectedName : activeVisibleItems[0].name;
+    await selectItem(nextName, !stillExists, { skipDirtyCheck, panelId: activeListPanelId() });
   }
 
   async function selectItem(name, rerenderList = true, options = {}) {
-    const { skipDirtyCheck = false } = options;
+    const { skipDirtyCheck = false, panelId = activeListPanelId() } = options;
     if (!skipDirtyCheck && name !== state.selectedName) {
       const ok = await confirmDiscardCaptionChanges();
       if (!ok) return;
     }
+    state.selectedPanel = panelId === "secondary" ? "secondary" : "primary";
     state.selectedName = name;
+    if (state.selectedPanel === "secondary") state.secondarySelectedName = name;
+    else state.primarySelectedName = name;
     if (!rerenderList) updateItemCardActiveState();
     const data = await apiGet("/api/item", { name });
     state.currentItem = data.item;
@@ -1608,16 +1834,17 @@ export function createBrowserModule({
   }
 
   async function selectRelativeItem(offset) {
-    if (!state.items.length) return;
-    const currentIndex = state.items.findIndex((item) => item.name === state.selectedName);
+    const activeItems = panelVisibleItems(activeListPanelId());
+    if (!activeItems.length) return;
+    const currentIndex = activeItems.findIndex((item) => item.name === state.selectedName);
     const baseIndex = currentIndex >= 0 ? currentIndex : 0;
-    const nextIndex = Math.max(0, Math.min(state.items.length - 1, baseIndex + offset));
-    const nextItem = state.items[nextIndex];
+    const nextIndex = Math.max(0, Math.min(activeItems.length - 1, baseIndex + offset));
+    const nextItem = activeItems[nextIndex];
     if (!nextItem || nextItem.name === state.selectedName) {
       scrollSelectedItemIntoView("nearest");
       return;
     }
-    await selectItem(nextItem.name);
+    await selectItem(nextItem.name, true, { panelId: activeListPanelId() });
     scrollSelectedItemIntoView("nearest");
   }
 
@@ -1701,47 +1928,57 @@ export function createBrowserModule({
   }
 
   function updateControlFieldVisibility() {
-    const count = activeControlCount();
+    const formCount = formControlCount();
+    const loadedCount = activeControlCount();
     const previousCount = Number(state.workspace?.settings?.control_count ?? refs.controlCount.dataset.previousCount ?? 1);
     document.querySelectorAll("[data-control-field]").forEach((node) => {
       const roleIndex = Number(node.getAttribute("data-control-field"));
-      node.style.display = roleIndex <= count ? "" : "none";
+      node.style.display = roleIndex <= formCount ? "" : "none";
     });
     document.querySelectorAll("[data-merge-control-field]").forEach((node) => {
       const roleIndex = Number(node.getAttribute("data-merge-control-field"));
-      node.style.display = roleIndex <= count ? "" : "none";
+      node.style.display = roleIndex <= formCount ? "" : "none";
     });
 
-    refs.filterGroup.querySelectorAll("button[data-filter]").forEach((button) => {
-      const filter = button.dataset.filter;
-      const shouldHide =
-        (filter === "no_control1" && count < 1) ||
-        (filter === "no_control2" && count < 2) ||
-        (filter === "no_control3" && count < 3);
-      button.style.display = shouldHide ? "none" : "";
+    [refs.filterGroup, refs.secondaryFilterGroup].filter(Boolean).forEach((group) => {
+      group.querySelectorAll("button[data-filter]").forEach((button) => {
+        const filter = button.dataset.filter;
+        const shouldHide =
+          (filter === "no_control1" && loadedCount < 1) ||
+          (filter === "no_control2" && loadedCount < 2) ||
+          (filter === "no_control3" && loadedCount < 3);
+        button.style.display = shouldHide ? "none" : "";
+      });
     });
     if (
-      (state.filter === "no_control1" && count < 1) ||
-      (state.filter === "no_control2" && count < 2) ||
-      (state.filter === "no_control3" && count < 3)
+      (state.filter === "no_control1" && loadedCount < 1) ||
+      (state.filter === "no_control2" && loadedCount < 2) ||
+      (state.filter === "no_control3" && loadedCount < 3)
     ) {
       state.filter = "all";
     }
+    if (
+      (state.secondaryFilter === "no_control1" && loadedCount < 1) ||
+      (state.secondaryFilter === "no_control2" && loadedCount < 2) ||
+      (state.secondaryFilter === "no_control3" && loadedCount < 3)
+    ) {
+      state.secondaryFilter = "all";
+    }
     syncWorkspaceBrowserTargetVisibility();
 
-    const allowedModes = count === 0 ? ["one"] : count === 1 ? ["one", "two"] : count === 2 ? ["one", "two", "three"] : ["one", "two", "three", "four"];
-    refs.viewModeGroup.style.display = count > 0 ? "" : "none";
+    const allowedModes = loadedCount === 0 ? ["one"] : loadedCount === 1 ? ["one", "two"] : loadedCount === 2 ? ["one", "two", "three"] : ["one", "two", "three", "four"];
+    refs.viewModeGroup.style.display = loadedCount > 0 ? "" : "none";
     refs.viewModeGroup.querySelectorAll("button[data-mode]").forEach((button) => {
-      button.style.display = count > 0 && allowedModes.includes(button.dataset.mode) ? "" : "none";
+      button.style.display = loadedCount > 0 && allowedModes.includes(button.dataset.mode) ? "" : "none";
     });
-    if (count > previousCount) {
+    if (loadedCount > previousCount) {
       state.viewMode = allowedModes.at(-1) || "two";
       saveStored(STORAGE_KEYS.viewMode, state.viewMode);
     } else if (!allowedModes.includes(state.viewMode)) {
       state.viewMode = allowedModes.at(-1) || "two";
       saveStored(STORAGE_KEYS.viewMode, state.viewMode);
     }
-    refs.controlCount.dataset.previousCount = String(count);
+    refs.controlCount.dataset.previousCount = String(loadedCount);
     renderFilters();
     if (state.items.length) {
       renderItemList();

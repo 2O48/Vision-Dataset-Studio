@@ -4,7 +4,7 @@
 
 用于视觉训练数据集的多图浏览、自然语言 Caption 编辑、批量整理、图像预处理、质检与 AI 标注辅助。
 
-如果你是通过 ZIP 收到这个项目，建议先阅读 [USAGE.md](USAGE.md)，里面包含解压、创建环境、启动、AI 标注、图像处理、导出和打包分享注意事项。
+如果你是通过 ZIP 收到这个项目，建议先阅读 [docs/USAGE.md](docs/USAGE.md)，里面包含解压、创建环境、启动、AI 标注、图像处理、导出和打包分享注意事项。
 
 当前默认入口是 **Web GUI**，支持：
 
@@ -362,7 +362,7 @@ models/Qwen3.5-0.8B
 
 ```bash
 .venv/bin/python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
-.venv/bin/python -m pip install --upgrade -r requirements-qwen-common.txt
+.venv/bin/python -m pip install --upgrade -r requirements/qwen-common.txt
 .venv/bin/python -m pip install --upgrade git+https://github.com/huggingface/transformers.git@main
 ```
 
@@ -458,10 +458,27 @@ server/                    后端入口与任务调度目录
 server/web_server.py       Web GUI 服务主实现
 server/caption_workflow.py 标注任务、写回策略与 modify 模式逻辑
 server/image_process_jobs.py 图像处理后台任务管理
-web_server.py              根目录兼容启动入口
-caption_workflow.py        根目录兼容导入包装
-image_process_jobs.py      根目录兼容导入包装
-frontend/                  前端辅助模块目录
+web_server.py              根目录启动入口
+start.sh / run.sh          macOS / Linux 启动包装入口
+install.sh                 macOS / Linux 安装包装入口
+run.bat / install.bat      Windows 启动 / 安装包装入口
+bootstrap_env.py           根目录兼容环境工具入口
+core/                      数据集、项目、导出、图像处理与模板核心逻辑
+core/dataset_workspace.py  工作区扫描 / 匹配 / 筛选 / 读写
+core/dataset_projects.py   历史项目保存 / 打开 / 管理
+core/dataset_exporter.py   数据集导出
+core/dataset_image_processor.py 图像预处理
+core/dataset_paths.py      datasets 路径与 tmp 清理
+captioning/                本地 / API / Ollama 标注相关逻辑
+captioning/caption_client.py 本地 AI 子进程客户端
+captioning/caption_service.py 本地 Qwen3.5 推理服务
+captioning/api_caption_client.py OpenAI 兼容 API 客户端
+captioning/ollama_caption_client.py Ollama 客户端
+frontend/                  前端页面、样式、入口与辅助模块目录
+frontend/index.html        前端页面
+frontend/app.js            前端入口和装配逻辑
+frontend/styles.css        前端样式
+frontend/assets/favicon.png 图标资源
 frontend/web_shared.js     前端共享常量、存储与请求工具
 frontend/web_projects.js   前端项目管理模块
 frontend/web_workspace.js  前端工作区浏览与路径填充模块
@@ -471,24 +488,11 @@ frontend/web_editor.js     前端编辑区、快捷标注与批量短语模块
 frontend/web_browser.js    前端列表、筛选、Viewer 与工作区动作模块
 frontend/web_shell.js      前端壳层、面板切换与活动后端选择模块
 frontend/web_bootstrap.js  前端设置恢复、事件绑定与启动模块
-web_index.html             前端页面
-web_app.js                 前端交互逻辑
-web_styles.css             前端样式
-dataset_workspace.py       工作区扫描 / 匹配 / 筛选 / 读写
-dataset_projects.py        历史项目保存 / 打开 / 管理
-dataset_paths.py           datasets 路径与 tmp 清理
-caption_client.py          本地 AI 子进程客户端
-caption_service.py         本地 Qwen3.5 推理服务
-api_caption_client.py      OpenAI 兼容 API 客户端
-ollama_caption_client.py   Ollama 客户端
-prompt_templates.py        Prompt 模板存储逻辑
-qwen_models.py             本地 Qwen 模型注册表
-bootstrap_env.py           创建 / 维护项目 .venv
-requirements-base.txt      Web GUI 基础依赖
-requirements-qwen-common.txt
-requirements-qwen-cu124.txt
-run.sh
-run.bat
+scripts/                   启动 / 安装脚本真实实现
+tools/bootstrap_env.py     创建 / 维护项目 .venv
+requirements/              基础与 Qwen 依赖清单
+config/                    环境文件与模板示例
+docs/                      使用文档和项目上下文记录
 legacy/                   归档的旧版 Tkinter GUI 与启动脚本
 models/                    项目内 Qwen 模型目录与内部缓存
 ~/.vision_dataset_studio/projects/ 保存后的正式项目
@@ -592,7 +596,7 @@ datasets/workspaces/       工作区状态
 
 推荐提交到仓库的是：
 
-- `prompt_templates.example.json`
+- `config/prompt_templates.example.json`
 
 如果文件不存在，会使用内置默认模板。
 
@@ -603,14 +607,14 @@ datasets/workspaces/       工作区状态
 如果你要继续扩展这个项目，建议优先从这几处看：
 
 - 文件匹配规则：
-  - [dataset_workspace.py](dataset_workspace.py)
+  - [core/dataset_workspace.py](core/dataset_workspace.py)
 - 多图本地标注：
-  - [caption_service.py](caption_service.py)
-  - [caption_client.py](caption_client.py)
+  - [captioning/caption_service.py](captioning/caption_service.py)
+  - [captioning/caption_client.py](captioning/caption_client.py)
   - [web_server.py](web_server.py)
 - Prompt 模板：
-  - [prompt_templates.py](prompt_templates.py)
+  - [core/prompt_templates.py](core/prompt_templates.py)
 - 前端工作区 / 浏览区 / 模板 UI：
-  - [web_app.js](web_app.js)
-  - [web_index.html](web_index.html)
-  - [web_styles.css](web_styles.css)
+  - [frontend/app.js](frontend/app.js)
+  - [frontend/index.html](frontend/index.html)
+  - [frontend/styles.css](frontend/styles.css)

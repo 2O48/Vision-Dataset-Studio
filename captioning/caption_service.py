@@ -18,12 +18,15 @@ import time
 import traceback
 from pathlib import Path
 
-from caption_image_preprocess import prepare_caption_images
-from qwen_models import get_qwen_model_config, list_qwen_model_configs
+BASE_DIR = Path(__file__).resolve().parent.parent
+if str(BASE_DIR) not in sys.path:
+    sys.path.insert(0, str(BASE_DIR))
+
+from captioning.caption_image_preprocess import prepare_caption_images
+from core.qwen_models import get_qwen_model_config, list_qwen_model_configs
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
-BASE_DIR = Path(__file__).parent.resolve()
 MODELS_DIR = BASE_DIR / "models"
 MODELS_DIR.mkdir(exist_ok=True)
 
