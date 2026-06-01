@@ -38,6 +38,7 @@ const state = {
   primarySelectedName: "",
   selectedPanel: "primary",
   batchSelectedNames: new Set(),
+  batchSelectionPanel: "primary",
   batchSelectionAnchor: "",
   currentItem: null,
   filter: "all",

@@ -506,18 +506,32 @@ export function createBrowserModule({
     return state.batchSelectedNames;
   }
 
-  function visibleItemNameSet() {
-    const active = activeListPanelId();
-    return new Set(panelVisibleItems(active).map((item) => item.name));
+  function batchSelectionPanelId() {
+    return state.splitListOpen && state.batchSelectionPanel === "secondary" ? "secondary" : "primary";
   }
 
-  function selectedBatchNames() {
+  function setBatchSelectionPanel(panelId = activeListPanelId(), options = {}) {
+    const nextPanel = panelId === "secondary" && state.splitListOpen ? "secondary" : "primary";
+    if (options.clearOnChange && state.batchSelectionPanel && state.batchSelectionPanel !== nextPanel) {
+      batchSelection().clear();
+      state.batchSelectionAnchor = "";
+    }
+    state.batchSelectionPanel = nextPanel;
+  }
+
+  function visibleItemNameSet() {
+    return new Set(panelVisibleItems(batchSelectionPanelId()).map((item) => item.name));
+  }
+
+  function selectedBatchNames(panelId = activeListPanelId()) {
+    if (panelId !== batchSelectionPanelId()) return [];
     const visibleNames = visibleItemNameSet();
     return [...batchSelection()].filter((name) => visibleNames.has(name));
   }
 
   function clearBatchSelection() {
     batchSelection().clear();
+    setBatchSelectionPanel();
     state.batchSelectionAnchor = "";
   }
 
@@ -528,8 +542,9 @@ export function createBrowserModule({
     else selection.add(name);
   }
 
-  function addBatchSelectionRange(targetName) {
-    const names = (state.visibleItems || []).map((item) => item.name);
+  function addBatchSelectionRange(targetName, panelId = activeListPanelId()) {
+    setBatchSelectionPanel(panelId, { clearOnChange: true });
+    const names = panelVisibleItems(panelId).map((item) => item.name);
     if (!names.length || !targetName) return 0;
     const anchorName = names.includes(state.batchSelectionAnchor)
       ? state.batchSelectionAnchor
@@ -559,6 +574,13 @@ export function createBrowserModule({
     if (state.batchSelectionAnchor && !visibleNames.has(state.batchSelectionAnchor)) {
       state.batchSelectionAnchor = "";
     }
+  }
+
+  function syncBatchSelectionPanelAvailability() {
+    if (state.splitListOpen || state.batchSelectionPanel !== "secondary") return;
+    batchSelection().clear();
+    state.batchSelectionPanel = "primary";
+    state.batchSelectionAnchor = "";
   }
 
   function renderFolderFilters(panel) {
@@ -823,6 +845,8 @@ export function createBrowserModule({
       const activeItems = panelVisibleItems(activeListPanelId());
       if (!isSelectAll || shouldIgnoreListArrowNavigation(event.target) || !activeItems.length) return;
       event.preventDefault();
+      clearBatchSelection();
+      setBatchSelectionPanel(activeListPanelId());
       activeItems.forEach((item) => batchSelection().add(item.name));
       state.batchSelectionAnchor = activeItems[0]?.name || "";
       renderItemList();
@@ -974,7 +998,7 @@ export function createBrowserModule({
     for (const panel of listPanels()) {
       panel.itemList.querySelectorAll(".item-card").forEach((card) => {
         card.classList.toggle("active", panel.id === activeListPanelId() && card.dataset.name === state.selectedName);
-        card.classList.toggle("multi-selected", batchSelection().has(card.dataset.name));
+        card.classList.toggle("multi-selected", panel.id === batchSelectionPanelId() && batchSelection().has(card.dataset.name));
       });
     }
   }
@@ -1386,6 +1410,7 @@ export function createBrowserModule({
     const scrollTops = new Map(listPanels().map((panel) => [panel.id, panel.itemList.scrollTop]));
     setPanelVisibleItems("primary", filteredItems("primary"));
     setPanelVisibleItems("secondary", filteredItems("secondary"));
+    syncBatchSelectionPanelAvailability();
     pruneBatchSelection();
     disconnectItemThumbObserver();
     renderWorkspaceSummary();
@@ -1403,7 +1428,7 @@ export function createBrowserModule({
           ? [...activeControlRoles(), "result"]
           : ["result"];
         const card = document.createElement("article");
-        card.className = `item-card${panelId === activeListPanelId() && item.name === state.selectedName ? " active" : ""}${batchSelection().has(item.name) ? " multi-selected" : ""}${thumbRoles.length > 1 ? " multi-thumb" : ""}`;
+        card.className = `item-card${panelId === activeListPanelId() && item.name === state.selectedName ? " active" : ""}${panelId === batchSelectionPanelId() && batchSelection().has(item.name) ? " multi-selected" : ""}${thumbRoles.length > 1 ? " multi-thumb" : ""}`;
         card.dataset.name = item.name;
         card.draggable = true;
         card.title = "双击重命名图片";
@@ -1466,17 +1491,19 @@ export function createBrowserModule({
         card.appendChild(right);
         card.addEventListener("click", (event) => {
           if (event.target.closest(".item-rename-input")) return;
+          const previousPanelId = activeListPanelId();
           state.selectedPanel = panelId;
           if (event.shiftKey) {
             event.preventDefault();
-            const count = addBatchSelectionRange(item.name);
+            const count = addBatchSelectionRange(item.name, panelId);
             updateItemCardActiveState();
             setAiStatusLine(`已选择 ${count} 项`);
             return;
           }
           if (event.ctrlKey || event.metaKey) {
             event.preventDefault();
-            if (!batchSelection().size && state.selectedName && state.selectedName !== item.name) {
+            setBatchSelectionPanel(panelId, { clearOnChange: true });
+            if (!batchSelection().size && previousPanelId === panelId && state.selectedName && state.selectedName !== item.name) {
               batchSelection().add(state.selectedName);
             }
             toggleBatchSelection(item.name);
@@ -1505,6 +1532,7 @@ export function createBrowserModule({
         });
         card.addEventListener("contextmenu", (event) => {
           if (event.target.closest(".item-rename-input")) return;
+          state.selectedPanel = panelId;
           openItemContextMenu(event, item, title);
         });
         panel.itemList.appendChild(card);
