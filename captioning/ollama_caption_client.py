@@ -13,8 +13,8 @@ from threading import RLock
 
 from PIL import Image
 
-from api_caption_client import DEFAULT_PROMPTS
-from caption_image_preprocess import prepare_caption_images
+from captioning.api_caption_client import DEFAULT_PROMPTS
+from captioning.caption_image_preprocess import prepare_caption_images
 
 
 def _normalize_base_url(base_url: str) -> str:

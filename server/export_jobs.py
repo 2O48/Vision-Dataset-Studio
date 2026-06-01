@@ -5,8 +5,8 @@ import time
 from pathlib import Path
 from typing import Optional
 
-from dataset_exporter import ExportCancelled, export_dataset
-from dataset_workspace import DatasetWorkspace
+from core.dataset_exporter import ExportCancelled, export_dataset
+from core.dataset_workspace import DatasetWorkspace
 
 
 class ExportManager:

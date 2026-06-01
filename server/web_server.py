@@ -22,8 +22,8 @@ BASE_DIR = SERVER_DIR.parent
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
-from api_caption_client import APICaptionClient
-from caption_client import CaptionServiceClient, DependencyInstaller
+from captioning.api_caption_client import APICaptionClient
+from captioning.caption_client import CaptionServiceClient, DependencyInstaller
 from server.caption_workflow import (
     BatchCaptionManager,
     VALIDATION_EXISTING_CAPTION,
@@ -35,25 +35,26 @@ from server.caption_workflow import (
     remove_validation_images as _remove_validation_images,
     resolve_caption_request as _resolve_caption_request,
 )
-from dataset_exporter import export_dataset
-from dataset_image_processor import (
+from core.dataset_exporter import export_dataset
+from core.dataset_image_processor import (
     process_viewer_item_match_result,
     process_viewer_item_scale,
 )
-from dataset_paths import cleanup_tmp, ensure_dataset_dirs, is_relative_to
-from dataset_projects import ProjectStore
-from dataset_workspace import DatasetWorkspace, IMAGE_EXTS, _resolve_user_path
+from core.dataset_paths import cleanup_tmp, ensure_dataset_dirs, is_relative_to
+from core.dataset_projects import ProjectStore
+from core.dataset_workspace import DatasetWorkspace, IMAGE_EXTS, _resolve_user_path
 from server.export_jobs import ExportManager
 from server.image_process_jobs import ImageProcessManager
-from ollama_caption_client import OllamaCaptionClient
-from prompt_templates import PromptTemplateStore
-from qwen_models import list_qwen_model_configs
+from captioning.ollama_caption_client import OllamaCaptionClient
+from core.prompt_templates import PromptTemplateStore
+from core.qwen_models import list_qwen_model_configs
 
 
-INDEX_FILE = BASE_DIR / "web_index.html"
-APP_JS_FILE = BASE_DIR / "web_app.js"
-STYLES_FILE = BASE_DIR / "web_styles.css"
-FAVICON_FILE = BASE_DIR / "favicon.png"
+FRONTEND_DIR = BASE_DIR / "frontend"
+INDEX_FILE = FRONTEND_DIR / "index.html"
+APP_JS_FILE = FRONTEND_DIR / "app.js"
+STYLES_FILE = FRONTEND_DIR / "styles.css"
+FAVICON_FILE = FRONTEND_DIR / "assets" / "favicon.png"
 PROMPT_TEMPLATES_FILE = BASE_DIR / "prompt_templates.json"
 THUMB_CACHE_MAX_ITEMS = 256
 

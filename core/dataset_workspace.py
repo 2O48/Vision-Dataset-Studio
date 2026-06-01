@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Optional
 
 from PIL import Image
-from dataset_paths import DATASETS_DIR, WORKSPACES_DIR
+from core.dataset_paths import DATASETS_DIR, WORKSPACES_DIR
 
 try:
     import send2trash
@@ -1730,7 +1730,7 @@ class DatasetWorkspace:
                 return target_path
             index += 1
 
-    def _validate_control_drop_target(self, target_name: str, target_role: str):
+    def _validate_control_drop_target(self, target_name: str, target_role: str, allow_replace: bool = True):
         if target_role not in CONTROL_ROLES:
             raise ValueError("Target role must be a control image role.")
         role_index = CONTROL_ROLES.index(target_role) + 1
@@ -1738,8 +1738,18 @@ class DatasetWorkspace:
             raise ValueError(f"{target_role} is not enabled in the current workspace.")
         if target_name not in self.file_names:
             raise KeyError(target_name)
-        if target_name in self.files[target_role]:
+        if not allow_replace and target_name in self.files[target_role]:
             raise ValueError(f"{target_role} already exists for {target_name}.")
+
+    def _control_drop_target_path(self, target_name: str, target_role: str, suffix: str) -> tuple[Path, Path | None]:
+        existing_path = self.files[target_role].get(target_name)
+        if existing_path and existing_path.exists():
+            suffix = suffix.lower()
+            target_path = existing_path.with_suffix(suffix)
+            if target_path != existing_path and target_path.exists():
+                raise FileExistsError(f"Target file already exists: {target_path}")
+            return target_path, existing_path
+        return self._next_control_drop_path(target_name, target_role, suffix), None
 
     def assign_control_image(self, source_name: str, target_name: str, target_role: str, source_role: str = "") -> dict:
         with self._lock:
@@ -1749,14 +1759,15 @@ class DatasetWorkspace:
             source_role = str(source_role or "").strip()
             if source_name not in self.file_names:
                 raise KeyError(source_name)
-            self._validate_control_drop_target(target_name, target_role)
+            self._validate_control_drop_target(target_name, target_role, allow_replace=True)
 
             source_path = self._item_image_path_for_role(source_name, source_role) if source_role else self._first_item_image_path(source_name)
-            target_path = self._next_control_drop_path(target_name, target_role, source_path.suffix)
+            target_path, replaced_path = self._control_drop_target_path(target_name, target_role, source_path.suffix)
             target_path.parent.mkdir(parents=True, exist_ok=True)
-            if source_path.resolve() == target_path.resolve():
-                raise ValueError("Source image is already at the target path.")
-            shutil.copy2(source_path, target_path)
+            if source_path.resolve() != target_path.resolve():
+                shutil.copy2(source_path, target_path)
+                if replaced_path and replaced_path != target_path and replaced_path.exists():
+                    replaced_path.unlink()
 
             summary = self.open_dirs()
             return {
@@ -1765,6 +1776,7 @@ class DatasetWorkspace:
                 "target_name": target_name,
                 "target_role": target_role,
                 "copied": {"from": str(source_path), "to": str(target_path)},
+                "replaced": str(replaced_path) if replaced_path else "",
                 "workspace": summary,
             }
 
@@ -1776,7 +1788,7 @@ class DatasetWorkspace:
             suffix = Path(filename).suffix.lower()
             if suffix not in IMAGE_EXTS:
                 raise ValueError("Dropped file must be an image.")
-            self._validate_control_drop_target(target_name, target_role)
+            self._validate_control_drop_target(target_name, target_role, allow_replace=True)
             raw_data = str(image_data or "")
             if "," in raw_data and raw_data.split(",", 1)[0].lower().startswith("data:"):
                 raw_data = raw_data.split(",", 1)[1]
@@ -1787,15 +1799,18 @@ class DatasetWorkspace:
             if not payload:
                 raise ValueError("Dropped image is empty.")
 
-            target_path = self._next_control_drop_path(target_name, target_role, suffix)
+            target_path, replaced_path = self._control_drop_target_path(target_name, target_role, suffix)
             target_path.parent.mkdir(parents=True, exist_ok=True)
             target_path.write_bytes(payload)
+            if replaced_path and replaced_path != target_path and replaced_path.exists():
+                replaced_path.unlink()
 
             summary = self.open_dirs()
             return {
                 "target_name": target_name,
                 "target_role": target_role,
                 "saved": {"filename": filename, "path": str(target_path)},
+                "replaced": str(replaced_path) if replaced_path else "",
                 "workspace": summary,
             }
 

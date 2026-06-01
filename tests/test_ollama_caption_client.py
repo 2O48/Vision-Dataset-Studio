@@ -1,6 +1,6 @@
 import unittest
 
-from ollama_caption_client import _normalize_ollama_endpoint, _tags_endpoint
+from captioning.ollama_caption_client import _normalize_ollama_endpoint, _tags_endpoint
 
 
 class OllamaEndpointTests(unittest.TestCase):

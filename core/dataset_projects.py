@@ -6,8 +6,8 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 
-from dataset_paths import is_relative_to
-from dataset_workspace import CONTROL_ROLES, IMAGE_EXTS
+from core.dataset_paths import is_relative_to
+from core.dataset_workspace import CONTROL_ROLES, IMAGE_EXTS
 
 
 APP_DATA_DIR = Path.home() / ".vision_dataset_studio"

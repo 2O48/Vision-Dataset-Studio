@@ -8,10 +8,10 @@ from typing import Optional
 
 from PIL import Image
 
-from api_caption_client import APICaptionClient
-from caption_client import CaptionServiceClient
-from dataset_workspace import DatasetWorkspace
-from ollama_caption_client import OllamaCaptionClient
+from captioning.api_caption_client import APICaptionClient
+from captioning.caption_client import CaptionServiceClient
+from captioning.ollama_caption_client import OllamaCaptionClient
+from core.dataset_workspace import DatasetWorkspace
 
 
 VALIDATION_EXISTING_CAPTION = "woman standing near a window, soft natural light, blue dress, indoor portrait"

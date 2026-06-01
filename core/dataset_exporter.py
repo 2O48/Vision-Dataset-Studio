@@ -11,8 +11,8 @@ from typing import Optional
 
 from PIL import Image, ImageOps
 
-from dataset_paths import DATASETS_DIR, EXPORTS_DIR
-from dataset_workspace import CONTROL_ROLES, _resolve_user_path
+from core.dataset_paths import DATASETS_DIR, EXPORTS_DIR
+from core.dataset_workspace import CONTROL_ROLES, _resolve_user_path
 
 
 APP_STATE_DIR = DATASETS_DIR

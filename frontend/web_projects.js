@@ -60,10 +60,17 @@ export function createProjectsModule({
     return {
       version: PROJECT_STATE_VERSION,
       selected_name: state.selectedName || "",
+      selected_panel: state.selectedPanel || "primary",
       filter: state.filter || "all",
       segment_query: refs.tagSearch?.value.trim() || state.segmentQuery || "",
       list_search_mode: state.listSearchMode === "name" ? "name" : "phrase",
       list_search_match_mode: state.listSearchMatchMode === "exact" ? "exact" : "contains",
+      secondary_filter: state.secondaryFilter || "all",
+      secondary_segment_query: refs.secondaryTagSearch?.value.trim() || state.secondarySegmentQuery || "",
+      secondary_list_search_mode: state.secondaryListSearchMode === "name" ? "name" : "phrase",
+      secondary_list_search_match_mode: state.secondaryListSearchMatchMode === "exact" ? "exact" : "contains",
+      secondary_list_thumb_mode: state.secondaryListThumbMode === "combined" ? "combined" : "result",
+      split_list_open: Boolean(state.splitListOpen),
       utility_panel: state.utilityPanel || "projects",
       view_mode: state.viewMode || "two",
       workspace_browser_target: state.browserTarget || "control1",
@@ -188,6 +195,7 @@ export function createProjectsModule({
 
     state.viewMode = uiState.view_mode || state.viewMode;
     saveStored(STORAGE_KEYS.viewMode, state.viewMode);
+    state.selectedPanel = uiState.selected_panel === "secondary" ? "secondary" : "primary";
     state.filter = uiState.filter || "all";
     state.segmentQuery = uiState.segment_query || "";
     if (refs.tagSearch) refs.tagSearch.value = state.segmentQuery;
@@ -195,18 +203,42 @@ export function createProjectsModule({
     saveStored(STORAGE_KEYS.listSearchMode, state.listSearchMode);
     state.listSearchMatchMode = uiState.list_search_match_mode === "exact" ? "exact" : "contains";
     saveStored(STORAGE_KEYS.listSearchMatchMode, state.listSearchMatchMode);
-    refs.tagSearchModeGroup?.querySelectorAll("button[data-search-mode]").forEach((button) => {
-      const isActive = button.dataset.searchMode === state.listSearchMode;
-      button.classList.toggle("active", isActive);
-      button.setAttribute("aria-pressed", String(isActive));
+    state.secondaryFilter = uiState.secondary_filter || "all";
+    state.secondarySegmentQuery = uiState.secondary_segment_query || "";
+    if (refs.secondaryTagSearch) refs.secondaryTagSearch.value = state.secondarySegmentQuery;
+    state.secondaryListSearchMode = uiState.secondary_list_search_mode === "name" ? "name" : "phrase";
+    saveStored(STORAGE_KEYS.secondaryListSearchMode, state.secondaryListSearchMode);
+    state.secondaryListSearchMatchMode = uiState.secondary_list_search_match_mode === "exact" ? "exact" : "contains";
+    saveStored(STORAGE_KEYS.secondaryListSearchMatchMode, state.secondaryListSearchMatchMode);
+    state.secondaryListThumbMode = uiState.secondary_list_thumb_mode === "combined" ? "combined" : "result";
+    saveStored(STORAGE_KEYS.secondaryListThumbMode, state.secondaryListThumbMode);
+    state.splitListOpen = Boolean(uiState.split_list_open);
+    saveStored(STORAGE_KEYS.splitListOpen, state.splitListOpen ? "1" : "0");
+    [
+      [refs.tagSearchModeGroup, state.listSearchMode],
+      [refs.secondaryTagSearchModeGroup, state.secondaryListSearchMode],
+    ].filter(([group]) => Boolean(group)).forEach(([group, mode]) => {
+      group.querySelectorAll("button[data-search-mode]").forEach((button) => {
+        const isActive = button.dataset.searchMode === mode;
+        button.classList.toggle("active", isActive);
+        button.setAttribute("aria-pressed", String(isActive));
+      });
     });
-    refs.tagSearchMatchGroup?.querySelectorAll("button[data-search-match]").forEach((button) => {
-      const isActive = button.dataset.searchMatch === state.listSearchMatchMode;
-      button.classList.toggle("active", isActive);
-      button.setAttribute("aria-pressed", String(isActive));
+    [
+      [refs.tagSearchMatchGroup, state.listSearchMatchMode],
+      [refs.secondaryTagSearchMatchGroup, state.secondaryListSearchMatchMode],
+    ].filter(([group]) => Boolean(group)).forEach(([group, matchMode]) => {
+      group.querySelectorAll("button[data-search-match]").forEach((button) => {
+        const isActive = button.dataset.searchMatch === matchMode;
+        button.classList.toggle("active", isActive);
+        button.setAttribute("aria-pressed", String(isActive));
+      });
     });
     if (refs.tagSearch) {
       refs.tagSearch.placeholder = state.listSearchMode === "name" ? "搜索图片名称 / 子文件夹" : "搜索 caption 短语";
+    }
+    if (refs.secondaryTagSearch) {
+      refs.secondaryTagSearch.placeholder = state.secondaryListSearchMode === "name" ? "搜索图片名称 / 子文件夹" : "搜索 caption 短语";
     }
     state.browserTarget = uiState.workspace_browser_target || state.browserTarget;
     saveStored(STORAGE_KEYS.workspaceBrowserTarget, state.browserTarget);
@@ -348,7 +380,9 @@ export function createProjectsModule({
   async function openProject(projectId) {
     await saveOpenProjectUiState();
     refs.itemList.textContent = "";
+    if (refs.secondaryItemList) refs.secondaryItemList.textContent = "";
     refs.listStats.textContent = "正在切换项目...";
+    if (refs.secondaryListStats) refs.secondaryListStats.textContent = "正在切换项目...";
     state.selectedName = "";
     state.currentItem = null;
     state.imageRefreshToken = `${Date.now()}-opening-${projectId}`;
@@ -362,9 +396,11 @@ export function createProjectsModule({
     rememberOpenedWorkspace(data.workspace);
     await refreshItems({ skipDirtyCheck: true });
     if (data.ui_state?.selected_name) {
-      const target = state.items.find((item) => item.name === data.ui_state.selected_name);
+      const selectedPanel = data.ui_state.selected_panel === "secondary" ? "secondary" : "primary";
+      const sourceItems = selectedPanel === "secondary" ? state.secondaryItems : state.items;
+      const target = sourceItems.find((item) => item.name === data.ui_state.selected_name);
       if (target) {
-        await selectItem(target.name, true, { skipDirtyCheck: true });
+        await selectItem(target.name, true, { skipDirtyCheck: true, panelId: selectedPanel });
       }
     }
     refs.projectStatus.textContent = `已打开项目：${data.project?.name || projectId}`;

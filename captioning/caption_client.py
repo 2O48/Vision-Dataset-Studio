@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Optional
 
 
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(__file__).resolve().parent.parent
 VENV_DIR = BASE_DIR / ".venv"
 
 
@@ -60,7 +60,7 @@ def diagnose_python_start_failure(exc: Exception) -> str:
 
 class CaptionServiceClient:
     def __init__(self, service_path: Optional[Path] = None):
-        self.service_path = service_path or (BASE_DIR / "caption_service.py")
+        self.service_path = service_path or (BASE_DIR / "captioning" / "caption_service.py")
         self.proc: Optional[subprocess.Popen] = None
         self._lock = threading.RLock()
         self._reader_thread: Optional[threading.Thread] = None
@@ -469,7 +469,7 @@ class DependencyInstaller:
         if not running_in_project_venv():
             self._append("当前服务不在项目 .venv 中，安装仍会强制写入项目 .venv，不会改动 Conda/系统环境。", "warn")
 
-        if not self._run_step("project .venv and base requirements", [str(bootstrap_py), str(BASE_DIR / "bootstrap_env.py"), "--ensure-base"], 5, 25):
+        if not self._run_step("project .venv and base requirements", [str(bootstrap_py), str(BASE_DIR / "tools" / "bootstrap_env.py"), "--ensure-base"], 5, 25):
             self._finish("failed", self.progress_pct)
             return
         if not venv_py.exists():
@@ -478,8 +478,8 @@ class DependencyInstaller:
             return
 
         steps = [
-            ("PyTorch CUDA 12.4", [str(venv_py), "-m", "pip", "install", "--progress-bar", "raw", "--disable-pip-version-check", "-r", str(BASE_DIR / "requirements-qwen-cu124.txt")], 25, 60),
-            ("huggingface_hub / accelerate / pillow / safetensors", [str(venv_py), "-m", "pip", "install", "--progress-bar", "raw", "--disable-pip-version-check", "--upgrade", "-r", str(BASE_DIR / "requirements-qwen-common.txt")], 60, 82),
+            ("PyTorch CUDA 12.4", [str(venv_py), "-m", "pip", "install", "--progress-bar", "raw", "--disable-pip-version-check", "-r", str(BASE_DIR / "requirements" / "qwen-cu124.txt")], 25, 60),
+            ("huggingface_hub / accelerate / pillow / safetensors", [str(venv_py), "-m", "pip", "install", "--progress-bar", "raw", "--disable-pip-version-check", "--upgrade", "-r", str(BASE_DIR / "requirements" / "qwen-common.txt")], 60, 82),
             ("transformers latest for Qwen3.5", [str(venv_py), "-m", "pip", "install", "--progress-bar", "raw", "--disable-pip-version-check", "--upgrade", "git+https://github.com/huggingface/transformers.git@main"], 82, 98),
         ]
 

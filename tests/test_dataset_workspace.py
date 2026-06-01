@@ -6,10 +6,10 @@ from unittest import mock
 
 from PIL import Image
 
-import dataset_workspace
-from dataset_exporter import ExportCancelled, export_dataset
-from dataset_image_processor import process_workspace_images
-from dataset_workspace import (
+from core import dataset_workspace
+from core.dataset_exporter import ExportCancelled, export_dataset
+from core.dataset_image_processor import process_workspace_images
+from core.dataset_workspace import (
     DatasetWorkspace,
     _delete_caption_segments,
     _parse_caption_segments,
@@ -273,6 +273,35 @@ class DatasetWorkspaceTextTests(unittest.TestCase):
             with Image.open(target) as image:
                 self.assertEqual(image.getpixel((0, 0)), (0, 255, 0))
 
+    def test_assign_control_image_replaces_existing_control_image(self):
+        workspace = DatasetWorkspace()
+        with tempfile.TemporaryDirectory() as root_dir:
+            root = Path(root_dir)
+            control1_path = root / "control1"
+            control2_path = root / "control2"
+            result_path = root / "result"
+            control1_path.mkdir()
+            control2_path.mkdir()
+            result_path.mkdir()
+            Image.new("RGB", (16, 16), (255, 0, 0)).save(control1_path / "sample.png")
+            Image.new("RGB", (16, 16), (255, 0, 0)).save(control2_path / "sample_control2.png")
+            Image.new("RGB", (16, 16), (0, 255, 0)).save(result_path / "source.png")
+
+            workspace.open_dirs(
+                control1_dir=str(control1_path),
+                control2_dir=str(control2_path),
+                result_dir=str(result_path),
+                control_count=2,
+            )
+            result = workspace.assign_control_image("source", "sample", "control2", "result")
+
+            control2_file = control2_path / "sample_control2.png"
+            self.assertEqual(result["copied"]["to"], str(control2_file))
+            self.assertEqual(result["replaced"], str(control2_file))
+            self.assertFalse((control2_path / "sample_control2_2.png").exists())
+            with Image.open(control2_file) as image:
+                self.assertEqual(image.getpixel((0, 0)), (0, 255, 0))
+
     def test_upload_control_image_saves_dropped_file_with_target_name(self):
         workspace = DatasetWorkspace()
         with tempfile.TemporaryDirectory() as root_dir:
@@ -294,6 +323,39 @@ class DatasetWorkspaceTextTests(unittest.TestCase):
             self.assertEqual(result["saved"]["path"], str(control2_file))
             self.assertTrue(control2_file.exists())
             self.assertTrue(workspace.get_item("sample")["exists"]["control2"])
+
+    def test_upload_control_image_replaces_existing_control_image_with_new_suffix(self):
+        workspace = DatasetWorkspace()
+        with tempfile.TemporaryDirectory() as root_dir:
+            root = Path(root_dir)
+            control1_path = root / "control1"
+            control2_path = root / "control2"
+            result_path = root / "result"
+            control1_path.mkdir()
+            control2_path.mkdir()
+            result_path.mkdir()
+            Image.new("RGB", (16, 16), (255, 0, 0)).save(control1_path / "sample.png")
+            Image.new("RGB", (16, 16), (255, 0, 0)).save(control2_path / "sample_control2.png")
+            Image.new("RGB", (16, 16), (0, 0, 255)).save(result_path / "sample.png")
+            dropped = root / "dropped.webp"
+            Image.new("RGB", (16, 16), (0, 255, 0)).save(dropped)
+
+            workspace.open_dirs(
+                control1_dir=str(control1_path),
+                control2_dir=str(control2_path),
+                result_dir=str(result_path),
+                control_count=2,
+            )
+            payload = dataset_workspace.base64.b64encode(dropped.read_bytes()).decode("ascii")
+            result = workspace.upload_control_image("sample", "control2", "external.webp", payload)
+
+            old_control2_file = control2_path / "sample_control2.png"
+            new_control2_file = control2_path / "sample_control2.webp"
+            self.assertEqual(result["saved"]["path"], str(new_control2_file))
+            self.assertEqual(result["replaced"], str(old_control2_file))
+            self.assertFalse(old_control2_file.exists())
+            self.assertTrue(new_control2_file.exists())
+            self.assertEqual(workspace.get_item("sample")["paths"]["control2"], str(new_control2_file))
 
     def test_move_item_to_folder_changes_parent_only(self):
         workspace = DatasetWorkspace()
@@ -335,7 +397,7 @@ class DatasetWorkspaceTextTests(unittest.TestCase):
             def fake_trash(path):
                 Path(path).unlink()
 
-            with mock.patch("dataset_workspace._send_to_trash", side_effect=fake_trash) as send_to_trash:
+            with mock.patch("core.dataset_workspace._send_to_trash", side_effect=fake_trash) as send_to_trash:
                 result = workspace.trash_item_files("sample")
 
             self.assertEqual(send_to_trash.call_count, 3)

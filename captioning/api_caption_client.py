@@ -13,7 +13,7 @@ from threading import RLock
 
 from PIL import Image
 
-from caption_image_preprocess import prepare_caption_images
+from captioning.caption_image_preprocess import prepare_caption_images
 
 DEFAULT_PROMPTS = {
     "natural": (

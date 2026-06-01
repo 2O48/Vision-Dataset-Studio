@@ -4,8 +4,8 @@ import threading
 import time
 from typing import Optional
 
-from dataset_image_processor import process_workspace_images, process_workspace_match_results
-from dataset_workspace import DatasetWorkspace
+from core.dataset_image_processor import process_workspace_images, process_workspace_match_results
+from core.dataset_workspace import DatasetWorkspace
 
 
 class ImageProcessManager:

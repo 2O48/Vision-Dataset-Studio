@@ -7,7 +7,7 @@ from typing import Callable
 
 from PIL import Image
 
-from dataset_exporter import (
+from core.dataset_exporter import (
     _active_control_roles,
     _build_export_root,
     _clean_name,
@@ -18,8 +18,8 @@ from dataset_exporter import (
     _unique_name,
     _write_processed_image,
 )
-from dataset_paths import TMP_DIR
-from dataset_workspace import APP_STATE_DIR, CONTROL_ROLES, IMAGE_ROLES, _resolve_user_path
+from core.dataset_paths import TMP_DIR
+from core.dataset_workspace import APP_STATE_DIR, CONTROL_ROLES, IMAGE_ROLES, _resolve_user_path
 
 
 PROCESSED_DIR = TMP_DIR / "processed"

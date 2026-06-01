@@ -35,6 +35,8 @@ const state = {
   globalTagPointerDrag: null,
   globalTagSuppressClick: false,
   selectedName: "",
+  primarySelectedName: "",
+  selectedPanel: "primary",
   batchSelectedNames: new Set(),
   batchSelectionAnchor: "",
   currentItem: null,
@@ -44,6 +46,14 @@ const state = {
   segmentQuery: "",
   listSearchMode: readStored(STORAGE_KEYS.listSearchMode, "phrase"),
   listSearchMatchMode: readStored(STORAGE_KEYS.listSearchMatchMode, "contains"),
+  secondaryFilter: "all",
+  secondaryItemFolderFilter: "",
+  secondaryItems: [],
+  secondaryVisibleItems: [],
+  secondarySelectedName: "",
+  secondarySegmentQuery: "",
+  secondaryListSearchMode: readStored(STORAGE_KEYS.secondaryListSearchMode, "phrase"),
+  secondaryListSearchMatchMode: readStored(STORAGE_KEYS.secondaryListSearchMatchMode, "contains"),
   utilityPanel: readStored(STORAGE_KEYS.utilityPanel, "workspace"),
   utilityOpen: false,
   captionSettingsOpen: false,
@@ -55,6 +65,8 @@ const state = {
   browserMessage: "",
   viewMode: readStored(STORAGE_KEYS.viewMode, "two"),
   listThumbMode: readStored(STORAGE_KEYS.listThumbMode, "result"),
+  secondaryListThumbMode: readStored(STORAGE_KEYS.secondaryListThumbMode, "result"),
+  splitListOpen: readStored(STORAGE_KEYS.splitListOpen, "0") === "1",
   currentText: "",
   captionSavedText: "",
   captionDirty: false,
@@ -165,14 +177,26 @@ const refs = {
   apiAiStatusText: document.querySelector("#apiAiStatusText"),
   ollamaAiStatusText: document.querySelector("#ollamaAiStatusText"),
   filterGroup: document.querySelector("#filterGroup"),
+  secondaryFilterGroup: document.querySelector("#secondaryFilterGroup"),
   listThumbModeSelect: document.querySelector("#listThumbModeSelect"),
+  secondaryListThumbModeSelect: document.querySelector("#secondaryListThumbModeSelect"),
+  listPanelShell: document.querySelector("#listPanelShell"),
+  secondaryListPanel: document.querySelector("#secondaryListPanel"),
+  toggleSplitListBtn: document.querySelector("#toggleSplitListBtn"),
   tagSearch: document.querySelector("#tagSearch"),
+  secondaryTagSearch: document.querySelector("#secondaryTagSearch"),
   tagSearchModeGroup: document.querySelector("#tagSearchModeGroup"),
+  secondaryTagSearchModeGroup: document.querySelector("#secondaryTagSearchModeGroup"),
   tagSearchMatchGroup: document.querySelector("#tagSearchMatchGroup"),
+  secondaryTagSearchMatchGroup: document.querySelector("#secondaryTagSearchMatchGroup"),
   tagSearchClear: document.querySelector("#tagSearchClear"),
+  secondaryTagSearchClear: document.querySelector("#secondaryTagSearchClear"),
   itemList: document.querySelector("#itemList"),
+  secondaryItemList: document.querySelector("#secondaryItemList"),
   itemFolderFilters: document.querySelector("#itemFolderFilters"),
+  secondaryItemFolderFilters: document.querySelector("#secondaryItemFolderFilters"),
   listStats: document.querySelector("#listStats"),
+  secondaryListStats: document.querySelector("#secondaryListStats"),
   currentName: document.querySelector("#currentName"),
   currentMeta: document.querySelector("#currentMeta"),
   viewModeGroup: document.querySelector("#viewModeGroup"),
@@ -380,6 +404,57 @@ const appDialog = createAppDialog();
 window.appAlert = (message, title) => appDialog.alert(message, title);
 window.appConfirm = (message, title) => appDialog.confirm(message, title);
 window.appPrompt = (title, defaultValue) => appDialog.prompt(title, defaultValue);
+
+function bindAboutDialog() {
+  const trigger = document.querySelector("#aboutStudioBtn");
+  const root = document.querySelector("#aboutDialog");
+  const confirmBtn = document.querySelector("#aboutDialogConfirm");
+  let previousFocus = null;
+  let closeTimer = 0;
+
+  function close() {
+    if (!root || root.getAttribute("aria-hidden") === "true") return;
+    root.classList.remove("dialog-open");
+    root.classList.add("dialog-closing");
+    if (closeTimer) window.clearTimeout(closeTimer);
+    closeTimer = window.setTimeout(() => {
+      closeTimer = 0;
+      root.setAttribute("aria-hidden", "true");
+      root.classList.remove("dialog-closing");
+      document.body.classList.remove("dialog-open");
+      if (previousFocus?.focus) previousFocus.focus();
+    }, 180);
+  }
+
+  function open() {
+    if (!root || !confirmBtn) return;
+    if (closeTimer) {
+      window.clearTimeout(closeTimer);
+      closeTimer = 0;
+    }
+    previousFocus = document.activeElement;
+    root.setAttribute("aria-hidden", "false");
+    root.classList.remove("dialog-closing");
+    document.body.classList.add("dialog-open");
+    requestAnimationFrame(() => {
+      root.classList.add("dialog-open");
+      confirmBtn.focus();
+    });
+  }
+
+  trigger?.addEventListener("click", open);
+  confirmBtn?.addEventListener("click", close);
+  root?.addEventListener("click", (event) => {
+    if (event.target === root) close();
+  });
+  root?.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return;
+    event.preventDefault();
+    close();
+  });
+}
+
+bindAboutDialog();
 
 function saveQuickTags() {
   state.quickTags = cleanQuickTags(state.quickTags);
@@ -793,6 +868,7 @@ const { restorePersistedSettings, bindSettingsPersistence, bindEvents, bootstrap
   applyWorkspaceBrowserPath,
   setWorkspaceBrowserTarget,
   refreshItems,
+  selectItem,
   selectRelativeItem,
   shouldIgnoreListArrowNavigation,
   loadWorkspace,
