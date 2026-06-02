@@ -41,6 +41,7 @@ export function createBootstrapModule({
   refreshItems,
   selectItem,
   selectRelativeItem,
+  trashCurrentItem,
   shouldIgnoreListArrowNavigation,
   loadWorkspace,
   rescanWorkspace,
@@ -82,7 +83,6 @@ export function createBootstrapModule({
   templateById,
   appendSegmentsToCaption,
   toggleQuickTags,
-  saveQuickTags,
   setCaptionEditorText,
   normalizeCaptionText,
   normalizeCaptionInputText,
@@ -258,7 +258,6 @@ export function createBootstrapModule({
     if (refs.swapSuffix) refs.swapSuffix.value = readStored(STORAGE_KEYS.swapSuffix, "_swap") || "_swap";
     state.quickTags = readQuickTags();
     state.quickTagsCollapsed = readStored(STORAGE_KEYS.quickTagsCollapsed, "true") !== "false";
-    state.quickTagsDirty = false;
     restoreCaptionSettings();
   }
 
@@ -895,6 +894,31 @@ export function createBootstrapModule({
         }
         return;
       }
+      const isTaskShortcutBlocked = document.body.classList.contains("dialog-open") || shouldIgnoreListArrowNavigation(event.target);
+      if (event.key === "Escape") {
+        if (event.repeat || isTaskShortcutBlocked) return;
+        event.preventDefault();
+        runWithStatus("正在停止当前任务...", () => stopBatchCaption()).catch(showError);
+        return;
+      }
+      if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+        if (event.repeat || event.altKey || isTaskShortcutBlocked) return;
+        event.preventDefault();
+        runWithStatus(`正在使用${activeCaptionBackendLabel()}批量标注...`, () => startBatchCaptionWithPayload(activeCaptionPayload())).catch(showError);
+        return;
+      }
+      if (event.key === "Enter") {
+        if (event.repeat || event.altKey || event.shiftKey || isTaskShortcutBlocked) return;
+        event.preventDefault();
+        runWithStatus(`正在使用${activeCaptionBackendLabel()}标注当前图片...`, () => captionCurrentWithPayload(activeCaptionPayload())).catch(showError);
+        return;
+      }
+      if (event.key === "Delete") {
+        if (event.repeat || shouldIgnoreListArrowNavigation(event.target)) return;
+        event.preventDefault();
+        runWithStatus("正在删除当前图片...", () => trashCurrentItem()).catch(showError);
+        return;
+      }
       if (shouldIgnoreListArrowNavigation(event.target)) return;
       const activeItems = state.selectedPanel === "secondary" && state.splitListOpen ? state.secondaryVisibleItems : state.visibleItems;
       if (!activeItems?.length) return;
@@ -925,7 +949,6 @@ export function createBootstrapModule({
       refs.newTagInput.value = "";
     });
     refs.quickTagToggleBtn.addEventListener("click", () => toggleQuickTags());
-    refs.quickTagSaveBtn.addEventListener("click", saveQuickTags);
     refs.captionEditor?.addEventListener("input", () => {
       const rawValue = refs.captionEditor.value;
       const normalized = normalizeCaptionInputText(rawValue);

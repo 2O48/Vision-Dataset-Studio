@@ -14,6 +14,7 @@ export function createEditorModule({
   renderViewer,
   confirmDiscardCaptionChanges,
   setCaptionEditorText,
+  prepareSelectionAfterRemoving,
   normalizeCaptionText,
   normalizeCaptionInputText,
   syncSegmentsFromText,
@@ -21,6 +22,8 @@ export function createEditorModule({
   onGlobalTagClick,
 }) {
   const GLOBAL_TAG_DRAG_TYPE = "application/x-vds-global-tag";
+  const QUICK_TAG_DRAG_TYPE = "application/x-vds-quick-tag";
+  const CAPTION_SEGMENT_DRAG_TYPE = "application/x-vds-caption-segment";
   const GLOBAL_TAG_ROW_HEIGHT = 42;
   const GLOBAL_TAG_ROW_GAP = 8;
   const GLOBAL_TAG_IDLE_OVERSCAN = 1;
@@ -177,6 +180,20 @@ export function createEditorModule({
     state.currentSegments.forEach((segment, index) => {
       const row = document.createElement("div");
       row.className = `chip${segmentMatchesListSearch(segment, searchQuery) ? " search-match" : ""}`;
+      row.draggable = true;
+      row.dataset.captionSegment = segment;
+      row.title = "拖到快捷标注中添加";
+      row.addEventListener("dragstart", (event) => {
+        state.quickTagDragging = { type: "caption", value: segment };
+        row.classList.add("dragging");
+        event.dataTransfer?.setData(CAPTION_SEGMENT_DRAG_TYPE, segment);
+        event.dataTransfer?.setData("text/plain", segment);
+        if (event.dataTransfer) event.dataTransfer.effectAllowed = "copy";
+      });
+      row.addEventListener("dragend", () => {
+        row.classList.remove("dragging");
+        scheduleCaptionDragEndCleanup();
+      });
       const input = document.createElement("input");
       input.className = "chip-input";
       input.value = segment;
@@ -215,9 +232,11 @@ export function createEditorModule({
   }
 
   function appendQuickTagToCaption(value) {
-    const text = `${value ?? ""}`;
+    const text = `${value ?? ""}`.trim();
     if (!text) return;
-    state.currentText = normalizeCaptionText(`${state.currentText || ""}${text}`);
+    const current = `${state.currentText || refs.captionEditor?.value || ""}`.replace(/\s+$/, "");
+    const separator = current ? (/[，,;；。]\s*$/.test(current) ? " " : ", ") : "";
+    state.currentText = normalizeCaptionText(`${current}${separator}${text}`);
     if (refs.captionEditor) refs.captionEditor.value = state.currentText;
     syncSegmentsFromText();
     syncCaptionDirty();
@@ -390,11 +409,10 @@ export function createEditorModule({
     scheduleGlobalTagViewportRender();
   });
 
-  function setQuickTagsDirty(value = true) {
-    state.quickTagsDirty = Boolean(value);
-    if (refs.quickTagSaveBtn) {
-      refs.quickTagSaveBtn.classList.toggle("dirty", state.quickTagsDirty);
-    }
+  function persistQuickTags() {
+    state.quickTags = cleanQuickTags(state.quickTags);
+    saveStored(STORAGE_KEYS.quickTags, JSON.stringify(state.quickTags));
+    refs.quickTagPanel?.classList.remove("delete-mode");
   }
 
   function renderQuickTags() {
@@ -403,12 +421,15 @@ export function createEditorModule({
     if (refs.quickTagToggleBtn) {
       refs.quickTagToggleBtn.textContent = state.quickTagsCollapsed ? "快捷标注 +" : "快捷标注 -";
     }
-    setQuickTagsDirty(state.quickTagsDirty);
     refs.quickTagGrid.textContent = "";
 
     state.quickTags.forEach((tag, index) => {
       const row = document.createElement("div");
-      row.className = "quick-tag-item";
+      const isCaptionDraft =
+        state.quickTagDragging?.type === "caption" &&
+        state.quickTagDragging.inserted &&
+        Number(state.quickTagDragIndex) === index;
+      row.className = `quick-tag-item${isCaptionDraft ? " dragging caption-draft" : ""}`;
       row.draggable = true;
       row.dataset.quickTagIndex = String(index);
 
@@ -429,26 +450,35 @@ export function createEditorModule({
       });
 
       row.addEventListener("dragstart", (event) => {
-        state.quickTagDragIndex = index;
+        state.quickTagDragIndex = Number(row.dataset.quickTagIndex);
+        state.quickTagDragging = {
+          type: "quick",
+          index: state.quickTagDragIndex,
+          value: state.quickTags[state.quickTagDragIndex] || "",
+          moved: false,
+          deleting: false,
+        };
         row.classList.add("dragging");
-        event.dataTransfer?.setData("text/plain", String(index));
+        event.dataTransfer?.setData(QUICK_TAG_DRAG_TYPE, String(state.quickTagDragIndex));
+        event.dataTransfer?.setData("text/plain", String(state.quickTagDragIndex));
         if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
       });
       row.addEventListener("dragend", () => {
-        state.quickTagDragIndex = null;
-        row.classList.remove("dragging");
-        refs.quickTagGrid.querySelectorAll(".quick-tag-item.over").forEach((node) => node.classList.remove("over"));
+        if (state.quickTagDragging?.type === "quick" && state.quickTagDragging.moved && !state.quickTagDragging.deleting) {
+          persistQuickTags();
+          renderQuickTags();
+        }
+        cleanupQuickTagDragState();
       });
       row.addEventListener("dragover", (event) => {
         event.preventDefault();
-        row.classList.add("over");
+        event.stopPropagation();
+        handleQuickTagDragOver(event, row);
       });
-      row.addEventListener("dragleave", () => row.classList.remove("over"));
       row.addEventListener("drop", (event) => {
         event.preventDefault();
-        row.classList.remove("over");
-        const fromIndex = Number(event.dataTransfer?.getData("text/plain") || state.quickTagDragIndex);
-        moveQuickTag(fromIndex, index);
+        event.stopPropagation();
+        handleQuickTagDrop(event);
       });
 
       row.appendChild(handle);
@@ -457,20 +487,307 @@ export function createEditorModule({
     });
   }
 
+  function updateQuickTagDomIndexes() {
+    refs.quickTagGrid?.querySelectorAll(".quick-tag-item").forEach((node, index) => {
+      node.dataset.quickTagIndex = String(index);
+    });
+  }
+
+  function quickTagDragSource() {
+    return state.quickTagDragging || null;
+  }
+
+  function eventHasQuickTagDrop(event) {
+    const types = Array.from(event.dataTransfer?.types || []);
+    return Boolean(quickTagDragSource()) || types.includes(QUICK_TAG_DRAG_TYPE) || types.includes(CAPTION_SEGMENT_DRAG_TYPE);
+  }
+
+  function quickTagRowFromPoint(event) {
+    const x = Number(event.clientX);
+    const y = Number(event.clientY);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+    const hit = document.elementFromPoint(x, y);
+    const direct = hit instanceof Element ? hit.closest(".quick-tag-item") : null;
+    if (direct && refs.quickTagGrid?.contains(direct) && !direct.classList.contains("dragging")) return direct;
+    return null;
+  }
+
+  function quickTagIndexForHoveredRow(row) {
+    const targetIndex = Number(row?.dataset?.quickTagIndex);
+    if (!Number.isFinite(targetIndex)) return 0;
+    return targetIndex;
+  }
+
+  function quickTagReflowRects() {
+    return new Map(
+      [...refs.quickTagGrid.querySelectorAll(".quick-tag-item:not(.dragging)")].map((row) => [row, row.getBoundingClientRect()])
+    );
+  }
+
+  function moveQuickTagDom(fromIndex, toIndex) {
+    if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0) return false;
+    if (fromIndex >= state.quickTags.length || toIndex >= state.quickTags.length) return false;
+    const beforeRects = quickTagReflowRects();
+    const next = [...state.quickTags];
+    const [item] = next.splice(fromIndex, 1);
+    next.splice(toIndex, 0, item);
+    state.quickTags = next;
+
+    const rows = [...refs.quickTagGrid.querySelectorAll(".quick-tag-item")];
+    const moving = rows.find((row) => Number(row.dataset.quickTagIndex) === fromIndex);
+    const target = rows.find((row) => Number(row.dataset.quickTagIndex) === toIndex);
+    if (moving && target) {
+      if (fromIndex < toIndex) refs.quickTagGrid.insertBefore(moving, target.nextSibling);
+      else refs.quickTagGrid.insertBefore(moving, target);
+      updateQuickTagDomIndexes();
+    }
+    animateQuickTagReflow(beforeRects);
+    return true;
+  }
+
+  function animateQuickTagReflow(beforeRects) {
+    const rows = [...refs.quickTagGrid.querySelectorAll(".quick-tag-item:not(.dragging)")];
+    refs.quickTagGrid.classList.add("sorting");
+    for (const row of rows) {
+      const before = beforeRects.get(row);
+      if (!before) continue;
+      const after = row.getBoundingClientRect();
+      const dx = before.left - after.left;
+      const dy = before.top - after.top;
+      if (!dx && !dy) continue;
+      row.style.transition = "none";
+      row.style.transform = `translate(${dx}px, ${dy}px)`;
+      row.getBoundingClientRect();
+      requestAnimationFrame(() => {
+        row.style.transition = "";
+        row.style.transform = "";
+      });
+    }
+    window.clearTimeout(state.quickTagSortTimer);
+    state.quickTagSortTimer = window.setTimeout(() => {
+      refs.quickTagGrid?.classList.remove("sorting");
+      refs.quickTagGrid?.querySelectorAll(".quick-tag-item").forEach((row) => {
+        row.style.transition = "";
+        row.style.transform = "";
+      });
+    }, 220);
+  }
+
+  function clearQuickTagHoverTimer() {
+    if (state.quickTagHoverTimer) {
+      window.clearTimeout(state.quickTagHoverTimer);
+      state.quickTagHoverTimer = 0;
+    }
+    state.quickTagHoverRow = null;
+  }
+
+  function clearCaptionDragEndCleanup() {
+    if (state.quickTagCaptionDragEndTimer) {
+      window.clearTimeout(state.quickTagCaptionDragEndTimer);
+      state.quickTagCaptionDragEndTimer = 0;
+    }
+  }
+
+  function scheduleCaptionDragEndCleanup() {
+    clearCaptionDragEndCleanup();
+    state.quickTagCaptionDragEndTimer = window.setTimeout(() => {
+      state.quickTagCaptionDragEndTimer = 0;
+      cleanupQuickTagDragState();
+    }, 140);
+  }
+
+  function scheduleQuickTagHover(row) {
+    if (!row || state.quickTagHoverRow === row) return;
+    clearQuickTagHoverTimer();
+    state.quickTagHoverRow = row;
+    state.quickTagHoverTimer = window.setTimeout(() => {
+      state.quickTagHoverTimer = 0;
+      if (state.quickTagHoverRow !== row || !row.isConnected) return;
+      state.quickTagHoverRow = null;
+      const drag = quickTagDragSource();
+      if (drag?.type === "quick") {
+        const fromIndex = Number(state.quickTagDragIndex);
+        const toIndex = Math.min(quickTagIndexForHoveredRow(row), state.quickTags.length - 1);
+        if (moveQuickTagDom(fromIndex, toIndex)) {
+          state.quickTagDragIndex = toIndex;
+          drag.index = toIndex;
+          drag.moved = true;
+        }
+      }
+    }, 200);
+  }
+
+  function moveCaptionDraftQuickTag(targetIndex) {
+    const drag = quickTagDragSource();
+    if (drag?.type !== "caption") return false;
+    const value = `${drag.value || ""}`.trim();
+    if (!value) return false;
+    const nextIndex = Math.max(0, Math.min(targetIndex, state.quickTags.length));
+    if (!drag.inserted) {
+      const next = [...state.quickTags];
+      next.splice(nextIndex, 0, value);
+      state.quickTags = next;
+      state.quickTagDragIndex = nextIndex;
+      drag.index = nextIndex;
+      drag.inserted = true;
+      renderQuickTags();
+      return true;
+    }
+    const fromIndex = Number(state.quickTagDragIndex);
+    const toIndex = Math.min(fromIndex <= nextIndex ? nextIndex + 1 : nextIndex, state.quickTags.length - 1);
+    if (moveQuickTagDom(fromIndex, toIndex)) {
+      state.quickTagDragIndex = toIndex;
+      drag.index = toIndex;
+      drag.moved = true;
+      return true;
+    }
+    return false;
+  }
+
+  function removeCaptionDraftQuickTag() {
+    const drag = quickTagDragSource();
+    if (drag?.type !== "caption" || !drag.inserted || drag.committed) return;
+    const index = Number(state.quickTagDragIndex);
+    if (index >= 0 && index < state.quickTags.length) {
+      state.quickTags.splice(index, 1);
+      renderQuickTags();
+    }
+    drag.inserted = false;
+    drag.index = null;
+    state.quickTagDragIndex = null;
+  }
+
+  function handleQuickTagDragOver(event, row = null) {
+    if (!eventHasQuickTagDrop(event)) return;
+    event.preventDefault();
+    refs.quickTagPanel?.classList.remove("delete-mode");
+    refs.quickTagGrid?.classList.add("drop-ready");
+    const drag = quickTagDragSource();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = drag?.type === "caption" ? "copy" : "move";
+    if (drag?.type === "caption") clearCaptionDragEndCleanup();
+
+    if (drag?.type === "caption") {
+      clearQuickTagHoverTimer();
+      moveCaptionDraftQuickTag(state.quickTags.length);
+      return;
+    }
+
+    const targetRow = quickTagRowFromPoint(event) || row;
+    if (targetRow) {
+      scheduleQuickTagHover(targetRow);
+      return;
+    }
+
+    clearQuickTagHoverTimer();
+
+    if (drag?.type === "quick") {
+      return;
+    }
+
+    if (drag?.type === "caption") {
+      return;
+    }
+  }
+
+  function handleQuickTagDrop(event) {
+    const drag = quickTagDragSource();
+    refs.quickTagGrid?.classList.remove("drop-ready");
+    if (drag?.type === "caption") {
+      if (!drag.inserted) moveCaptionDraftQuickTag(state.quickTags.length);
+      drag.committed = true;
+      persistQuickTags();
+      renderQuickTags();
+      cleanupQuickTagDragState();
+      return;
+    }
+    if (drag?.type === "quick") {
+      persistQuickTags();
+      renderQuickTags();
+      cleanupQuickTagDragState();
+    }
+  }
+
+  function isQuickTagDropPoint(event) {
+    const x = Number(event.clientX);
+    const y = Number(event.clientY);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
+    const rect = refs.quickTagPanel?.getBoundingClientRect();
+    return Boolean(rect && x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom);
+  }
+
+  function deleteDraggingQuickTag() {
+    const drag = quickTagDragSource();
+    if (drag?.type !== "quick") return;
+    const index = Number(state.quickTagDragIndex);
+    if (index < 0 || index >= state.quickTags.length) return;
+    drag.deleting = true;
+    state.quickTags.splice(index, 1);
+    persistQuickTags();
+    renderQuickTags();
+  }
+
+  function cleanupQuickTagDragState() {
+    removeCaptionDraftQuickTag();
+    clearCaptionDragEndCleanup();
+    state.quickTagDragIndex = null;
+    state.quickTagDragging = null;
+    refs.quickTagPanel?.classList.remove("delete-mode");
+    refs.quickTagGrid?.classList.remove("drop-ready");
+    refs.quickTagGrid?.querySelectorAll(".quick-tag-item.dragging").forEach((node) => {
+      node.classList.remove("dragging");
+    });
+    clearQuickTagHoverTimer();
+  }
+
+  refs.quickTagGrid?.addEventListener("dragover", (event) => {
+    if (!eventHasQuickTagDrop(event)) return;
+    handleQuickTagDragOver(event);
+  });
+
+  refs.quickTagGrid?.addEventListener("drop", (event) => {
+    if (!eventHasQuickTagDrop(event)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    handleQuickTagDrop(event);
+  });
+
+  document.addEventListener("dragover", (event) => {
+    const drag = quickTagDragSource();
+    const outside = !isQuickTagDropPoint(event);
+    if (drag?.type === "caption") {
+      if (outside) clearQuickTagHoverTimer();
+      return;
+    }
+    if (drag?.type !== "quick") return;
+    if (outside) clearQuickTagHoverTimer();
+    refs.quickTagPanel?.classList.toggle("delete-mode", outside);
+    if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+    if (outside) event.preventDefault();
+  }, true);
+
+  document.addEventListener("drop", (event) => {
+    const drag = quickTagDragSource();
+    if (drag?.type !== "quick" || isQuickTagDropPoint(event)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    deleteDraggingQuickTag();
+    cleanupQuickTagDragState();
+  }, true);
+
   function toggleQuickTags(force = null) {
     state.quickTagsCollapsed = force === null ? !state.quickTagsCollapsed : Boolean(force);
     saveStored(STORAGE_KEYS.quickTagsCollapsed, state.quickTagsCollapsed ? "true" : "false");
     renderQuickTags();
   }
 
-  function moveQuickTag(fromIndex, toIndex) {
+  function moveQuickTag(fromIndex, toIndex, options = {}) {
     if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0) return;
     if (fromIndex >= state.quickTags.length || toIndex >= state.quickTags.length) return;
     const next = [...state.quickTags];
     const [item] = next.splice(fromIndex, 1);
     next.splice(toIndex, 0, item);
     state.quickTags = next;
-    setQuickTagsDirty(true);
+    if (options.persist) persistQuickTags();
     renderQuickTags();
   }
 
@@ -499,7 +816,7 @@ export function createEditorModule({
         state.quickTags.splice(index, 1);
       }
       state.quickTags = cleanQuickTags(state.quickTags);
-      setQuickTagsDirty(true);
+      persistQuickTags();
       renderQuickTags();
     };
 
@@ -857,8 +1174,10 @@ export function createEditorModule({
     if (!(await confirmDiscardCaptionChanges())) return;
     const ok = await window.appConfirm(`确定从导出数据集中排除 ${state.selectedName}？原始文件不会被删除。`);
     if (!ok) return;
+    const selectNext = prepareSelectionAfterRemoving?.([state.selectedName]);
     await apiPost("/api/item/delete", { name: state.selectedName });
-    await refreshItems();
+    if (selectNext) await selectNext();
+    else await refreshItems();
   }
 
   async function loadPromptTemplates() {

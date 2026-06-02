@@ -76,9 +76,12 @@ const state = {
   currentSegments: [],
   quickTags: [],
   quickTagsCollapsed: true,
-  quickTagsDirty: false,
   quickTagClickTimer: null,
   quickTagDragIndex: null,
+  quickTagSortTimer: 0,
+  quickTagHoverTimer: 0,
+  quickTagHoverRow: null,
+  quickTagCaptionDragEndTimer: 0,
   aiStatus: null,
   promptTemplates: [],
   aiOptions: {
@@ -213,7 +216,6 @@ const refs = {
   quickTagGrid: document.querySelector("#quickTagGrid"),
   quickTagPanel: document.querySelector("#quickTagPanel"),
   quickTagToggleBtn: document.querySelector("#quickTagToggleBtn"),
-  quickTagSaveBtn: document.querySelector("#quickTagSaveBtn"),
   translateCurrentBtn: document.querySelector("#translateCurrentBtn"),
   translatedText: document.querySelector("#translatedText"),
   globalTagSearch: document.querySelector("#globalTagSearch"),
@@ -333,7 +335,7 @@ function createAppDialog() {
       input.value = "";
       if (previousFocus?.focus) previousFocus.focus();
       resolve(value);
-    }, 180);
+    }, 220);
   }
 
   function open({ kind = "alert", titleText = "提示", messageText = "", defaultValue = "" } = {}) {
@@ -382,9 +384,17 @@ function createAppDialog() {
       event.preventDefault();
       finish(dialogKind === "alert" ? true : dialogKind === "prompt" ? null : false);
     }
+    if ((event.key === " " || event.key === "Spacebar") && document.activeElement !== input) {
+      event.preventDefault();
+      finish(dialogKind === "prompt" ? input.value : true);
+    }
     if (event.key === "Enter" && dialogKind === "prompt" && document.activeElement === input) {
       event.preventDefault();
       finish(input.value);
+    }
+    if (event.key === "Enter" && document.activeElement !== input) {
+      event.preventDefault();
+      finish(dialogKind === "prompt" ? input.value : true);
     }
   });
 
@@ -424,7 +434,7 @@ function bindAboutDialog() {
       root.classList.remove("dialog-closing");
       document.body.classList.remove("dialog-open");
       if (previousFocus?.focus) previousFocus.focus();
-    }, 180);
+    }, 220);
   }
 
   function open() {
@@ -449,26 +459,13 @@ function bindAboutDialog() {
     if (event.target === root) close();
   });
   root?.addEventListener("keydown", (event) => {
-    if (event.key !== "Escape") return;
+    if (event.key !== "Escape" && event.key !== " " && event.key !== "Spacebar" && event.key !== "Enter") return;
     event.preventDefault();
     close();
   });
 }
 
 bindAboutDialog();
-
-function saveQuickTags() {
-  state.quickTags = cleanQuickTags(state.quickTags);
-  saveStored(STORAGE_KEYS.quickTags, JSON.stringify(state.quickTags));
-  state.quickTagsDirty = false;
-  if (refs.quickTagSaveBtn) {
-    refs.quickTagSaveBtn.title = "已存储";
-    window.setTimeout(() => {
-      refs.quickTagSaveBtn.title = "";
-    }, 700);
-  }
-  renderQuickTags();
-}
 
 function syncSegmentsFromText() {
   state.currentSegments = parseSegments(state.currentText);
@@ -658,6 +655,8 @@ const {
   shouldIgnoreListArrowNavigation,
   scrollSelectedItemIntoView,
   selectRelativeItem,
+  prepareSelectionAfterRemoving,
+  trashCurrentItem,
   refreshItems,
   selectItem,
   applyWorkspaceSummary,
@@ -710,6 +709,7 @@ const editorModule = createEditorModule({
   renderViewer,
   confirmDiscardCaptionChanges,
   setCaptionEditorText,
+  prepareSelectionAfterRemoving,
   normalizeCaptionText,
   normalizeCaptionInputText,
   syncSegmentsFromText,
@@ -871,6 +871,7 @@ const { restorePersistedSettings, bindSettingsPersistence, bindEvents, bootstrap
   refreshItems,
   selectItem,
   selectRelativeItem,
+  trashCurrentItem,
   shouldIgnoreListArrowNavigation,
   loadWorkspace,
   rescanWorkspace,
@@ -912,7 +913,6 @@ const { restorePersistedSettings, bindSettingsPersistence, bindEvents, bootstrap
   templateById,
   appendSegmentsToCaption,
   toggleQuickTags,
-  saveQuickTags,
   setCaptionEditorText,
   normalizeCaptionText,
   normalizeCaptionInputText,

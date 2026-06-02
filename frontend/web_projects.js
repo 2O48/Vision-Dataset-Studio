@@ -62,10 +62,12 @@ export function createProjectsModule({
       selected_name: state.selectedName || "",
       selected_panel: state.selectedPanel || "primary",
       filter: state.filter || "all",
+      item_folder_filter: state.itemFolderFilter || "",
       segment_query: refs.tagSearch?.value.trim() || state.segmentQuery || "",
       list_search_mode: state.listSearchMode === "name" ? "name" : "phrase",
       list_search_match_mode: state.listSearchMatchMode === "exact" ? "exact" : "contains",
       secondary_filter: state.secondaryFilter || "all",
+      secondary_item_folder_filter: state.secondaryItemFolderFilter || "",
       secondary_segment_query: refs.secondaryTagSearch?.value.trim() || state.secondarySegmentQuery || "",
       secondary_list_search_mode: state.secondaryListSearchMode === "name" ? "name" : "phrase",
       secondary_list_search_match_mode: state.secondaryListSearchMatchMode === "exact" ? "exact" : "contains",
@@ -197,6 +199,7 @@ export function createProjectsModule({
     saveStored(STORAGE_KEYS.viewMode, state.viewMode);
     state.selectedPanel = uiState.selected_panel === "secondary" ? "secondary" : "primary";
     state.filter = uiState.filter || "all";
+    state.itemFolderFilter = uiState.item_folder_filter || "";
     state.segmentQuery = uiState.segment_query || "";
     if (refs.tagSearch) refs.tagSearch.value = state.segmentQuery;
     state.listSearchMode = uiState.list_search_mode === "name" ? "name" : "phrase";
@@ -204,6 +207,7 @@ export function createProjectsModule({
     state.listSearchMatchMode = uiState.list_search_match_mode === "exact" ? "exact" : "contains";
     saveStored(STORAGE_KEYS.listSearchMatchMode, state.listSearchMatchMode);
     state.secondaryFilter = uiState.secondary_filter || "all";
+    state.secondaryItemFolderFilter = uiState.secondary_item_folder_filter || "";
     state.secondarySegmentQuery = uiState.secondary_segment_query || "";
     if (refs.secondaryTagSearch) refs.secondaryTagSearch.value = state.secondarySegmentQuery;
     state.secondaryListSearchMode = uiState.secondary_list_search_mode === "name" ? "name" : "phrase";
