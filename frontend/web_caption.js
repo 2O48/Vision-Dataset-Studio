@@ -628,6 +628,27 @@ export function createCaptionModule({
     setAiStatusLine(`ZIP 已生成并开始下载：${filename}`);
   }
 
+  async function showExportSuccessDialog(exportInfo) {
+    const result = exportInfo.result || {};
+    const exportPath = result.path || "";
+    const exported = Number(exportInfo.exported || result.exported || 0);
+    const skipped = Number(exportInfo.skipped || result.skipped?.length || 0);
+    const details = [
+      `已导出 ${exported} 项。`,
+      skipped ? `跳过 ${skipped} 项。` : "",
+      exportPath ? `位置：${exportPath}` : "",
+    ].filter(Boolean).join("\n");
+    const action = await window.appChoice(details, "导出成功", {
+      cancelText: "确定",
+      confirmText: "打开文件夹",
+      cancelValue: "ok",
+      confirmValue: "open",
+    });
+    if (action === "open") {
+      await apiPost("/api/export/reveal", {});
+    }
+  }
+
   function hasActiveAiStatus(data) {
     return (
       data.export?.running ||
@@ -692,6 +713,9 @@ export function createCaptionModule({
         state.lastExportSignature = exportSignature;
         if (exportInfo.status === "done" && exportInfo.result?.format === "zip" && exportPath) {
           await downloadFinishedExport(exportInfo);
+        }
+        if (exportInfo.status === "done" && exportPath && state.exportDownloadRequested) {
+          await showExportSuccessDialog(exportInfo);
         }
         if (["done", "stopped", "error"].includes(exportInfo.status)) {
           state.exportDownloadRequested = false;

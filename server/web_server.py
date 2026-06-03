@@ -209,6 +209,17 @@ def _open_in_file_manager(path: Path):
         subprocess.Popen(["xdg-open", str(target.parent)])
 
 
+def _open_folder_for_path(path: Path):
+    target = path.resolve()
+    folder = target if target.is_dir() else target.parent
+    if sys.platform.startswith("win"):
+        subprocess.Popen(["explorer.exe", str(folder)])
+    elif sys.platform == "darwin":
+        subprocess.Popen(["open", str(folder)])
+    else:
+        subprocess.Popen(["xdg-open", str(folder)])
+
+
 def _tmp_cleanup_loop():
     while True:
         time.sleep(24 * 3600)
@@ -641,6 +652,11 @@ class AppHandler(BaseHTTPRequestHandler):
             if path == "/api/export/stop":
                 EXPORT_MANAGER.stop()
                 return self._send_json({"ok": True, "export": EXPORT_MANAGER.snapshot()})
+
+            if path == "/api/export/reveal":
+                export_path = EXPORT_MANAGER.result_path()
+                _open_folder_for_path(export_path)
+                return self._send_json({"ok": True, "path": str(export_path)})
 
             if path == "/api/export/dataset":
                 names = body.get("names", [])

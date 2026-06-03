@@ -112,7 +112,7 @@ export function createProjectsModule({
         process_include_controls: Boolean(refs.processIncludeControls?.checked),
         process_load_workspace: Boolean(refs.processLoadWorkspace?.checked),
         process_only_mismatched: Boolean(refs.processOnlyMismatched?.checked),
-        export_project_name: refs.exportProjectName?.value || projectName || "",
+        export_project_name: projectName || "",
         export_target_pixels: refs.exportTargetPixels?.value || "",
         export_size_multiple: refs.exportSizeMultiple?.value || "",
         export_format: refs.exportFormat?.value || "",
@@ -140,7 +140,19 @@ export function createProjectsModule({
     }));
   }
 
+  function setExportProjectNameDefault(projectName) {
+    if (!refs.exportProjectName) return;
+    refs.exportProjectName.value = `${projectName || ""}`.trim();
+  }
+
+  function setProcessProjectNameDefault(projectName) {
+    if (!refs.processProjectName) return;
+    refs.processProjectName.value = `${projectName || ""}`.trim();
+  }
+
   function applyProjectUiState(uiState, projectName) {
+    setExportProjectNameDefault(projectName);
+    setProcessProjectNameDefault(projectName);
     if (!uiState || typeof uiState !== "object") return;
     const workspaceSettings = uiState.workspace_settings || {};
     const captionSettings = uiState.caption_settings || {};
@@ -172,11 +184,11 @@ export function createProjectsModule({
     setValue(refs.ollamaPrompt, captionSettings.ollama_prompt, STORAGE_KEYS.ollamaPrompt);
 
     setValue(refs.viewerTargetPixels, processingSettings.viewer_target_pixels, STORAGE_KEYS.viewerTargetPixels);
-    setValue(refs.processProjectName, processingSettings.process_project_name || projectName, STORAGE_KEYS.processProjectName);
+    setProcessProjectNameDefault(projectName);
     setChecked(refs.processIncludeControls, processingSettings.process_include_controls, STORAGE_KEYS.processIncludeControls);
     setChecked(refs.processLoadWorkspace, processingSettings.process_load_workspace, STORAGE_KEYS.processLoadWorkspace);
     setChecked(refs.processOnlyMismatched, processingSettings.process_only_mismatched, STORAGE_KEYS.processOnlyMismatched);
-    setValue(refs.exportProjectName, processingSettings.export_project_name || projectName, STORAGE_KEYS.exportProjectName);
+    setExportProjectNameDefault(projectName);
     setValue(refs.exportTargetPixels, processingSettings.export_target_pixels, STORAGE_KEYS.exportTargetPixels);
     setValue(refs.exportSizeMultiple, processingSettings.export_size_multiple, STORAGE_KEYS.exportSizeMultiple);
     setValue(refs.exportFormat, processingSettings.export_format, STORAGE_KEYS.exportFormat);

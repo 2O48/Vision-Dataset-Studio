@@ -86,6 +86,13 @@ class ExportManager:
                 raise FileNotFoundError("Export ZIP is not ready.")
             return path
 
+    def result_path(self) -> Path:
+        with self._lock:
+            path = Path(str(self.result.get("path", "") or ""))
+            if self.status != "done" or not path.exists():
+                raise FileNotFoundError("Export result is not ready.")
+            return path
+
     def _progress(self, row: dict):
         with self._lock:
             self.total = int(row.get("total", self.total) or self.total)
