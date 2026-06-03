@@ -18,6 +18,7 @@ export const STORAGE_KEYS = {
   viewMode: storageKey("view-mode"),
   listThumbMode: storageKey("list-thumb-mode"),
   splitListOpen: storageKey("split-list-open"),
+  selectedItemState: storageKey("selected-item-state"),
   secondaryListThumbMode: storageKey("secondary-list-thumb-mode"),
   secondaryListSearchMode: storageKey("secondary-list-search-mode"),
   secondaryListSearchMatchMode: storageKey("secondary-list-search-match-mode"),
@@ -225,14 +226,14 @@ export function filenameFromDisposition(value) {
 
 export function splitSegmentInput(value) {
   return `${value || ""}`
-    .split(",")
+    .split(/[,。]+/)
     .map((segment) => segment.trim())
     .filter(Boolean);
 }
 
 export function parseSegments(value) {
   return `${value || ""}`
-    .split(/[,\n;，；]+/)
+    .split(/[,\n;，；。]+/)
     .map((item) => item.trim())
     .filter(Boolean);
 }

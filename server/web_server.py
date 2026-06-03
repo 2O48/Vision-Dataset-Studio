@@ -68,6 +68,53 @@ PROMPT_TEMPLATES = PromptTemplateStore(PROMPT_TEMPLATES_FILE)
 PROJECT_STORE = ProjectStore()
 THUMB_CACHE_LOCK = threading.RLock()
 THUMB_CACHE: OrderedDict[tuple[str, int, int, int, str], bytes] = OrderedDict()
+ACTIVE_PROJECT_LOCK = threading.RLock()
+ACTIVE_PROJECT_ID = ""
+
+
+def _set_active_project(project_id: str = "") -> None:
+    global ACTIVE_PROJECT_ID
+    with ACTIVE_PROJECT_LOCK:
+        ACTIVE_PROJECT_ID = str(project_id or "")
+
+
+def _active_project_id() -> str:
+    with ACTIVE_PROJECT_LOCK:
+        return ACTIVE_PROJECT_ID
+
+
+def _touch_active_project_content(project_id: str = "") -> None:
+    project_id = str(project_id or "") or _active_project_id()
+    if not project_id:
+        return
+    try:
+        PROJECT_STORE.touch_project_content(project_id)
+    except FileNotFoundError:
+        _set_active_project("")
+
+
+def _infer_project_id_from_workspace(workspace: dict) -> str:
+    dirs = workspace.get("dirs", {}) if isinstance(workspace, dict) else {}
+    paths = []
+    for value in dirs.values():
+        raw = str(value or "").strip()
+        if not raw:
+            continue
+        try:
+            paths.append(_resolve_user_path(raw).resolve())
+        except Exception:
+            continue
+    if not paths:
+        return ""
+    for project in PROJECT_STORE.list_projects():
+        project_path = Path(str(project.get("path", "") or "")).resolve()
+        if project_path and any(is_relative_to(path, project_path) for path in paths):
+            return str(project.get("id", "") or "")
+    return ""
+
+
+def _activate_project_for_workspace(workspace: dict) -> None:
+    _set_active_project(_infer_project_id_from_workspace(workspace))
 
 
 def _download_content_disposition(filename: str) -> str:
@@ -99,7 +146,7 @@ def _store_cached_thumbnail(key: tuple[str, int, int, int, str], data: bytes):
             THUMB_CACHE.popitem(last=False)
 
 
-BATCH_MANAGER = BatchCaptionManager(WORKSPACE, CAPTION_CLIENT, API_CAPTION_CLIENT, OLLAMA_CAPTION_CLIENT)
+BATCH_MANAGER = BatchCaptionManager(WORKSPACE, CAPTION_CLIENT, API_CAPTION_CLIENT, OLLAMA_CAPTION_CLIENT, on_content_change=_touch_active_project_content)
 IMAGE_PROCESS_MANAGER = ImageProcessManager(WORKSPACE)
 EXPORT_MANAGER = ExportManager(WORKSPACE)
 
@@ -315,6 +362,7 @@ class AppHandler(BaseHTTPRequestHandler):
                     control_count=body.get("control_count"),
                     ignore_tokens=body.get("ignore_tokens"),
                 )
+                _activate_project_for_workspace(summary)
                 IMAGE_PROCESS_MANAGER.reset_if_idle()
                 return self._send_json({"ok": True, "workspace": summary})
 
@@ -330,6 +378,8 @@ class AppHandler(BaseHTTPRequestHandler):
                     result_dir=body.get("result_dir") or None,
                     control_count=body.get("control_count"),
                 )
+                if int(result.get("merged", 0) or 0) > 0:
+                    _touch_active_project_content()
                 return self._send_json({"ok": True, **result})
 
             if path == "/api/projects/save":
@@ -360,6 +410,15 @@ class AppHandler(BaseHTTPRequestHandler):
                 if aliases:
                     summary = WORKSPACE.apply_name_aliases(aliases)
                 result["workspace"] = summary
+                _set_active_project(result.get("project", {}).get("id", ""))
+                return self._send_json({"ok": True, **result})
+
+            if path == "/api/projects/create":
+                result = PROJECT_STORE.create_project(
+                    name=str(body.get("name", "") or ""),
+                    control_count=body.get("control_count"),
+                    ui_state=body.get("ui_state", {}),
+                )
                 return self._send_json({"ok": True, **result})
 
             if path == "/api/projects/open":
@@ -384,6 +443,7 @@ class AppHandler(BaseHTTPRequestHandler):
                 }
                 if aliases:
                     summary = WORKSPACE.apply_name_aliases(aliases)
+                _set_active_project(detail.get("project", {}).get("id", project_id))
                 IMAGE_PROCESS_MANAGER.reset_if_idle()
                 return self._send_json({
                     "ok": True,
@@ -393,7 +453,10 @@ class AppHandler(BaseHTTPRequestHandler):
                 })
 
             if path == "/api/projects/rename":
-                project = PROJECT_STORE.rename_project(str(body.get("id", "") or ""), str(body.get("name", "") or ""))
+                old_id = str(body.get("id", "") or "")
+                project = PROJECT_STORE.rename_project(old_id, str(body.get("name", "") or ""))
+                if _active_project_id() == old_id:
+                    _set_active_project(project.get("id", old_id))
                 return self._send_json({"ok": True, "project": project})
 
             if path == "/api/projects/clone":
@@ -411,11 +474,18 @@ class AppHandler(BaseHTTPRequestHandler):
                 return self._send_json({"ok": True, **result})
 
             if path == "/api/projects/delete":
-                result = PROJECT_STORE.delete_project(str(body.get("id", "") or ""))
+                deleted_id = str(body.get("id", "") or "")
+                result = PROJECT_STORE.delete_project(deleted_id)
+                if _active_project_id() == deleted_id:
+                    _set_active_project("")
                 return self._send_json({"ok": True, **result})
 
             if path == "/api/tmp/cleanup":
                 result = cleanup_tmp(max_age_hours=int(body.get("max_age_hours", 48) or 48))
+                return self._send_json({"ok": True, "cleanup": result})
+
+            if path == "/api/trash/cleanup":
+                result = PROJECT_STORE.cleanup_trash()
                 return self._send_json({"ok": True, "cleanup": result})
 
             if path == "/api/item/save":
@@ -427,6 +497,7 @@ class AppHandler(BaseHTTPRequestHandler):
                     if not isinstance(segments, list):
                         return self._error("segments must be a list.")
                     item = WORKSPACE.save_segments(name, segments)
+                _touch_active_project_content()
                 return self._send_json({"ok": True, "item": item})
 
             if path == "/api/item/rename":
@@ -434,10 +505,13 @@ class AppHandler(BaseHTTPRequestHandler):
                     str(body.get("name", "") or ""),
                     str(body.get("new_name", "") or ""),
                 )
+                if result.get("old_name") != result.get("new_name") or result.get("renamed"):
+                    _touch_active_project_content()
                 return self._send_json({"ok": True, **result})
 
             if path == "/api/item/clone":
                 result = WORKSPACE.clone_item(str(body.get("name", "") or ""))
+                _touch_active_project_content()
                 return self._send_json({"ok": True, **result})
 
             if path == "/api/item/swap-roles":
@@ -446,6 +520,8 @@ class AppHandler(BaseHTTPRequestHandler):
                     str(body.get("source_role", "") or ""),
                     str(body.get("target_role", "") or ""),
                 )
+                if result.get("swapped"):
+                    _touch_active_project_content()
                 return self._send_json({"ok": True, **result})
 
             if path == "/api/item/assign-control-image":
@@ -455,6 +531,7 @@ class AppHandler(BaseHTTPRequestHandler):
                     str(body.get("target_role", "") or ""),
                     str(body.get("source_role", "") or ""),
                 )
+                _touch_active_project_content()
                 return self._send_json({"ok": True, **result})
 
             if path == "/api/item/upload-control-image":
@@ -464,6 +541,7 @@ class AppHandler(BaseHTTPRequestHandler):
                     str(body.get("filename", "") or ""),
                     str(body.get("data", "") or ""),
                 )
+                _touch_active_project_content()
                 return self._send_json({"ok": True, **result})
 
             if path == "/api/item/move-folder":
@@ -471,6 +549,8 @@ class AppHandler(BaseHTTPRequestHandler):
                     str(body.get("name", "") or ""),
                     str(body.get("folder", "") or ""),
                 )
+                if result.get("moved"):
+                    _touch_active_project_content()
                 return self._send_json({"ok": True, **result})
 
             if path == "/api/item/reveal":
@@ -482,11 +562,13 @@ class AppHandler(BaseHTTPRequestHandler):
             if path == "/api/item/trash":
                 name = str(body.get("name", "") or "")
                 result = WORKSPACE.trash_item_files(name)
+                _touch_active_project_content()
                 return self._send_json({"ok": True, **result})
 
             if path == "/api/item/delete":
                 name = body.get("name", "")
                 result = WORKSPACE.delete_item(name)
+                _touch_active_project_content()
                 return self._send_json({"ok": True, **result})
 
             if path in {"/api/batch/add", "/api/batch/add-segments"}:
@@ -495,10 +577,14 @@ class AppHandler(BaseHTTPRequestHandler):
                     body.get("segments", body.get("tags", [])),
                     position=str(body.get("position", "after") or "after"),
                 )
+                if int(result.get("changed", 0) or 0) > 0:
+                    _touch_active_project_content()
                 return self._send_json({"ok": True, **result})
 
             if path in {"/api/batch/delete", "/api/batch/delete-segments"}:
                 result = WORKSPACE.batch_delete_segments(body.get("names", []), body.get("segments", body.get("tags", [])))
+                if int(result.get("changed", 0) or 0) > 0:
+                    _touch_active_project_content()
                 return self._send_json({"ok": True, **result})
 
             if path in {"/api/batch/replace", "/api/batch/replace-segment"}:
@@ -507,6 +593,8 @@ class AppHandler(BaseHTTPRequestHandler):
                     body.get("old_segment", body.get("old_tag", "")),
                     body.get("new_segment", body.get("new_tag", "")),
                 )
+                if int(result.get("changed", 0) or 0) > 0:
+                    _touch_active_project_content()
                 return self._send_json({"ok": True, **result})
 
             if path == "/api/batch/rename":
@@ -517,6 +605,8 @@ class AppHandler(BaseHTTPRequestHandler):
                     old_value=str(body.get("old_value", "") or ""),
                     new_value=str(body.get("new_value", "") or ""),
                 )
+                if int(result.get("changed", 0) or 0) > 0:
+                    _touch_active_project_content()
                 return self._send_json({"ok": True, **result})
 
             if path == "/api/batch/swap-control-result":
@@ -525,6 +615,8 @@ class AppHandler(BaseHTTPRequestHandler):
                     result_dir=body.get("result_dir") or None,
                     suffix=body.get("suffix", "_swap"),
                 )
+                if int(result.get("swapped", 0) or 0) > 0:
+                    _touch_active_project_content()
                 return self._send_json({"ok": True, **result})
 
             if path == "/api/export/start":
@@ -623,6 +715,7 @@ class AppHandler(BaseHTTPRequestHandler):
                         control_count=WORKSPACE.control_count,
                         ignore_tokens=WORKSPACE.ignore_tokens,
                     )
+                    _activate_project_for_workspace(summary)
                     payload["workspace"] = summary
                 return self._send_json(payload)
 
@@ -637,6 +730,7 @@ class AppHandler(BaseHTTPRequestHandler):
                     control_count=WORKSPACE.control_count,
                 )
                 updated = WORKSPACE.replace_item_paths(name, process_result.get("paths", {}))
+                _touch_active_project_content()
                 return self._send_json({"ok": True, "process": process_result, "item": updated})
 
             if path == "/api/images/item/match-result":
@@ -649,6 +743,7 @@ class AppHandler(BaseHTTPRequestHandler):
                     control_count=WORKSPACE.control_count,
                 )
                 updated = WORKSPACE.replace_item_paths(name, process_result.get("paths", {}))
+                _touch_active_project_content()
                 return self._send_json({"ok": True, "process": process_result, "item": updated})
 
             if path == "/api/translate":
@@ -715,6 +810,7 @@ class AppHandler(BaseHTTPRequestHandler):
                 )
                 output_text = _apply_caption_result(item["text"], result, request["write_mode"])
                 updated = WORKSPACE.save_text(name, output_text)
+                _touch_active_project_content()
                 return self._send_json(
                     {
                         "ok": True,
@@ -799,6 +895,7 @@ class AppHandler(BaseHTTPRequestHandler):
                         "api_base_url": body.get("api_base_url", ""),
                         "api_key": body.get("api_key", ""),
                         "ollama_base_url": body.get("ollama_base_url", "http://127.0.0.1:11434"),
+                        "project_id": _active_project_id(),
                     },
                 )
                 return self._send_json({"ok": True, "batch": BATCH_MANAGER.snapshot()})

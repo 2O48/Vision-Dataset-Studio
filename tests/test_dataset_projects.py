@@ -150,6 +150,58 @@ class ProjectStoreTests(unittest.TestCase):
             self.assertFalse((root / "app" / "projects" / renamed["id"]).exists())
             self.assertTrue(Path(deleted["trashed_to"]).is_dir())
 
+            cleanup = store.cleanup_trash()
+            self.assertIn(Path(deleted["trashed_to"]).name, cleanup["removed"])
+            self.assertFalse(Path(deleted["trashed_to"]).exists())
+
+    def test_create_project_makes_empty_named_project(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = ProjectStore(root / "app" / "projects")
+
+            created = store.create_project(
+                name="空白项目",
+                control_count=0,
+                ui_state={"utility_panel": "projects"},
+            )
+            project_id = created["project"]["id"]
+            detail = store.get_project(project_id)
+            projects = store.list_projects()
+
+            self.assertEqual(created["project"]["name"], "空白项目")
+            self.assertEqual(created["project"]["item_count"], 0)
+            self.assertEqual(created["project"]["captioned_count"], 0)
+            self.assertEqual(created["workspace"]["items"], [])
+            self.assertEqual(created["workspace"]["settings"]["control_count"], 0)
+            self.assertEqual(detail["workspace"]["ui_state"], {"utility_panel": "projects"})
+            self.assertEqual(projects[0]["id"], project_id)
+
+    def test_list_projects_repairs_stale_metadata_id(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = ProjectStore(root / "app" / "projects")
+            created = store.create_project(name="真实项目名")
+            project_id = created["project"]["id"]
+            project_dir = root / "app" / "projects" / project_id
+            project_json = project_dir / "project.json"
+            workspace_json = project_dir / "workspace.json"
+
+            project_json.write_text(
+                project_json.read_text(encoding="utf-8").replace(project_id, "20260603-090819-未命名项目"),
+                encoding="utf-8",
+            )
+            workspace_json.write_text(
+                workspace_json.read_text(encoding="utf-8").replace(project_id, "20260603-090819-未命名项目"),
+                encoding="utf-8",
+            )
+
+            projects = store.list_projects()
+            repaired = store.get_project(project_id)
+
+            self.assertEqual(projects[0]["id"], project_id)
+            self.assertEqual(repaired["project"]["id"], project_id)
+            self.assertEqual(repaired["workspace"]["project_id"], project_id)
+
     def test_save_project_uses_selected_control_count(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -170,6 +222,7 @@ class ProjectStoreTests(unittest.TestCase):
             workspace = self._make_workspace(root)
             saved = store.save_project(name="标注配置项目", workspace=workspace)
             project_id = saved["project"]["id"]
+            original_updated_at = saved["project"]["updated_at"]
 
             ui_state = {
                 "caption_settings": {
@@ -187,6 +240,11 @@ class ProjectStoreTests(unittest.TestCase):
 
             self.assertEqual(updated["workspace"]["ui_state"], ui_state)
             self.assertEqual(reopened["workspace"]["ui_state"], ui_state)
+            self.assertEqual(updated["project"]["updated_at"], original_updated_at)
+            self.assertEqual(reopened["project"]["updated_at"], original_updated_at)
+            with mock.patch("core.dataset_projects._now", return_value="2099-01-02T03:04:05"):
+                touched = store.touch_project_content(project_id)
+            self.assertEqual(touched["updated_at"], "2099-01-02T03:04:05")
             self.assertEqual(
                 (root / "app" / "projects" / project_id / "state" / "caption_config.json").read_text(encoding="utf-8"),
                 '{\n  "local_overwrite_mode": "skip",\n  "local_caption_mode": "tag",\n  "local_max_tokens": "1024",\n  "local_prompt": "只输出短标签"\n}',

@@ -73,7 +73,7 @@ def _resolve_user_path(value: str) -> Path:
 
 
 def _parse_caption_segments(content: str) -> list[str]:
-    return [segment.strip() for segment in re.split(r"[,，;\n；]+", content or "") if segment.strip()]
+    return [segment.strip() for segment in re.split(r"[,，;\n；。]+", content or "") if segment.strip()]
 
 
 def _parse_tags(content: str) -> list[str]:
@@ -107,12 +107,12 @@ def _merge_text_with_segments(existing: str, segments: list[str], position: str 
     if not additions:
         return current_text
     if position == "before":
-        return ", ".join(additions) + f"; {current_text.lstrip(',，;； ')}"
-    return f"{current_text.rstrip(',，;； ')}; " + ", ".join(additions)
+        return ", ".join(additions) + f"; {current_text.lstrip(',，;；。 ')}"
+    return f"{current_text.rstrip(',，;；。 ')}; " + ", ".join(additions)
 
 
 def _split_caption_parts(content: str) -> list[tuple[str, str]]:
-    tokens = re.split(r"([,，;\n；]+)", content or "")
+    tokens = re.split(r"([,，;\n；。]+)", content or "")
     parts: list[tuple[str, str]] = []
     index = 0
     while index < len(tokens):

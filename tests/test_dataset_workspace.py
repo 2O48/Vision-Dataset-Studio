@@ -28,8 +28,8 @@ class DatasetWorkspaceTextTests(unittest.TestCase):
         self._state_tmp.cleanup()
 
     def test_parse_caption_segments_multi_separators(self):
-        value = "a, b，c; d；e\nf"
-        self.assertEqual(_parse_caption_segments(value), ["a", "b", "c", "d", "e", "f"])
+        value = "a, b，c; d；e\nf。g.h"
+        self.assertEqual(_parse_caption_segments(value), ["a", "b", "c", "d", "e", "f", "g.h"])
 
     def test_delete_caption_segments_keeps_layout(self):
         value = "A girl near window,\nsoft light; blue dress"
@@ -401,6 +401,7 @@ class DatasetWorkspaceTextTests(unittest.TestCase):
                 result = workspace.trash_item_files("sample")
 
             self.assertEqual(send_to_trash.call_count, 3)
+            self.assertEqual(len(result["trashed"]), 3)
             self.assertFalse(control_file.exists())
             self.assertFalse(result_file.exists())
             self.assertFalse(txt_file.exists())

@@ -95,6 +95,7 @@ export function createBrowserModule({
   function setPanelFolderFilter(panelId, value) {
     if (panelId === "secondary") state.secondaryItemFolderFilter = value || "";
     else state.itemFolderFilter = value || "";
+    saveListViewState();
   }
 
   function panelSegmentQuery(panelId = "primary") {
@@ -126,6 +127,86 @@ export function createBrowserModule({
 
   function panelThumbMode(panelId = "primary") {
     return panelId === "secondary" ? (state.secondaryListThumbMode || "result") : (state.listThumbMode || "result");
+  }
+
+  function workspaceSelectionKey() {
+    const workspaceKey = state.workspace?.workspace_key || "";
+    if (workspaceKey) return workspaceKey;
+    const dirs = state.workspace?.dirs || {};
+    return ["control1", "control2", "control3", "result"].map((key) => dirs[key] || "").join("|");
+  }
+
+  function readStoredListViewState() {
+    try {
+      const raw = window.localStorage.getItem(STORAGE_KEYS.selectedItemState);
+      const value = raw ? JSON.parse(raw) : null;
+      return value && typeof value === "object" ? value : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function saveListViewState() {
+    window.localStorage.setItem(STORAGE_KEYS.selectedItemState, JSON.stringify({
+      workspace_key: workspaceSelectionKey(),
+      name: state.selectedName || "",
+      panel: activeListPanelId(),
+      folder_filter: state.itemFolderFilter || "",
+      secondary_folder_filter: state.secondaryItemFolderFilter || "",
+    }));
+  }
+
+  function clearListViewState() {
+    window.localStorage.removeItem(STORAGE_KEYS.selectedItemState);
+  }
+
+  function storedListViewStateForActiveWorkspace() {
+    const value = readStoredListViewState();
+    if (!value) return null;
+    const storedKey = `${value.workspace_key || ""}`;
+    const currentKey = workspaceSelectionKey();
+    if (storedKey && currentKey && storedKey !== currentKey) return null;
+    return {
+      name: `${value.name || ""}`,
+      panel: value.panel === "secondary" && state.splitListOpen ? "secondary" : "primary",
+      folderFilter: `${value.folder_filter || ""}`,
+      secondaryFolderFilter: `${value.secondary_folder_filter || ""}`,
+    };
+  }
+
+  function candidateNameForPanel(panelId, preferredName = "", fallbackIndex = 0) {
+    const items = panelVisibleItems(panelId);
+    if (!items.length) return "";
+    if (preferredName && items.some((item) => item.name === preferredName)) return preferredName;
+    const nextIndex = Math.max(0, Math.min(items.length - 1, fallbackIndex));
+    return items[nextIndex]?.name || "";
+  }
+
+  function nextNameAfterRemoving(panelId, removedNames = []) {
+    const removed = new Set((Array.isArray(removedNames) ? removedNames : [removedNames]).filter(Boolean));
+    const before = panelVisibleItems(panelId).map((item) => item.name);
+    const firstRemovedIndex = before.findIndex((name) => removed.has(name));
+    const fallbackIndex = firstRemovedIndex >= 0 ? firstRemovedIndex : before.findIndex((name) => name === state.selectedName);
+    return () => candidateNameForPanel(panelId, "", Math.max(0, fallbackIndex));
+  }
+
+  async function selectAfterListMutation(panelId, preferredName = "", fallbackIndex = 0) {
+    const nextName = candidateNameForPanel(panelId, preferredName, fallbackIndex);
+    if (nextName) {
+      await selectItem(nextName, true, { skipDirtyCheck: true, panelId });
+      return;
+    }
+    state.selectedName = "";
+    if (panelId === "secondary") state.secondarySelectedName = "";
+    else state.primarySelectedName = "";
+    state.currentItem = null;
+    clearListViewState();
+    setCaptionEditorText("", { markSaved: true });
+    renderItemList();
+    renderViewer();
+    renderTags();
+    renderGlobalTags();
+    renderSelectionSummary();
   }
 
   function setPanelThumbMode(panelId, value) {
@@ -765,51 +846,42 @@ export function createBrowserModule({
   async function trashItemFiles(item) {
     if (!item?.name) return;
     if (item.name === state.selectedName && !(await confirmDiscardCaptionChanges())) return;
-    const ok = await window.appConfirm(`确定将「${displayItemName(item.name)}」的图像和关联 TXT 移到系统回收站吗？`, "删除图片");
+    const panelId = activeListPanelId();
+    const nextName = nextNameAfterRemoving(panelId, [item.name]);
+    const ok = await window.appConfirm(`确定删除「${displayItemName(item.name)}」的图像和关联 TXT 吗？`, "删除图片");
     if (!ok) return;
     const data = await apiPost("/api/item/trash", { name: item.name });
     if (data.workspace) applyWorkspaceSummary(data.workspace);
-    setAiStatusLine(`已移到系统回收站：${displayItemName(item.name)}`);
+    setAiStatusLine(`已删除：${displayItemName(item.name)}`);
     await refreshItems({ skipDirtyCheck: true, suppressSelectionSync: true });
-    const next = panelVisibleItems(activeListPanelId())[0];
-    if (next) {
-      await selectItem(next.name, true, { skipDirtyCheck: true, panelId: activeListPanelId() });
-    } else {
-      state.selectedName = "";
-      state.currentItem = null;
-      setCaptionEditorText("", { markSaved: true });
-      renderViewer();
-      renderTags();
-      renderGlobalTags();
-      renderSelectionSummary();
-    }
+    await selectAfterListMutation(panelId, nextName());
+  }
+
+  async function trashCurrentItem() {
+    if (!state.selectedName) return;
+    const item = state.currentItem?.name === state.selectedName
+      ? state.currentItem
+      : panelItems(activeListPanelId()).find((candidate) => candidate.name === state.selectedName);
+    if (!item) return;
+    await trashItemFiles(item);
   }
 
   async function trashBatchItems(names) {
     const targets = [...new Set(names || [])].filter(Boolean);
     if (!targets.length) return;
     if (targets.includes(state.selectedName) && !(await confirmDiscardCaptionChanges())) return;
-    const ok = await window.appConfirm(`确定将所选 ${targets.length} 项的图像和关联 TXT 移到系统回收站吗？`, "批量删除图片");
+    const panelId = activeListPanelId();
+    const nextName = nextNameAfterRemoving(panelId, targets);
+    const ok = await window.appConfirm(`确定删除所选 ${targets.length} 项的图像和关联 TXT 吗？`, "批量删除图片");
     if (!ok) return;
     for (const name of targets) {
       const data = await apiPost("/api/item/trash", { name });
       if (data.workspace) applyWorkspaceSummary(data.workspace);
     }
     clearBatchSelection();
-    setAiStatusLine(`已移到系统回收站：${targets.length} 项`);
+    setAiStatusLine(`已删除：${targets.length} 项`);
     await refreshItems({ skipDirtyCheck: true, suppressSelectionSync: true });
-    const next = panelVisibleItems(activeListPanelId())[0];
-    if (next) {
-      await selectItem(next.name, true, { skipDirtyCheck: true, panelId: activeListPanelId() });
-    } else {
-      state.selectedName = "";
-      state.currentItem = null;
-      setCaptionEditorText("", { markSaved: true });
-      renderViewer();
-      renderTags();
-      renderGlobalTags();
-      renderSelectionSummary();
-    }
+    await selectAfterListMutation(panelId, nextName());
   }
 
   function ensureItemContextMenuEvents() {
@@ -1815,17 +1887,27 @@ export function createBrowserModule({
       const secondaryData = await loadPanelItems("secondary");
       setPanelItems("secondary", secondaryData.items || []);
     }
+    const rememberedSelection = storedListViewStateForActiveWorkspace();
+    if (rememberedSelection) {
+      state.itemFolderFilter = rememberedSelection.folderFilter;
+      state.secondaryItemFolderFilter = rememberedSelection.secondaryFolderFilter;
+    }
     renderFilters();
     renderItemList();
     renderGlobalTags();
     renderWorkspaceSummary();
 
-    const activeVisibleItems = panelVisibleItems(activeListPanelId());
+    const activePanel = rememberedSelection?.panel || activeListPanelId();
+    if (rememberedSelection?.panel && rememberedSelection.panel !== state.selectedPanel) {
+      state.selectedPanel = rememberedSelection.panel;
+    }
+    const activeVisibleItems = panelVisibleItems(activePanel);
     if (!activeVisibleItems.length) {
       state.selectedName = "";
-      if (activeListPanelId() === "secondary") state.secondarySelectedName = "";
+      if (activePanel === "secondary") state.secondarySelectedName = "";
       else state.primarySelectedName = "";
       state.currentItem = null;
+      saveListViewState();
       setCaptionEditorText("", { markSaved: true });
       renderViewer();
       renderTags();
@@ -1837,8 +1919,9 @@ export function createBrowserModule({
     }
 
     const stillExists = activeVisibleItems.some((item) => item.name === state.selectedName);
-    const nextName = stillExists ? state.selectedName : activeVisibleItems[0].name;
-    await selectItem(nextName, !stillExists, { skipDirtyCheck, panelId: activeListPanelId() });
+    const rememberedExists = rememberedSelection?.name && activeVisibleItems.some((item) => item.name === rememberedSelection.name);
+    const nextName = stillExists ? state.selectedName : rememberedExists ? rememberedSelection.name : activeVisibleItems[0].name;
+    await selectItem(nextName, !stillExists || rememberedExists, { skipDirtyCheck, panelId: activePanel });
   }
 
   async function selectItem(name, rerenderList = true, options = {}) {
@@ -1854,6 +1937,7 @@ export function createBrowserModule({
     if (!rerenderList) updateItemCardActiveState();
     const data = await apiGet("/api/item", { name });
     state.currentItem = data.item;
+    saveListViewState();
     setCaptionEditorText(data.item.text || "", { markSaved: true });
     if (rerenderList) renderItemList();
     renderViewer();
@@ -1874,6 +1958,15 @@ export function createBrowserModule({
     }
     await selectItem(nextItem.name, true, { panelId: activeListPanelId() });
     scrollSelectedItemIntoView("nearest");
+  }
+
+  function prepareSelectionAfterRemoving(names = []) {
+    const panelId = activeListPanelId();
+    const nextName = nextNameAfterRemoving(panelId, names);
+    return async () => {
+      await refreshItems({ skipDirtyCheck: true, suppressSelectionSync: true });
+      await selectAfterListMutation(panelId, nextName());
+    };
   }
 
   function applyWorkspaceSummary(workspace) {
@@ -2024,6 +2117,8 @@ export function createBrowserModule({
     shouldIgnoreListArrowNavigation,
     scrollSelectedItemIntoView,
     selectRelativeItem,
+    prepareSelectionAfterRemoving,
+    trashCurrentItem,
     refreshItems,
     selectItem,
     applyWorkspaceSummary,

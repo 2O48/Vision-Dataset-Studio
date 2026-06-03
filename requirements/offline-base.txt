@@ -1,0 +1,6 @@
+pip
+setuptools
+wheel
+virtualenv
+pillow
+send2trash

@@ -397,7 +397,7 @@ button {
   background: var(--paper-strong);
   box-shadow: var(--shadow);
   opacity: 0;
-  transform: translateY(12px) scale(0.8);
+  transform: translateY(12px) scale(0.6);
   transition:
     opacity 180ms cubic-bezier(0.16, 1, 0.3, 1),
     transform 220ms cubic-bezier(0.16, 1, 0.3, 1);
@@ -411,18 +411,28 @@ button {
 }
 
 .dialog-backdrop.dialog-closing .dialog-panel {
-  opacity: 0;
-  transform: translateY(8px) scale(0.97);
+  animation: dialogPanelScaleOut 220ms cubic-bezier(0.4, 0, 1, 1) both;
 }
 
 @keyframes dialogPanelSpringIn {
   0% {
     opacity: 0;
-    transform: translateY(12px) scale(0.8);
+    transform: translateY(12px) scale(0.6);
   }
   100% {
     opacity: 1;
     transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes dialogPanelScaleOut {
+  0% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(0) scale(0.6);
   }
 }
 
@@ -2232,12 +2242,22 @@ textarea:focus {
   border-color: rgba(47, 111, 115, 0.22);
   color: var(--accent-strong);
   line-height: 1.2;
+  transition: transform 180ms cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: transform;
 }
 
 .chip.search-match {
   background: rgba(70, 152, 96, 0.2);
   border-color: rgba(70, 152, 96, 0.34);
   color: var(--ok);
+}
+
+.chip.dragging {
+  opacity: 0.58;
+}
+
+.chip-editor.sorting .chip:not(.dragging) {
+  transition: transform 180ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .chip-input {
@@ -2293,21 +2313,16 @@ textarea:focus {
   font-weight: 700;
 }
 
-.quick-tag-save {
-  min-height: 32px;
-  padding: 6px 10px;
-}
-
-.quick-tag-save.dirty {
-  border-color: rgba(192, 115, 53, 0.34);
-  color: var(--accent-warm);
-}
-
 .quick-tag-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
   margin-top: 10px;
+}
+
+.quick-tag-grid.drop-ready {
+  outline: 1px dashed rgba(47, 111, 115, 0.28);
+  outline-offset: 6px;
 }
 
 .quick-tag-panel.collapsed .quick-tag-grid {
@@ -2320,15 +2335,26 @@ textarea:focus {
   align-items: center;
   gap: 8px;
   min-width: 0;
+  transition: transform 180ms cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: transform;
 }
 
 .quick-tag-item.dragging {
-  opacity: 0.54;
+  opacity: 0.32;
 }
 
-.quick-tag-item.over .quick-tag-btn {
-  border-color: rgba(47, 111, 115, 0.34);
-  background: rgba(47, 111, 115, 0.08);
+.quick-tag-grid.sorting .quick-tag-item:not(.dragging) {
+  transition: transform 180ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.quick-tag-panel.delete-mode .quick-tag-grid {
+  outline-color: rgba(180, 54, 54, 0.42);
+}
+
+.quick-tag-panel.delete-mode .quick-tag-item.dragging .quick-tag-btn {
+  border-color: rgba(180, 54, 54, 0.55);
+  background: rgba(180, 54, 54, 0.12);
+  color: var(--danger);
 }
 
 .quick-tag-handle {

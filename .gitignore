@@ -9,6 +9,10 @@ __pycache__/
 .venv/
 venv/
 
+# Wheels
+requirements/python
+requirements/whl
+
 # Local model/cache artifacts
 models/
 
@@ -27,6 +31,8 @@ datasets/workspaces/*
 # Local runtime and logs
 *.log
 .DS_Store
+.tmp/
+._*
 
 # Local tool state
 .claude/

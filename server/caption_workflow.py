@@ -4,7 +4,7 @@ import tempfile
 import threading
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 from PIL import Image
 
@@ -169,11 +169,13 @@ class BatchCaptionManager:
         client: CaptionServiceClient,
         api_client: APICaptionClient,
         ollama_client: OllamaCaptionClient,
+        on_content_change: Optional[Callable[[str], None]] = None,
     ):
         self.workspace = workspace
         self.client = client
         self.api_client = api_client
         self.ollama_client = ollama_client
+        self.on_content_change = on_content_change
         self._lock = threading.RLock()
         self._thread: Optional[threading.Thread] = None
         self.running = False
@@ -257,6 +259,7 @@ class BatchCaptionManager:
         api_base_url = options.get("api_base_url", "")
         api_key = options.get("api_key", "")
         ollama_base_url = options.get("ollama_base_url", "")
+        project_id = str(options.get("project_id", "") or "")
 
         try:
             if backend == "api":
@@ -311,6 +314,8 @@ class BatchCaptionManager:
                     )
                     output_text = apply_caption_result(item["text"], result, request["write_mode"])
                     self.workspace.save_text(name, output_text)
+                    if self.on_content_change:
+                        self.on_content_change(project_id)
                     with self._lock:
                         self.success += 1
                         self.done += 1
