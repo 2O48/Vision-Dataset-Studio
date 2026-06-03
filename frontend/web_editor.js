@@ -173,6 +173,11 @@ export function createEditorModule({
     return state.listSearchMatchMode === "exact" ? value === needle : value.includes(needle);
   }
 
+  function persistCaptionTagOrder() {
+    writeSegmentsToText([...state.currentSegments]);
+    renderTags();
+  }
+
   function renderTags() {
     refs.tagChips.innerHTML = "";
     const searchQuery = state.listSearchMode === "name" ? "" : `${state.segmentQuery || ""}`.trim().toLowerCase();
@@ -182,21 +187,40 @@ export function createEditorModule({
       row.className = `chip${segmentMatchesListSearch(segment, searchQuery) ? " search-match" : ""}`;
       row.draggable = true;
       row.dataset.captionSegment = segment;
-      row.title = "拖到快捷标注中添加";
+      row.dataset.captionIndex = String(index);
+      row.title = "拖动排序，拖到快捷标注中添加";
       row.addEventListener("dragstart", (event) => {
+        state.captionTagDragIndex = Number(row.dataset.captionIndex);
+        state.captionTagDragging = {
+          index: state.captionTagDragIndex,
+          value: state.currentSegments[state.captionTagDragIndex] || segment,
+          moved: false,
+        };
         state.quickTagDragging = { type: "caption", value: segment };
         row.classList.add("dragging");
         event.dataTransfer?.setData(CAPTION_SEGMENT_DRAG_TYPE, segment);
         event.dataTransfer?.setData("text/plain", segment);
-        if (event.dataTransfer) event.dataTransfer.effectAllowed = "copy";
+        if (event.dataTransfer) event.dataTransfer.effectAllowed = "copyMove";
       });
       row.addEventListener("dragend", () => {
-        row.classList.remove("dragging");
+        if (state.captionTagDragging?.moved) persistCaptionTagOrder();
+        cleanupCaptionTagDragState();
         scheduleCaptionDragEndCleanup();
       });
       const input = document.createElement("input");
       input.className = "chip-input";
       input.value = segment;
+      input.addEventListener("dragover", (event) => {
+        if (!captionTagDragSource()) return;
+        event.preventDefault();
+        event.stopPropagation();
+      });
+      input.addEventListener("drop", (event) => {
+        if (!captionTagDragSource()) return;
+        event.preventDefault();
+        event.stopPropagation();
+        handleCaptionTagDrop(event);
+      });
       input.addEventListener("change", () => {
         const next = [...state.currentSegments];
         next[index] = input.value.trim();
@@ -493,6 +517,156 @@ export function createEditorModule({
     });
   }
 
+  function updateCaptionTagDomIndexes() {
+    refs.tagChips?.querySelectorAll(".chip").forEach((node, index) => {
+      node.dataset.captionIndex = String(index);
+    });
+  }
+
+  function captionTagDragSource() {
+    return state.captionTagDragging || null;
+  }
+
+  function captionTagRowFromPoint(event) {
+    const x = Number(event.clientX);
+    const y = Number(event.clientY);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+    const hit = document.elementFromPoint(x, y);
+    const direct = hit instanceof Element ? hit.closest(".chip") : null;
+    if (direct && refs.tagChips?.contains(direct) && !direct.classList.contains("dragging")) return direct;
+    return null;
+  }
+
+  function captionTagIndexForHoveredRow(row) {
+    const targetIndex = Number(row?.dataset?.captionIndex);
+    if (!Number.isFinite(targetIndex)) return 0;
+    return targetIndex;
+  }
+
+  function captionTagReflowRects() {
+    return new Map(
+      [...refs.tagChips.querySelectorAll(".chip:not(.dragging)")].map((row) => [row, row.getBoundingClientRect()])
+    );
+  }
+
+  function moveCaptionTagDom(fromIndex, toIndex) {
+    if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0) return false;
+    if (fromIndex >= state.currentSegments.length || toIndex >= state.currentSegments.length) return false;
+    const beforeRects = captionTagReflowRects();
+    const next = [...state.currentSegments];
+    const [item] = next.splice(fromIndex, 1);
+    next.splice(toIndex, 0, item);
+    state.currentSegments = next;
+
+    const rows = [...refs.tagChips.querySelectorAll(".chip")];
+    const moving = rows.find((row) => Number(row.dataset.captionIndex) === fromIndex);
+    const target = rows.find((row) => Number(row.dataset.captionIndex) === toIndex);
+    if (moving && target) {
+      if (fromIndex < toIndex) refs.tagChips.insertBefore(moving, target.nextSibling);
+      else refs.tagChips.insertBefore(moving, target);
+      updateCaptionTagDomIndexes();
+    }
+    animateCaptionTagReflow(beforeRects);
+    return true;
+  }
+
+  function animateCaptionTagReflow(beforeRects) {
+    const rows = [...refs.tagChips.querySelectorAll(".chip:not(.dragging)")];
+    refs.tagChips.classList.add("sorting");
+    for (const row of rows) {
+      const before = beforeRects.get(row);
+      if (!before) continue;
+      const after = row.getBoundingClientRect();
+      const dx = before.left - after.left;
+      const dy = before.top - after.top;
+      if (!dx && !dy) continue;
+      row.style.transition = "none";
+      row.style.transform = `translate(${dx}px, ${dy}px)`;
+      row.getBoundingClientRect();
+      requestAnimationFrame(() => {
+        row.style.transition = "";
+        row.style.transform = "";
+      });
+    }
+    window.clearTimeout(state.captionTagSortTimer);
+    state.captionTagSortTimer = window.setTimeout(() => {
+      refs.tagChips?.classList.remove("sorting");
+      refs.tagChips?.querySelectorAll(".chip").forEach((row) => {
+        row.style.transition = "";
+        row.style.transform = "";
+      });
+    }, 220);
+  }
+
+  function clearCaptionTagHoverTimer() {
+    if (state.captionTagHoverTimer) {
+      window.clearTimeout(state.captionTagHoverTimer);
+      state.captionTagHoverTimer = 0;
+    }
+    state.captionTagHoverRow = null;
+  }
+
+  function scheduleCaptionTagHover(row) {
+    if (!row || state.captionTagHoverRow === row) return;
+    clearCaptionTagHoverTimer();
+    state.captionTagHoverRow = row;
+    state.captionTagHoverTimer = window.setTimeout(() => {
+      state.captionTagHoverTimer = 0;
+      if (state.captionTagHoverRow !== row || !row.isConnected) return;
+      state.captionTagHoverRow = null;
+      const drag = captionTagDragSource();
+      if (!drag) return;
+      const fromIndex = Number(state.captionTagDragIndex);
+      const toIndex = Math.min(captionTagIndexForHoveredRow(row), state.currentSegments.length - 1);
+      if (moveCaptionTagDom(fromIndex, toIndex)) {
+        state.captionTagDragIndex = toIndex;
+        drag.index = toIndex;
+        drag.moved = true;
+      }
+    }, 200);
+  }
+
+  function isCaptionTagDropPoint(event) {
+    const x = Number(event.clientX);
+    const y = Number(event.clientY);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
+    const rect = refs.tagChips?.getBoundingClientRect();
+    return Boolean(rect && x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom);
+  }
+
+  function handleCaptionTagDragOver(event) {
+    if (!captionTagDragSource()) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+    const targetRow = captionTagRowFromPoint(event);
+    if (targetRow) {
+      scheduleCaptionTagHover(targetRow);
+      return;
+    }
+    clearCaptionTagHoverTimer();
+  }
+
+  function handleCaptionTagDrop(event) {
+    const drag = captionTagDragSource();
+    if (!drag) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (drag.moved) persistCaptionTagOrder();
+    cleanupCaptionTagDragState();
+    cleanupQuickTagDragState();
+  }
+
+  function cleanupCaptionTagDragState() {
+    clearCaptionTagHoverTimer();
+    state.captionTagDragIndex = null;
+    state.captionTagDragging = null;
+    refs.tagChips?.classList.remove("sorting");
+    refs.tagChips?.querySelectorAll(".chip.dragging").forEach((node) => {
+      node.classList.remove("dragging");
+    });
+  }
+
   function quickTagDragSource() {
     return state.quickTagDragging || null;
   }
@@ -751,6 +925,16 @@ export function createEditorModule({
     handleQuickTagDrop(event);
   });
 
+  refs.tagChips?.addEventListener("dragover", (event) => {
+    if (!captionTagDragSource()) return;
+    handleCaptionTagDragOver(event);
+  }, true);
+
+  refs.tagChips?.addEventListener("drop", (event) => {
+    if (!captionTagDragSource()) return;
+    handleCaptionTagDrop(event);
+  }, true);
+
   document.addEventListener("dragover", (event) => {
     const drag = quickTagDragSource();
     const outside = !isQuickTagDropPoint(event);
@@ -763,6 +947,11 @@ export function createEditorModule({
     refs.quickTagPanel?.classList.toggle("delete-mode", outside);
     if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
     if (outside) event.preventDefault();
+  }, true);
+
+  document.addEventListener("dragover", (event) => {
+    if (!captionTagDragSource()) return;
+    if (!isCaptionTagDropPoint(event)) clearCaptionTagHoverTimer();
   }, true);
 
   document.addEventListener("drop", (event) => {
@@ -1059,7 +1248,14 @@ export function createEditorModule({
 
   async function translateCurrent() {
     if (!state.currentItem) return;
-    const text = state.currentText || state.currentItem.text || "";
+    let text = state.currentText || state.currentItem.text || "";
+    if (refs.captionEditor) {
+      const start = Number(refs.captionEditor.selectionStart);
+      const end = Number(refs.captionEditor.selectionEnd);
+      if (Number.isFinite(start) && Number.isFinite(end) && end > start) {
+        text = refs.captionEditor.value.slice(start, end);
+      }
+    }
     if (!text.trim()) return;
     const data = await apiPost("/api/translate", { text });
     refs.translatedText.value = data.translated;

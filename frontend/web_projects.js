@@ -297,6 +297,30 @@ export function createProjectsModule({
     return refs.projectNameInput.value.trim() || "未命名项目";
   }
 
+  function isProjectNotFoundError(error) {
+    return /Project not found:/i.test(`${error?.message || error || ""}`);
+  }
+
+  function clearCurrentProjectReference(projectId = state.currentProjectId) {
+    const staleId = `${projectId || ""}`;
+    if (!staleId || state.currentProjectId === staleId) {
+      state.currentProjectId = "";
+      state.currentProjectName = "";
+      renderWorkspaceSummary();
+    }
+    try {
+      const raw = window.localStorage.getItem(STORAGE_KEYS.lastWorkspaceDirs);
+      const payload = raw ? JSON.parse(raw) : null;
+      if (payload && typeof payload === "object" && `${payload.project_id || ""}` === staleId) {
+        delete payload.project_id;
+        delete payload.project_name;
+        saveStored(STORAGE_KEYS.lastWorkspaceDirs, JSON.stringify(payload));
+      }
+    } catch (_) {
+      saveStored(STORAGE_KEYS.lastWorkspaceDirs, "");
+    }
+  }
+
   async function saveProject({ asNew = false } = {}) {
     if (state.captionDirty && state.selectedName) {
       await saveCurrentCaption();
@@ -320,7 +344,7 @@ export function createProjectsModule({
       rememberOpenedWorkspace(data.workspace);
       await refreshItems({ skipDirtyCheck: true });
     }
-    refs.projectStatus.textContent = `${asNew || !payload.overwrite_id ? "已保存为新项目" : "已保存当前项目"}：${data.project?.name || name}`;
+    refs.projectStatus.textContent = `${asNew || !payload.overwrite_id ? "已保存项目" : "已保存当前项目"}：${data.project?.name || name}`;
     await refreshProjects();
   }
 
@@ -328,20 +352,43 @@ export function createProjectsModule({
     await saveProject({ asNew: false });
   }
 
-  async function saveProjectAsNew() {
-    await saveProject({ asNew: true });
+  async function createProject() {
+    const defaultName = refs.projectNameInput?.value.trim() || "新项目";
+    const name = await window.appPrompt("输入新项目名称", defaultName);
+    if (!name || !name.trim()) return;
+    await runWithStatus("正在新建项目...", async () => {
+      await saveOpenProjectUiState({ ignoreMissingCurrent: true });
+      const cleanName = name.trim();
+      const data = await apiPost("/api/projects/create", {
+        name: cleanName,
+        control_count: Number(refs.controlCount?.value ?? 1),
+        ui_state: collectProjectUiState(cleanName),
+      });
+      refs.projectStatus.textContent = `已新建项目：${data.project?.name || cleanName}`;
+      await refreshProjects();
+      await openProject(data.project?.id || "", { skipCurrentStateSave: true });
+    }).catch(showError);
   }
 
-  async function saveOpenProjectUiState() {
+  async function saveOpenProjectUiState({ ignoreMissingCurrent = false } = {}) {
     if (!state.currentProjectId) return;
     if (projectUiStateSaveTimer) {
       window.clearTimeout(projectUiStateSaveTimer);
       projectUiStateSaveTimer = 0;
     }
-    await apiPost("/api/projects/ui-state", {
-      id: state.currentProjectId,
-      ui_state: collectProjectUiState(state.currentProjectName || refs.projectNameInput?.value || ""),
-    });
+    const projectId = state.currentProjectId;
+    try {
+      await apiPost("/api/projects/ui-state", {
+        id: projectId,
+        ui_state: collectProjectUiState(state.currentProjectName || refs.projectNameInput?.value || ""),
+      });
+    } catch (error) {
+      if (ignoreMissingCurrent && isProjectNotFoundError(error)) {
+        clearCurrentProjectReference(projectId);
+        return;
+      }
+      throw error;
+    }
   }
 
   function saveOpenProjectUiStateNow() {
@@ -381,8 +428,8 @@ export function createProjectsModule({
 
   bindProjectCaptionSettingsAutosave();
 
-  async function openProject(projectId) {
-    await saveOpenProjectUiState();
+  async function openProject(projectId, { skipCurrentStateSave = false } = {}) {
+    if (!skipCurrentStateSave) await saveOpenProjectUiState({ ignoreMissingCurrent: true });
     refs.itemList.textContent = "";
     if (refs.secondaryItemList) refs.secondaryItemList.textContent = "";
     refs.listStats.textContent = "正在切换项目...";
@@ -453,9 +500,11 @@ export function createProjectsModule({
   }
 
   async function cleanupTmpNow() {
-    const data = await apiPost("/api/tmp/cleanup", { max_age_hours: 48 });
+    if (!(await window.appConfirm("清空用户目录 .vision_dataset_studio/trash 中的回收项目？此操作无法撤销。"))) return;
+    const data = await apiPost("/api/trash/cleanup", {});
     const cleanup = data.cleanup || {};
-    refs.projectStatus.textContent = `tmp 清理完成：删除 ${cleanup.removed?.length || 0} 项，跳过 ${cleanup.skipped?.length || 0} 项`;
+    const errors = cleanup.errors?.length ? `，失败 ${cleanup.errors.length} 项` : "";
+    refs.projectStatus.textContent = `回收项目清理完成：删除 ${cleanup.removed?.length || 0} 项${errors}`;
   }
 
   function renderProjects() {
@@ -530,7 +579,7 @@ export function createProjectsModule({
     refreshProjects,
     applyProjectUiState,
     saveCurrentProject,
-    saveProjectAsNew,
+    createProject,
     saveOpenProjectUiState,
     openProject,
     renameProject,

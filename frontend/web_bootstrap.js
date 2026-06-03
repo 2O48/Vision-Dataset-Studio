@@ -46,7 +46,7 @@ export function createBootstrapModule({
   loadWorkspace,
   rescanWorkspace,
   saveCurrentProject,
-  saveProjectAsNew,
+  createProject,
   refreshProjects,
   cleanupTmpNow,
   scheduleCaptionAutosave,
@@ -665,9 +665,9 @@ export function createBootstrapModule({
     refs.loadWorkspaceBtn.addEventListener("click", () => runWithStatus("正在加载工作区...", () => loadWorkspace()).catch(showError));
     refs.rescanWorkspaceBtn.addEventListener("click", () => runWithStatus("正在重扫工作区...", () => rescanWorkspace()).catch(showError));
     refs.saveProjectBtn?.addEventListener("click", () => runWithStatus("正在保存项目...", () => saveCurrentProject()).catch(showError));
-    refs.saveProjectAsBtn?.addEventListener("click", () => runWithStatus("正在保存为新项目...", () => saveProjectAsNew()).catch(showError));
+    refs.createProjectBtn?.addEventListener("click", () => createProject().catch(showError));
     refs.refreshProjectsBtn?.addEventListener("click", () => runWithStatus("正在刷新项目列表...", () => refreshProjects()).catch(showError));
-    refs.cleanupTmpBtn?.addEventListener("click", () => runWithStatus("正在清理 tmp...", () => cleanupTmpNow()).catch(showError));
+    refs.cleanupTmpBtn?.addEventListener("click", () => runWithStatus("正在清理回收项目...", () => cleanupTmpNow()).catch(showError));
     refs.openCaptionSettingsBtn?.addEventListener("click", () => toggleCaptionSettingsPanel());
     refs.closeCaptionSettingsBtn?.addEventListener("click", () => toggleCaptionSettingsPanel(false));
 

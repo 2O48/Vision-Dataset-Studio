@@ -325,10 +325,18 @@ class ProjectStore:
             meta = _read_json(path / "project.json", {})
             if not meta:
                 continue
+            if str(meta.get("id") or "") != path.name:
+                meta["id"] = path.name
+                workspace = _read_json(path / "workspace.json", {})
+                if isinstance(workspace, dict):
+                    workspace["project_id"] = path.name
+                    workspace["dirs"] = _workspace_dirs(path, int(meta.get("control_count", 1)))
+                    _write_json(path / "workspace.json", workspace)
+                _write_json(path / "project.json", meta)
             stat = path.stat()
             rows.append(
                 {
-                    "id": meta.get("id") or path.name,
+                    "id": path.name,
                     "name": meta.get("name") or path.name,
                     "created_at": meta.get("created_at", ""),
                     "updated_at": meta.get("updated_at", datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds")),
@@ -558,6 +566,63 @@ class ProjectStore:
         self._refresh_index()
         return {"project": project_meta, "workspace": workspace_state}
 
+    def create_project(self, *, name: str, control_count: int | None = None, ui_state: dict | None = None) -> dict:
+        self.ensure()
+        project_name = _clean_name(name)
+        project_id, project_dir = self._unique_project_dir(project_name)
+        paths = _project_paths(project_dir)
+        saved_control_count = 1 if control_count is None else int(control_count)
+        saved_control_count = max(0, min(3, saved_control_count))
+        active_roles = _active_roles(saved_control_count)
+
+        for key in ("assets", "captions", "state", "thumbnails"):
+            paths[key].mkdir(parents=True, exist_ok=True)
+        for role in active_roles:
+            (paths["assets"] / role).mkdir(parents=True, exist_ok=True)
+
+        now = _now()
+        project_meta = {
+            "schema_version": SCHEMA_VERSION,
+            "id": project_id,
+            "name": project_name,
+            "created_at": now,
+            "updated_at": now,
+            "source_dirs": {},
+            "item_count": 0,
+            "captioned_count": 0,
+            "control_count": saved_control_count,
+            "thumbnail": "",
+        }
+        workspace_state = {
+            "schema_version": SCHEMA_VERSION,
+            "project_id": project_id,
+            "project_name": project_name,
+            "settings": {"control_count": saved_control_count},
+            "dirs": _workspace_dirs(project_dir, saved_control_count),
+            "items": [],
+            "ui_state": ui_state if isinstance(ui_state, dict) else {},
+        }
+        progress = {
+            "schema_version": SCHEMA_VERSION,
+            "total": 0,
+            "captioned": 0,
+            "items": {},
+        }
+        labels = {
+            "schema_version": SCHEMA_VERSION,
+            "items": {},
+        }
+
+        _write_json(paths["project"], project_meta)
+        _write_json(paths["manifest"], {"schema_version": SCHEMA_VERSION, "items": []})
+        _write_json(paths["workspace"], workspace_state)
+        _write_json(paths["state"] / "progress.json", progress)
+        _write_json(paths["state"] / "labels.json", labels)
+        _write_json(paths["state"] / "caption_config.json", workspace_state["ui_state"].get("caption_settings", {}))
+        _write_json(paths["state"] / "ui_state.json", workspace_state["ui_state"])
+        self._refresh_index()
+        return {"project": project_meta, "workspace": workspace_state}
+
     def rename_project(self, project_id: str, name: str) -> dict:
         path = self._project_dir(project_id)
         if not path.is_dir():
@@ -617,10 +682,19 @@ class ProjectStore:
         _write_json(path / "state" / "caption_config.json", workspace["ui_state"].get("caption_settings", {}))
         _write_json(path / "state" / "ui_state.json", workspace["ui_state"])
         meta = _read_json(path / "project.json", {})
+        self._refresh_index()
+        return {"project": meta, "workspace": workspace}
+
+    def touch_project_content(self, project_id: str) -> dict:
+        path = self._project_dir(project_id)
+        if not path.is_dir():
+            raise FileNotFoundError(f"Project not found: {project_id}")
+        meta = _read_json(path / "project.json", {})
+        meta["id"] = path.name
         meta["updated_at"] = _now()
         _write_json(path / "project.json", meta)
         self._refresh_index()
-        return {"project": meta, "workspace": workspace}
+        return meta
 
     def delete_project(self, project_id: str) -> dict:
         path = self._project_dir(project_id)
@@ -631,3 +705,18 @@ class ProjectStore:
         path.replace(target)
         self._refresh_index()
         return {"deleted": project_id, "trashed_to": str(target)}
+
+    def cleanup_trash(self) -> dict:
+        self.ensure()
+        removed: list[str] = []
+        errors: list[str] = []
+        for child in sorted(self.trash_dir.iterdir(), key=lambda item: item.name.lower()):
+            try:
+                if child.is_dir():
+                    shutil.rmtree(child)
+                else:
+                    child.unlink(missing_ok=True)
+                removed.append(child.name)
+            except Exception as exc:
+                errors.append(f"{child.name}: {exc}")
+        return {"removed": removed, "errors": errors, "path": str(self.trash_dir)}

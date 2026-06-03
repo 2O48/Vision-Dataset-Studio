@@ -2242,6 +2242,8 @@ textarea:focus {
   border-color: rgba(47, 111, 115, 0.22);
   color: var(--accent-strong);
   line-height: 1.2;
+  transition: transform 180ms cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: transform;
 }
 
 .chip.search-match {
@@ -2252,6 +2254,10 @@ textarea:focus {
 
 .chip.dragging {
   opacity: 0.58;
+}
+
+.chip-editor.sorting .chip:not(.dragging) {
+  transition: transform 180ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .chip-input {
