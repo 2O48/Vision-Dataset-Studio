@@ -34,6 +34,8 @@ export function createBootstrapModule({
   renderOverwriteModeHints,
   renderWorkspaceBrowser,
   updateControlFieldVisibility,
+  scrollSelectedItemIntoView,
+  renderLocateSelectedState,
   browseWorkspacePath,
   applyWorkspaceBrowserPath,
   setWorkspaceBrowserTarget,
@@ -699,6 +701,29 @@ export function createBootstrapModule({
         renderFilters();
         renderViewer();
         await refreshItems({ skipDirtyCheck: true, suppressSelectionSync: true });
+      })().catch(showError);
+    });
+    refs.locateSelectedBtn?.addEventListener("click", () => {
+      (async () => {
+        const batch = state.aiStatus?.batch || {};
+        if (batch.running) {
+          state.followCaptionCurrent = !state.followCaptionCurrent;
+          state.lastFollowedCaptionName = "";
+          renderLocateSelectedState?.();
+          const currentName = `${batch.current || ""}`.trim();
+          if (state.followCaptionCurrent && currentName) {
+            await selectItem(currentName, false, { skipDirtyCheck: true, panelId: "primary" });
+            scrollSelectedItemIntoView?.("center");
+          } else if (state.selectedName) {
+            scrollSelectedItemIntoView?.("center");
+          }
+          return;
+        }
+
+        state.followCaptionCurrent = false;
+        state.lastFollowedCaptionName = "";
+        renderLocateSelectedState?.();
+        if (state.selectedName) scrollSelectedItemIntoView?.("center");
       })().catch(showError);
     });
     const panelControls = {

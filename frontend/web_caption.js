@@ -10,9 +10,11 @@ export function createCaptionModule({
   apiPost,
   setAiStatusLine,
   activeCaptionBackendLabel,
+  renderLocateSelectedState,
   renderImageProcessStatus,
   refreshItems,
   selectItem,
+  scrollSelectedItemIntoView,
   visibleNames,
   applyWorkspaceSummary,
   renderViewer,
@@ -649,9 +651,11 @@ export function createCaptionModule({
       const data = await apiGet("/api/ai/status");
       state.aiStatus = data;
       renderAiStatus();
+      renderLocateSelectedState?.();
       nextDelay = nextAiPollDelay(data);
 
-      const batchSignature = `${data.batch.running}-${data.batch.done}-${data.batch.total}-${data.batch.status}-${data.batch.backend}`;
+      const batchCurrent = `${data.batch.current || ""}`.trim();
+      const batchSignature = `${data.batch.running}-${data.batch.done}-${data.batch.total}-${data.batch.status}-${data.batch.backend}-${batchCurrent}`;
       if (batchSignature !== state.lastBatchSignature) {
         state.lastBatchSignature = batchSignature;
         if (state.workspace?.counts?.all) {
@@ -659,6 +663,17 @@ export function createCaptionModule({
             skipDirtyCheck: true,
             suppressSelectionSync: state.captionDirty,
           });
+        }
+        if (state.followCaptionCurrent && data.batch.running && batchCurrent && batchCurrent !== state.lastFollowedCaptionName) {
+          state.lastFollowedCaptionName = batchCurrent;
+          await selectItem(batchCurrent, false, { skipDirtyCheck: true, panelId: "primary" });
+          scrollSelectedItemIntoView?.("center");
+        }
+        if (!data.batch.running && state.followCaptionCurrent) {
+          await refreshCurrentItemIfVisible();
+          state.followCaptionCurrent = false;
+          state.lastFollowedCaptionName = "";
+          renderLocateSelectedState?.();
         }
       }
       const process = data.image_process || {};

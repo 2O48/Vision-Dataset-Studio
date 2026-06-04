@@ -100,6 +100,8 @@ const state = {
   ollamaModelMenuOpen: false,
   ollamaModelQuery: "",
   lastBatchSignature: "",
+  followCaptionCurrent: false,
+  lastFollowedCaptionName: "",
   lastImageProcessSignature: "",
   lastExportSignature: "",
   exportDownloadRequested: false,
@@ -190,6 +192,7 @@ const refs = {
   listPanelShell: document.querySelector("#listPanelShell"),
   secondaryListPanel: document.querySelector("#secondaryListPanel"),
   toggleSplitListBtn: document.querySelector("#toggleSplitListBtn"),
+  locateSelectedBtn: document.querySelector("#locateSelectedBtn"),
   tagSearch: document.querySelector("#tagSearch"),
   secondaryTagSearch: document.querySelector("#secondaryTagSearch"),
   tagSearchModeGroup: document.querySelector("#tagSearchModeGroup"),
@@ -612,6 +615,19 @@ function activeControlCount() {
   return Math.max(0, Math.min(3, Number.isFinite(count) ? count : 1));
 }
 
+function renderLocateSelectedState() {
+  const button = refs.locateSelectedBtn;
+  if (!button) return;
+  const following = Boolean(state.followCaptionCurrent);
+  button.classList.toggle("active", following);
+  button.setAttribute("aria-pressed", following ? "true" : "false");
+  const title = following ? "正在跟随批量打标图片，点击关闭" : "定位到选中的图片";
+  button.title = title;
+  button.setAttribute("aria-label", title);
+  button.disabled = false;
+}
+renderLocateSelectedState();
+
 const shellModule = createShellModule({
   state,
   refs,
@@ -817,9 +833,11 @@ const captionModule = createCaptionModule({
   apiPost,
   setAiStatusLine,
   activeCaptionBackendLabel,
+  renderLocateSelectedState,
   renderImageProcessStatus,
   refreshItems,
   selectItem,
+  scrollSelectedItemIntoView,
   visibleNames,
   applyWorkspaceSummary,
   renderViewer,
@@ -894,6 +912,8 @@ const { restorePersistedSettings, bindSettingsPersistence, bindEvents, bootstrap
   renderOverwriteModeHints,
   renderWorkspaceBrowser,
   updateControlFieldVisibility,
+  scrollSelectedItemIntoView,
+  renderLocateSelectedState,
   browseWorkspacePath,
   applyWorkspaceBrowserPath,
   setWorkspaceBrowserTarget,
