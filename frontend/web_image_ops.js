@@ -125,7 +125,6 @@ export function createImageOpsModule({
     if (refs.topAiProgressBar) refs.topAiProgressBar.style.width = "0%";
     state.exportDownloadRequested = true;
     state.lastExportSignature = "";
-    state.lastExportDownloadPath = "";
     await apiPost("/api/export/start", exportPayload());
     await pollAiStatus({ scheduleNext: true });
   }

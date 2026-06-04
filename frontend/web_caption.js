@@ -8,7 +8,6 @@ export function createCaptionModule({
   restoreSelectValue,
   apiGet,
   apiPost,
-  filenameFromDisposition,
   setAiStatusLine,
   activeCaptionBackendLabel,
   renderImageProcessStatus,
@@ -596,38 +595,6 @@ export function createCaptionModule({
     renderViewer();
   }
 
-  async function downloadFinishedExport(exportInfo) {
-    const result = exportInfo.result || {};
-    const exportPath = result.path || "";
-    if (!state.exportDownloadRequested || !exportPath || state.lastExportDownloadPath === exportPath) return;
-    state.lastExportDownloadPath = exportPath;
-    const response = await fetch("/api/export/download");
-    if (!response.ok) {
-      let message = `下载导出 ZIP 失败 (${response.status})`;
-      try {
-        const data = await response.json();
-        message = data.error || message;
-      } catch (_) {
-        // Keep the HTTP status fallback.
-      }
-      throw new Error(message);
-    }
-    const blob = await response.blob();
-    const filename =
-      filenameFromDisposition(response.headers.get("Content-Disposition")) ||
-      result.filename ||
-      "dataset.zip";
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = filename;
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-    URL.revokeObjectURL(url);
-    setAiStatusLine(`ZIP 已生成并开始下载：${filename}`);
-  }
-
   async function showExportSuccessDialog(exportInfo) {
     const result = exportInfo.result || {};
     const exportPath = result.path || "";
@@ -711,9 +678,6 @@ export function createCaptionModule({
       const exportSignature = `${exportInfo.running}-${exportInfo.done}-${exportInfo.total}-${exportInfo.status}-${exportPath}`;
       if (exportSignature !== state.lastExportSignature) {
         state.lastExportSignature = exportSignature;
-        if (exportInfo.status === "done" && exportInfo.result?.format === "zip" && exportPath) {
-          await downloadFinishedExport(exportInfo);
-        }
         if (exportInfo.status === "done" && exportPath && state.exportDownloadRequested) {
           await showExportSuccessDialog(exportInfo);
         }

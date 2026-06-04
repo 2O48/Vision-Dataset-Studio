@@ -247,6 +247,7 @@ export function createBootstrapModule({
     refs.exportOutputDir.value = readStored(STORAGE_KEYS.exportOutputDir, "");
     refs.exportProcessImages.checked = readStored(STORAGE_KEYS.exportProcessImages, "true") !== "false";
     refs.exportIncludeControls.checked = readStored(STORAGE_KEYS.exportIncludeControls, "true") !== "false";
+    ensureExportIncludeControlsForActiveControls();
     refs.exportPreserveSubfolders.checked = readStored(STORAGE_KEYS.exportPreserveSubfolders, "false") === "true";
     refs.viewerTargetPixels.value = readStored(STORAGE_KEYS.viewerTargetPixels, "4");
     refs.processProjectName.value = "";
@@ -261,11 +262,19 @@ export function createBootstrapModule({
     restoreCaptionSettings();
   }
 
+  function ensureExportIncludeControlsForActiveControls() {
+    const controlCount = Number(refs.controlCount?.value ?? 0);
+    if (!refs.exportIncludeControls || !Number.isFinite(controlCount) || controlCount < 1) return;
+    refs.exportIncludeControls.checked = true;
+    saveStored(STORAGE_KEYS.exportIncludeControls, "true");
+  }
+
   function bindSettingsPersistence() {
     const refreshModelStatus = () => renderAiStatus();
     refs.controlCount.addEventListener("change", () => {
       saveStored(STORAGE_KEYS.controlCount, refs.controlCount.value);
       updateControlFieldVisibility();
+      ensureExportIncludeControlsForActiveControls();
     });
     refs.ignoreTokensInput.addEventListener("change", () => {
       saveStored(STORAGE_KEYS.ignoreTokens, refs.ignoreTokensInput.value.trim());

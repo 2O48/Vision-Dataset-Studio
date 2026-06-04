@@ -56,6 +56,13 @@ export function createProjectsModule({
     if (storageKey) saveStored(storageKey, ref.checked ? "true" : "false");
   }
 
+  function ensureExportIncludeControlsForActiveControls() {
+    const controlCount = Number(refs.controlCount?.value ?? 0);
+    if (!refs.exportIncludeControls || !Number.isFinite(controlCount) || controlCount < 1) return;
+    refs.exportIncludeControls.checked = true;
+    saveStored(STORAGE_KEYS.exportIncludeControls, "true");
+  }
+
   function collectProjectUiState(projectName) {
     return {
       version: PROJECT_STATE_VERSION,
@@ -195,6 +202,7 @@ export function createProjectsModule({
     setValue(refs.exportOutputDir, processingSettings.export_output_dir, STORAGE_KEYS.exportOutputDir);
     setChecked(refs.exportProcessImages, processingSettings.export_process_images, STORAGE_KEYS.exportProcessImages);
     setChecked(refs.exportIncludeControls, processingSettings.export_include_controls, STORAGE_KEYS.exportIncludeControls);
+    ensureExportIncludeControlsForActiveControls();
 
     if (Array.isArray(uiState.quick_tags)) {
       state.quickTags = uiState.quick_tags;
