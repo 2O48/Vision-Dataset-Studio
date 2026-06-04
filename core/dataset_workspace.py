@@ -150,19 +150,20 @@ def _delete_caption_segments(content: str, needles: list[str]) -> str:
 
 
 def _replace_caption_segment(content: str, old_segment: str, new_segment: str) -> str:
-    target = (old_segment or "").strip().lower()
+    target = (old_segment or "").strip()
     if not target:
         return content
     replacement = (new_segment or "").strip()
     changed = False
     updated_parts: list[tuple[str, str]] = []
     for segment, separator in _split_caption_parts(content):
-        if segment.strip().lower() != target:
+        updated_segment = re.sub(re.escape(target), lambda _: replacement, segment, flags=re.IGNORECASE)
+        if updated_segment == segment:
             updated_parts.append((segment, separator))
             continue
         changed = True
-        if replacement:
-            updated_parts.append((replacement, separator))
+        if updated_segment.strip():
+            updated_parts.append((updated_segment, separator))
     if not changed:
         return content
     return _normalize_caption_spacing(_join_caption_parts(updated_parts))

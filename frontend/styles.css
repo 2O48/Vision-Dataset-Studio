@@ -1250,7 +1250,8 @@ textarea:focus {
   min-width: 0;
 }
 
-.list-split-toggle {
+.list-split-toggle,
+.list-locate-toggle {
   flex: 0 0 auto;
   width: 30px;
   height: 30px;
@@ -1259,7 +1260,8 @@ textarea:focus {
   color: var(--ink-soft);
 }
 
-.list-split-toggle svg {
+.list-split-toggle svg,
+.list-locate-toggle svg {
   width: 18px;
   height: 18px;
   color: inherit;
@@ -1269,21 +1271,26 @@ textarea:focus {
   fill: currentColor;
 }
 
-.list-split-toggle svg line {
+.list-split-toggle svg line,
+.list-locate-toggle svg line,
+.list-locate-toggle svg circle {
   stroke: currentColor;
 }
 
-.list-split-toggle svg rect[width="256"][height="256"] {
+.list-split-toggle svg rect[width="256"][height="256"],
+.list-locate-toggle svg rect[width="256"][height="256"] {
   fill: none;
   stroke: none;
 }
 
-.list-split-toggle[aria-pressed="true"] {
+.list-split-toggle[aria-pressed="true"],
+.list-locate-toggle[aria-pressed="true"] {
   background: var(--accent-soft);
   color: var(--accent-strong);
 }
 
-.list-split-toggle[aria-pressed="true"]:hover {
+.list-split-toggle[aria-pressed="true"]:hover,
+.list-locate-toggle[aria-pressed="true"]:hover {
   background: var(--ink);
   color: var(--ink-contrast);
 }
