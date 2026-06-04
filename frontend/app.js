@@ -324,6 +324,8 @@ function createAppDialog() {
   let dialogKind = "alert";
   let previousFocus = null;
   let closeTimer = 0;
+  let confirmValue = true;
+  let cancelValue = false;
 
   function finish(value) {
     if (!resolver || !root) return;
@@ -343,7 +345,16 @@ function createAppDialog() {
     }, 220);
   }
 
-  function open({ kind = "alert", titleText = "提示", messageText = "", defaultValue = "" } = {}) {
+  function open({
+    kind = "alert",
+    titleText = "提示",
+    messageText = "",
+    defaultValue = "",
+    cancelText = "取消",
+    confirmText = "确定",
+    nextCancelValue = false,
+    nextConfirmValue = true,
+  } = {}) {
     if (!root || !title || !message || !input || !cancelBtn || !confirmBtn) {
       return Promise.resolve(kind === "prompt" ? null : kind === "confirm" ? false : true);
     }
@@ -358,11 +369,15 @@ function createAppDialog() {
     }
     dialogKind = kind;
     previousFocus = document.activeElement;
+    cancelValue = nextCancelValue;
+    confirmValue = nextConfirmValue;
     title.textContent = titleText || "提示";
     message.textContent = messageText || "";
     input.hidden = kind !== "prompt";
     input.value = defaultValue || "";
     cancelBtn.hidden = kind === "alert";
+    cancelBtn.textContent = cancelText || "取消";
+    confirmBtn.textContent = confirmText || "确定";
     root.dataset.kind = kind;
     root.setAttribute("aria-hidden", "false");
     root.classList.remove("dialog-closing");
@@ -379,10 +394,10 @@ function createAppDialog() {
   }
 
   confirmBtn?.addEventListener("click", () => {
-    finish(dialogKind === "prompt" ? input.value : true);
+    finish(dialogKind === "prompt" ? input.value : confirmValue);
   });
   cancelBtn?.addEventListener("click", () => {
-    finish(dialogKind === "prompt" ? null : false);
+    finish(dialogKind === "prompt" ? null : cancelValue);
   });
   root?.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
@@ -391,7 +406,7 @@ function createAppDialog() {
     }
     if ((event.key === " " || event.key === "Spacebar") && document.activeElement !== input) {
       event.preventDefault();
-      finish(dialogKind === "prompt" ? input.value : true);
+      finish(dialogKind === "prompt" ? input.value : confirmValue);
     }
     if (event.key === "Enter" && dialogKind === "prompt" && document.activeElement === input) {
       event.preventDefault();
@@ -399,7 +414,7 @@ function createAppDialog() {
     }
     if (event.key === "Enter" && document.activeElement !== input) {
       event.preventDefault();
-      finish(dialogKind === "prompt" ? input.value : true);
+      finish(dialogKind === "prompt" ? input.value : confirmValue);
     }
   });
 
@@ -413,6 +428,17 @@ function createAppDialog() {
     prompt(titleText, defaultValue = "") {
       return open({ kind: "prompt", titleText, defaultValue });
     },
+    choice(messageText, titleText = "提示", options = {}) {
+      return open({
+        kind: "choice",
+        titleText,
+        messageText,
+        cancelText: options.cancelText || "确定",
+        confirmText: options.confirmText || "打开文件夹",
+        nextCancelValue: options.cancelValue ?? "ok",
+        nextConfirmValue: options.confirmValue ?? "open",
+      });
+    },
   };
 }
 
@@ -420,6 +446,7 @@ const appDialog = createAppDialog();
 window.appAlert = (message, title) => appDialog.alert(message, title);
 window.appConfirm = (message, title) => appDialog.confirm(message, title);
 window.appPrompt = (title, defaultValue) => appDialog.prompt(title, defaultValue);
+window.appChoice = (message, title, options) => appDialog.choice(message, title, options);
 
 function bindAboutDialog() {
   const trigger = document.querySelector("#aboutStudioBtn");

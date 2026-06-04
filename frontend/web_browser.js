@@ -1152,9 +1152,7 @@ export function createBrowserModule({
     };
 
     imagePreview.close.addEventListener("click", closeImagePreview);
-    root.addEventListener("click", (event) => {
-      if (event.target === root) closeImagePreview();
-    });
+    root.addEventListener("click", handleImagePreviewOverlayClick);
     imagePreview.main.addEventListener("load", () => {
       imagePreview.panX = 0;
       imagePreview.panY = 0;
@@ -1291,6 +1289,36 @@ export function createBrowserModule({
     };
   }
 
+  function imagePreviewIsClipped() {
+    const preview = ensureImagePreviewOverlay();
+    const img = preview.main;
+    if (!img.naturalWidth || !img.naturalHeight) return true;
+    const stage = previewStageRect();
+    return img.naturalWidth > stage.width || img.naturalHeight > stage.height;
+  }
+
+  function pointInRect(x, y, rect) {
+    return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+  }
+
+  function handleImagePreviewOverlayClick(event) {
+    const preview = ensureImagePreviewOverlay();
+    if (event.target.closest("[data-preview-close], [data-preview-controls], [data-preview-minimap]")) return;
+
+    const stageRect = preview.stage.getBoundingClientRect();
+    if (!pointInRect(event.clientX, event.clientY, stageRect)) {
+      closeImagePreview();
+      return;
+    }
+
+    if (imagePreviewIsClipped()) return;
+
+    const imageRect = preview.main.getBoundingClientRect();
+    if (!pointInRect(event.clientX, event.clientY, imageRect)) {
+      closeImagePreview();
+    }
+  }
+
   function clampImagePreviewPan() {
     const preview = ensureImagePreviewOverlay();
     const img = preview.main;
@@ -1388,6 +1416,7 @@ export function createBrowserModule({
   function startImagePreviewDrag(event) {
     const preview = ensureImagePreviewOverlay();
     if (event.button !== 0 || !preview.main.naturalWidth) return;
+    if (!imagePreviewIsClipped()) return;
     event.preventDefault();
     preview.dragging = {
       x: event.clientX,

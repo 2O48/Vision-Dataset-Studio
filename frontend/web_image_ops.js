@@ -46,7 +46,7 @@ export function createImageOpsModule({
   function imageProcessPayload() {
     return {
       output_dir: "",
-      project_name: refs.processProjectName.value.trim() || refs.exportProjectName.value.trim(),
+      project_name: refs.processProjectName.value.trim() || state.currentProjectName || state.workspace?.project_name || refs.exportProjectName.value.trim(),
       target_megapixels: Number(refs.exportTargetPixels.value || 4),
       multiple: Number(refs.exportSizeMultiple.value || 16),
       include_controls: refs.processIncludeControls.checked,
@@ -67,7 +67,7 @@ export function createImageOpsModule({
     if (refs.topAiProgressBar) refs.topAiProgressBar.style.width = "0%";
     await apiPost("/api/images/match-result/start", {
       output_dir: "",
-      project_name: refs.processProjectName.value.trim() || refs.exportProjectName.value.trim(),
+      project_name: refs.processProjectName.value.trim() || state.currentProjectName || state.workspace?.project_name || refs.exportProjectName.value.trim(),
       include_controls: refs.processIncludeControls.checked,
       load_workspace: refs.processLoadWorkspace.checked,
       only_mismatched: refs.processOnlyMismatched.checked,
@@ -111,7 +111,7 @@ export function createImageOpsModule({
     return {
       format: refs.exportFormat.value,
       output_dir: refs.exportOutputDir.value.trim(),
-      project_name: refs.exportProjectName.value.trim(),
+      project_name: refs.exportProjectName.value.trim() || state.currentProjectName || state.workspace?.project_name || "",
       target_megapixels: Number(refs.exportTargetPixels.value || 4),
       multiple: Number(refs.exportSizeMultiple.value || 16),
       process_images: refs.exportProcessImages.checked,
