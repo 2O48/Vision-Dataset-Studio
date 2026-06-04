@@ -12,7 +12,6 @@ import {
   restoreSelectValue,
   apiGet,
   apiPost,
-  filenameFromDisposition,
   splitSegmentInput,
   parseSegments,
 } from "./frontend/web_shared.js";
@@ -103,7 +102,6 @@ const state = {
   lastBatchSignature: "",
   lastImageProcessSignature: "",
   lastExportSignature: "",
-  lastExportDownloadPath: "",
   exportDownloadRequested: false,
   aiPollTimer: null,
   aiPollInFlight: false,
@@ -817,7 +815,6 @@ const captionModule = createCaptionModule({
   restoreSelectValue,
   apiGet,
   apiPost,
-  filenameFromDisposition,
   setAiStatusLine,
   activeCaptionBackendLabel,
   renderImageProcessStatus,

@@ -2029,6 +2029,13 @@ export function createBrowserModule({
     renderWorkspaceSummary();
   }
 
+  function ensureExportIncludeControlsForActiveControls() {
+    const controlCount = activeControlCount();
+    if (!refs.exportIncludeControls || controlCount < 1) return;
+    refs.exportIncludeControls.checked = true;
+    saveStored(STORAGE_KEYS.exportIncludeControls, "true");
+  }
+
   function workspaceOpenPayloadFromInputs() {
     const controlCount = Number(refs.controlCount.value ?? 1);
     return {
@@ -2129,6 +2136,7 @@ export function createBrowserModule({
       saveStored(STORAGE_KEYS.viewMode, state.viewMode);
     }
     refs.controlCount.dataset.previousCount = String(loadedCount);
+    ensureExportIncludeControlsForActiveControls();
     renderFilters();
     if (state.items.length) {
       renderItemList();
