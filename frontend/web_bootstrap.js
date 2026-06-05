@@ -568,14 +568,14 @@ export function createBootstrapModule({
     restorePanelWidthVar("--right-panel-width", 320, 280, 680);
     bindPanelResizer(refs.leftPanelResizer, { cssVar: "--left-panel-width", fallback: 300, min: 240, max: 620, direction: 1 });
     bindPanelResizer(refs.rightPanelResizer, { cssVar: "--right-panel-width", fallback: 320, min: 280, max: 680, direction: -1 });
-    restoreContentSizeVar("--thumb-list-width", 320, 240, Math.max(320, (refs.workbenchLayout?.clientWidth || 980) - 460));
+    restoreContentSizeVar("--thumb-list-width", 320, 164, Math.max(320, (refs.workbenchLayout?.clientWidth || 980) - 460));
     restoreContentSizeVar("--viewer-panel-height", 520, 220, Math.max(320, (refs.workbenchLayout?.clientHeight || 820) - 220));
     restoreContentSizeVar("--caption-panel-width", 560, 280, Math.max(280, (refs.workbenchLayout?.clientWidth || 980) - 409));
     bindContentResizer(refs.listViewerResizer, {
       cssVar: "--thumb-list-width",
       axis: "x",
       fallback: 320,
-      min: 240,
+      min: 164,
       maxFor: () => (refs.workbenchLayout?.clientWidth || window.innerWidth) - 460,
     });
     bindContentResizer(refs.viewerEditorResizer, {
@@ -896,7 +896,8 @@ export function createBootstrapModule({
     });
     Object.entries(panelControls).forEach(([panelId, controls]) => {
       controls.thumbModeSelect?.addEventListener("change", () => {
-        const nextMode = controls.thumbModeSelect.value === "combined" ? "combined" : "result";
+        const rawMode = controls.thumbModeSelect.value || "result";
+        const nextMode = /^(combined|control[1-3])$/.test(rawMode) ? rawMode : "result";
         if (panelId === "secondary") {
           state.secondaryListThumbMode = nextMode;
           saveStored(STORAGE_KEYS.secondaryListThumbMode, state.secondaryListThumbMode);

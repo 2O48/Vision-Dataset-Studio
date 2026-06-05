@@ -129,6 +129,22 @@ export function createBrowserModule({
     return panelId === "secondary" ? (state.secondaryListThumbMode || "result") : (state.listThumbMode || "result");
   }
 
+  function normalizeThumbMode(value) {
+    const mode = `${value || "result"}`;
+    const controlCount = activeControlCount();
+    if (mode === "combined") return controlCount > 0 ? "combined" : "result";
+    const controlMatch = mode.match(/^control([1-3])$/);
+    if (controlMatch && controlCount >= Number(controlMatch[1])) return mode;
+    return "result";
+  }
+
+  function thumbRolesForMode(mode) {
+    const normalizedMode = normalizeThumbMode(mode);
+    if (normalizedMode === "combined") return [...activeControlRoles(), "result"];
+    if (/^control[1-3]$/.test(normalizedMode)) return [normalizedMode];
+    return ["result"];
+  }
+
   function workspaceSelectionKey() {
     const workspaceKey = state.workspace?.workspace_key || "";
     if (workspaceKey) return workspaceKey;
@@ -210,8 +226,9 @@ export function createBrowserModule({
   }
 
   function setPanelThumbMode(panelId, value) {
-    if (panelId === "secondary") state.secondaryListThumbMode = value === "combined" ? "combined" : "result";
-    else state.listThumbMode = value === "combined" ? "combined" : "result";
+    const nextMode = normalizeThumbMode(value);
+    if (panelId === "secondary") state.secondaryListThumbMode = nextMode;
+    else state.listThumbMode = nextMode;
   }
 
   function syncSplitListUi() {
@@ -397,6 +414,16 @@ export function createBrowserModule({
     return types.includes(ITEM_DRAG_TYPE) || types.includes("Files");
   }
 
+  function dragEventHasFilePayload(event) {
+    return Array.from(event.dataTransfer?.types || []).includes("Files");
+  }
+
+  function clearItemListDropClasses() {
+    for (const panel of listPanels()) {
+      panel.itemList?.classList.remove("result-drop-over");
+    }
+  }
+
   function bindItemControlDropTarget(target, item, role) {
     if (!target || !item || !canDropItemOnControlRole(role)) return;
     target.dataset.dropRole = role;
@@ -471,25 +498,22 @@ export function createBrowserModule({
   }
 
   function renderFilterSummary() {
-    const showCombined = activeControlCount() > 0;
-    if (!showCombined && state.listThumbMode === "combined") {
-      state.listThumbMode = "result";
-      saveStored(STORAGE_KEYS.listThumbMode, state.listThumbMode);
-    }
     const selects = [
       ["primary", refs.listThumbModeSelect],
       ["secondary", refs.secondaryListThumbModeSelect],
     ];
     for (const [panelId, select] of selects.filter(([, select]) => Boolean(select))) {
-      if (!showCombined && panelThumbMode(panelId) === "combined") {
-        setPanelThumbMode(panelId, "result");
-        saveStored(panelId === "secondary" ? STORAGE_KEYS.secondaryListThumbMode : STORAGE_KEYS.listThumbMode, "result");
+      const currentValue = normalizeThumbMode(panelThumbMode(panelId));
+      if (currentValue !== panelThumbMode(panelId)) {
+        setPanelThumbMode(panelId, currentValue);
+        saveStored(panelId === "secondary" ? STORAGE_KEYS.secondaryListThumbMode : STORAGE_KEYS.listThumbMode, currentValue);
       }
-      const currentValue = panelThumbMode(panelId) === "combined" && showCombined ? "combined" : "result";
-      select.replaceChildren(
-        new Option("仅结果图", "result"),
-        ...(showCombined ? [new Option("控制图与结果图", "combined")] : []),
-      );
+      const controlOptions = activeControlRoles().map((role, index) => new Option(`仅控制图${index + 1}`, role));
+      select.replaceChildren();
+      if (activeControlCount() > 0) {
+        select.append(new Option("控制图与结果图", "combined"));
+      }
+      select.append(new Option("仅结果图", "result"), ...controlOptions);
       select.value = currentValue;
     }
   }
@@ -1506,6 +1530,50 @@ export function createBrowserModule({
     setAiStatusLine?.(`已把 ${file.name || "拖入图片"} 设置为 ${targetName} 的 ${ROLE_LABELS[targetRole] || targetRole}`);
   }
 
+  async function uploadRoleImageFile(file, role = "result") {
+    if (!file) return;
+    const targetRole = /^control[1-3]$/.test(role) ? role : "result";
+    const data = await apiPost("/api/item/upload-role-image", {
+      role: targetRole,
+      filename: file.name || "dropped.png",
+      data: arrayBufferToBase64(await file.arrayBuffer()),
+    });
+    if (data.workspace) applyWorkspaceSummary(data.workspace);
+    state.imageRefreshToken = `${Date.now()}-upload-${targetRole}-${data.name || file.name || "dropped"}`;
+    await refreshItems({ skipDirtyCheck: true });
+    setAiStatusLine?.(`已添加${ROLE_LABELS[targetRole] || targetRole}：${data.name || file.name || "拖入图片"}`);
+  }
+
+  function dropRoleForPanel(panelId) {
+    const mode = normalizeThumbMode(panelThumbMode(panelId));
+    return /^control[1-3]$/.test(mode) ? mode : "result";
+  }
+
+  function bindItemListResultDropTarget(panel) {
+    const list = panel?.itemList;
+    if (!list || list.dataset.resultDropBound === "true") return;
+    list.dataset.resultDropBound = "true";
+    list.addEventListener("dragover", (event) => {
+      if (!dragEventHasFilePayload(event) || event.target.closest(".item-thumb-drop")) return;
+      event.preventDefault();
+      list.classList.add("result-drop-over");
+      if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+    });
+    list.addEventListener("dragleave", (event) => {
+      if (list.contains(event.relatedTarget)) return;
+      list.classList.remove("result-drop-over");
+    });
+    list.addEventListener("drop", (event) => {
+      if (event.target.closest(".item-thumb-drop")) return;
+      const file = droppedImageFile(event.dataTransfer);
+      if (!file) return;
+      event.preventDefault();
+      event.stopPropagation();
+      clearItemListDropClasses();
+      uploadRoleImageFile(file, dropRoleForPanel(panel.id || "primary")).catch(showError || console.error);
+    });
+  }
+
   function renderItemList() {
     ensureItemContextMenuEvents();
     const scrollTops = new Map(listPanels().map((panel) => [panel.id, panel.itemList.scrollTop]));
@@ -1520,16 +1588,18 @@ export function createBrowserModule({
     for (const panel of listPanels()) {
       const panelId = panel.id || "primary";
       const items = panelVisibleItems(panelId);
+      bindItemListResultDropTarget(panel);
       renderFolderFilters(panel);
       panel.itemList.textContent = "";
       if (panel.listStats) panel.listStats.textContent = panelFolderFilter(panelId) ? `${items.length}/${panelItems(panelId).length} 项` : `${items.length} 项`;
 
       for (const item of items) {
-        const thumbRoles = panelThumbMode(panelId) === "combined" && activeControlCount() > 0
-          ? [...activeControlRoles(), "result"]
-          : ["result"];
+        const thumbRoles = thumbRolesForMode(panelThumbMode(panelId));
         const card = document.createElement("article");
         card.className = `item-card${panelId === activeListPanelId() && item.name === state.selectedName ? " active" : ""}${panelId === batchSelectionPanelId() && batchSelection().has(item.name) ? " multi-selected" : ""}${thumbRoles.length > 1 ? " multi-thumb" : ""}`;
+        if (thumbRoles.length > 1) {
+          card.style.setProperty("--item-card-min-width", `${(thumbRoles.length * 88) + ((thumbRoles.length - 1) * 3) + 10 + 50 + 16}px`);
+        }
         card.dataset.name = item.name;
         card.draggable = true;
         card.title = "双击重命名图片";

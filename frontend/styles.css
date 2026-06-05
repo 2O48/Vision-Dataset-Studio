@@ -1033,7 +1033,7 @@ label span,
 
 .workbench-layout {
   display: grid;
-  grid-template-columns: var(--split-list-card-width, minmax(240px, var(--thumb-list-width))) 4px minmax(0, 1fr);
+  grid-template-columns: var(--split-list-card-width, minmax(164px, var(--thumb-list-width))) 4px minmax(0, 1fr);
   gap: 0;
   column-gap: 5px;
   align-items: stretch;
@@ -1542,6 +1542,16 @@ textarea:focus {
   gap: 8px;
   margin-top: 14px;
   padding-right: 4px;
+  border-radius: var(--radius-md);
+  min-width: 0;
+  transition:
+    background 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.item-list.result-drop-over {
+  background: rgba(47, 111, 115, 0.08);
+  box-shadow: inset 0 0 0 1px rgba(47, 111, 115, 0.24);
 }
 
 .item-card,
@@ -1557,8 +1567,9 @@ textarea:focus {
 
 .item-card {
   display: grid;
-  grid-template-columns: 88px minmax(0, 1fr);
+  grid-template-columns: 88px minmax(50px, 1fr);
   gap: 10px;
+  min-width: 164px;
   padding: 8px;
   border-radius: var(--radius-lg);
   background: var(--green-surface);
@@ -1587,8 +1598,9 @@ textarea:focus {
 }
 
 .item-card.multi-thumb {
-  grid-template-columns: max-content minmax(0, 1fr);
+  grid-template-columns: max-content minmax(50px, 1fr);
   gap: 10px;
+  min-width: var(--item-card-min-width, 255px);
 }
 
 .item-card.dragging {
@@ -1675,9 +1687,12 @@ textarea:focus {
 .item-card-main {
   flex: 1;
   min-width: 0;
+  overflow: hidden;
 }
 
 .item-title {
+  min-width: 50px;
+  max-width: 100%;
   color: var(--ink);
   font-size: 16px;
   line-height: 1.3;
@@ -3459,7 +3474,7 @@ textarea:focus {
 
 @media (max-width: 1320px) {
   .workbench-layout {
-    grid-template-columns: var(--split-list-card-width, minmax(240px, min(var(--thumb-list-width), 330px))) 4px minmax(0, 1fr);
+    grid-template-columns: var(--split-list-card-width, minmax(164px, min(var(--thumb-list-width), 330px))) 4px minmax(0, 1fr);
   }
 
   .workbench-layout:has(.list-card.split-open) {
@@ -3635,7 +3650,8 @@ textarea:focus {
   }
 
   .item-card {
-    grid-template-columns: 72px minmax(0, 1fr);
+    grid-template-columns: 72px minmax(50px, 1fr);
+    min-width: 148px;
   }
 
   .item-thumb,
