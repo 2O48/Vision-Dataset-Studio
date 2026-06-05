@@ -22,6 +22,17 @@ def project_python() -> Path:
     return VENV_DIR / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
 
 
+def pip_progress_mode(py: Path) -> str:
+    result = subprocess.run(
+        [str(py), "-m", "pip", "install", "--help"],
+        cwd=BASE_DIR,
+        text=True,
+        capture_output=True,
+    )
+    help_text = f"{result.stdout}\n{result.stderr}".lower()
+    return "raw" if "raw" in help_text else "on"
+
+
 def running_in_project_venv() -> bool:
     try:
         return Path(sys.executable).resolve() == project_python().resolve()
@@ -477,10 +488,11 @@ class DependencyInstaller:
             self._finish("failed", self.progress_pct)
             return
 
+        progress_mode = pip_progress_mode(venv_py)
         steps = [
-            ("PyTorch CUDA 12.4", [str(venv_py), "-m", "pip", "install", "--progress-bar", "raw", "--disable-pip-version-check", "-r", str(BASE_DIR / "requirements" / "qwen-cu124.txt")], 25, 60),
-            ("huggingface_hub / accelerate / pillow / safetensors", [str(venv_py), "-m", "pip", "install", "--progress-bar", "raw", "--disable-pip-version-check", "--upgrade", "-r", str(BASE_DIR / "requirements" / "qwen-common.txt")], 60, 82),
-            ("transformers latest for Qwen3.5", [str(venv_py), "-m", "pip", "install", "--progress-bar", "raw", "--disable-pip-version-check", "--upgrade", "git+https://github.com/huggingface/transformers.git@main"], 82, 98),
+            ("PyTorch CUDA 12.6", [str(venv_py), "-m", "pip", "install", "--progress-bar", progress_mode, "--disable-pip-version-check", "-r", str(BASE_DIR / "requirements" / "qwen-cu126.txt")], 25, 60),
+            ("huggingface_hub / accelerate / pillow / safetensors", [str(venv_py), "-m", "pip", "install", "--progress-bar", progress_mode, "--disable-pip-version-check", "--upgrade", "-r", str(BASE_DIR / "requirements" / "qwen-common.txt")], 60, 82),
+            ("transformers latest for Qwen3.5", [str(venv_py), "-m", "pip", "install", "--progress-bar", progress_mode, "--disable-pip-version-check", "--upgrade", "git+https://github.com/huggingface/transformers.git@main"], 82, 98),
         ]
 
         ok = True
