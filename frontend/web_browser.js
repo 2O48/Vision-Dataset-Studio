@@ -35,7 +35,8 @@ export function createBrowserModule({
   let itemContextTarget = null;
   let itemContextCloseTimer = 0;
   let splitListRenderTimer = 0;
-  let itemThumbObserver = null;
+  const itemThumbObservers = new Map();
+  let itemDragSource = null;
   let imagePreview = null;
 
   function listPanels() {
@@ -313,23 +314,28 @@ export function createBrowserModule({
     url.searchParams.set("role", role);
     url.searchParams.set("name", name);
     url.searchParams.set("workspace", state.workspace?.workspace_key || String(state.workspaceImageVersion || 0));
-    url.searchParams.set("refresh", String(state.imageRefreshToken || 0));
     if (thumb) {
       url.searchParams.set("thumb", "1");
       url.searchParams.set("width", String(width));
       url.searchParams.set("height", String(height));
+    } else {
+      url.searchParams.set("refresh", String(state.imageRefreshToken || 0));
     }
     return url.toString();
   }
 
-  function disconnectItemThumbObserver() {
-    itemThumbObserver?.disconnect();
-    itemThumbObserver = null;
+  function disconnectItemThumbObservers() {
+    for (const observer of itemThumbObservers.values()) {
+      observer.disconnect();
+    }
+    itemThumbObservers.clear();
   }
 
-  function ensureItemThumbObserver() {
-    if (itemThumbObserver || typeof IntersectionObserver === "undefined") return itemThumbObserver;
-    itemThumbObserver = new IntersectionObserver(
+  function ensureItemThumbObserver(root) {
+    if (!root || typeof IntersectionObserver === "undefined") return null;
+    const existing = itemThumbObservers.get(root);
+    if (existing) return existing;
+    const observer = new IntersectionObserver(
       (entries) => {
         for (const entry of entries) {
           if (entry.isIntersecting) {
@@ -339,9 +345,10 @@ export function createBrowserModule({
           }
         }
       },
-      { root: null, rootMargin: "120px", threshold: 0.01 },
+      { root, rootMargin: "160px", threshold: 0.01 },
     );
-    return itemThumbObserver;
+    itemThumbObservers.set(root, observer);
+    return observer;
   }
 
   function loadItemThumb(slot) {
@@ -368,7 +375,17 @@ export function createBrowserModule({
     slot.classList.remove("loaded");
   }
 
-  function createItemThumbSlot(item, role) {
+  function closestElement(target, selector) {
+    return target instanceof Element ? target.closest(selector) : null;
+  }
+
+  function itemDragPayload(event) {
+    const sourceName = event.dataTransfer?.getData(ITEM_DRAG_TYPE) || itemDragSource?.name || "";
+    const sourceRole = event.dataTransfer?.getData(ITEM_ROLE_DRAG_TYPE) || itemDragSource?.role || "";
+    return { sourceName, sourceRole };
+  }
+
+  function createItemThumbSlot(item, role, root = null) {
     const slot = document.createElement("div");
     slot.className = "item-thumb-lazy";
     slot.dataset.src = imageUrl(role, item.name, true, 192, 156);
@@ -382,13 +399,14 @@ export function createBrowserModule({
       event.dataTransfer?.setData(ITEM_ROLE_DRAG_TYPE, role);
       event.dataTransfer?.setData("text/plain", item.name);
       if (event.dataTransfer) event.dataTransfer.effectAllowed = "copyMove";
+      itemDragSource = { name: item.name, role };
       slot.closest(".item-card")?.classList.add("dragging");
     });
     if (canDropItemOnControlRole(role)) {
       slot.classList.add("item-thumb-drop");
       bindItemControlDropTarget(slot, item, role);
     }
-    const observer = ensureItemThumbObserver();
+    const observer = ensureItemThumbObserver(root);
     if (observer) {
       observer.observe(slot);
     } else {
@@ -411,7 +429,7 @@ export function createBrowserModule({
 
   function dragEventHasControlImagePayload(event) {
     const types = Array.from(event.dataTransfer?.types || []);
-    return types.includes(ITEM_DRAG_TYPE) || types.includes("Files");
+    return Boolean(itemDragSource?.name) || types.includes(ITEM_DRAG_TYPE) || types.includes("Files");
   }
 
   function dragEventHasFilePayload(event) {
@@ -440,8 +458,7 @@ export function createBrowserModule({
       target.classList.remove("drag-over");
     });
     target.addEventListener("drop", (event) => {
-      const sourceName = event.dataTransfer?.getData(ITEM_DRAG_TYPE) || "";
-      const sourceRole = event.dataTransfer?.getData(ITEM_ROLE_DRAG_TYPE) || "result";
+      const { sourceName, sourceRole } = itemDragPayload(event);
       const file = droppedImageFile(event.dataTransfer);
       if (!sourceName && !file) return;
       event.preventDefault();
@@ -602,8 +619,16 @@ export function createBrowserModule({
 
   function filteredItems(panelId = "primary") {
     const folder = panelFolderFilter(panelId);
-    const items = panelItems(panelId);
+    const mode = normalizeThumbMode(panelThumbMode(panelId));
+    const items = panelItems(panelId).filter((item) => (
+      !/^(?:result|control[1-3])$/.test(mode) || item.exists?.[mode]
+    ));
     return folder ? items.filter((item) => itemFolder(item.name) === folder) : [...items];
+  }
+
+  function itemDragRoleForPanel(item, panelId = "primary") {
+    const visibleRoles = thumbRolesForMode(panelThumbMode(panelId));
+    return visibleRoles.find((role) => item.exists?.[role]) || "";
   }
 
   function batchSelection() {
@@ -1502,7 +1527,7 @@ export function createBrowserModule({
     });
     if (data.workspace) applyWorkspaceSummary(data.workspace);
     state.imageRefreshToken = `${Date.now()}-assign-${targetRole}-${targetName}`;
-    await refreshItems({ skipDirtyCheck: true });
+    await refreshItems({ skipDirtyCheck: true, suppressSelectionSync: true, includeGlobalSegments: false });
     setAiStatusLine?.(`已把 ${sourceName} 设置为 ${targetName} 的 ${ROLE_LABELS[targetRole] || targetRole}`);
   }
 
@@ -1526,7 +1551,7 @@ export function createBrowserModule({
     });
     if (data.workspace) applyWorkspaceSummary(data.workspace);
     state.imageRefreshToken = `${Date.now()}-upload-${targetRole}-${targetName}`;
-    await refreshItems({ skipDirtyCheck: true });
+    await refreshItems({ skipDirtyCheck: true, suppressSelectionSync: true, includeGlobalSegments: false });
     setAiStatusLine?.(`已把 ${file.name || "拖入图片"} 设置为 ${targetName} 的 ${ROLE_LABELS[targetRole] || targetRole}`);
   }
 
@@ -1540,7 +1565,7 @@ export function createBrowserModule({
     });
     if (data.workspace) applyWorkspaceSummary(data.workspace);
     state.imageRefreshToken = `${Date.now()}-upload-${targetRole}-${data.name || file.name || "dropped"}`;
-    await refreshItems({ skipDirtyCheck: true });
+    await refreshItems({ skipDirtyCheck: true, suppressSelectionSync: true, includeGlobalSegments: false });
     setAiStatusLine?.(`已添加${ROLE_LABELS[targetRole] || targetRole}：${data.name || file.name || "拖入图片"}`);
   }
 
@@ -1554,7 +1579,7 @@ export function createBrowserModule({
     if (!list || list.dataset.resultDropBound === "true") return;
     list.dataset.resultDropBound = "true";
     list.addEventListener("dragover", (event) => {
-      if (!dragEventHasFilePayload(event) || event.target.closest(".item-thumb-drop")) return;
+      if (!dragEventHasFilePayload(event) || closestElement(event.target, ".item-thumb-drop")) return;
       event.preventDefault();
       list.classList.add("result-drop-over");
       if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
@@ -1564,7 +1589,7 @@ export function createBrowserModule({
       list.classList.remove("result-drop-over");
     });
     list.addEventListener("drop", (event) => {
-      if (event.target.closest(".item-thumb-drop")) return;
+      if (closestElement(event.target, ".item-thumb-drop")) return;
       const file = droppedImageFile(event.dataTransfer);
       if (!file) return;
       event.preventDefault();
@@ -1581,7 +1606,7 @@ export function createBrowserModule({
     setPanelVisibleItems("secondary", filteredItems("secondary"));
     syncBatchSelectionPanelAvailability();
     pruneBatchSelection();
-    disconnectItemThumbObserver();
+    disconnectItemThumbObservers();
     renderWorkspaceSummary();
     if (refs.metricFiltered) refs.metricFiltered.textContent = `${panelVisibleItems("primary").length || 0}`;
 
@@ -1608,13 +1633,20 @@ export function createBrowserModule({
             event.preventDefault();
             return;
           }
+          const dragRole = itemDragRoleForPanel(item, panelId);
+          if (!dragRole) {
+            event.preventDefault();
+            return;
+          }
           event.dataTransfer?.setData(ITEM_DRAG_TYPE, item.name);
-          event.dataTransfer?.setData(ITEM_ROLE_DRAG_TYPE, "result");
+          event.dataTransfer?.setData(ITEM_ROLE_DRAG_TYPE, dragRole);
           event.dataTransfer?.setData("text/plain", item.name);
           if (event.dataTransfer) event.dataTransfer.effectAllowed = "copyMove";
+          itemDragSource = { name: item.name, role: dragRole };
           card.classList.add("dragging");
         });
         card.addEventListener("dragend", () => {
+          itemDragSource = null;
           card.classList.remove("dragging");
           for (const currentPanel of listPanels()) {
             currentPanel.folderFilters?.querySelectorAll(".drag-over").forEach((node) => node.classList.remove("drag-over"));
@@ -1627,7 +1659,7 @@ export function createBrowserModule({
         thumbs.style.setProperty("--thumb-count", String(thumbRoles.length));
         for (const role of thumbRoles) {
           if (item.exists[role]) {
-            thumbs.appendChild(createItemThumbSlot(item, role));
+            thumbs.appendChild(createItemThumbSlot(item, role, panel.itemList));
           } else {
             thumbs.appendChild(
               thumbRoles.length > 1 && canDropItemOnControlRole(role)
@@ -1635,7 +1667,7 @@ export function createBrowserModule({
                 : (() => {
                     const placeholder = document.createElement("div");
                     placeholder.className = "item-thumb-empty";
-                    placeholder.textContent = thumbRoles.length > 1 ? (ROLE_LABELS[role] || role).replace(/\s+/g, "") : "无结果";
+                    placeholder.textContent = `无${(ROLE_LABELS[role] || role).replace(/\s+/g, "")}`;
                     return placeholder;
                   })(),
             );
@@ -1841,7 +1873,7 @@ export function createBrowserModule({
       const types = Array.from(event.dataTransfer?.types || []);
       if (!card) return;
       const targetRole = card.dataset.role || "";
-      if ((types.includes(ITEM_DRAG_TYPE) || types.includes("Files")) && canAssignListItemToViewerControl(targetRole)) {
+      if ((itemDragSource?.name || types.includes(ITEM_DRAG_TYPE) || types.includes("Files")) && canAssignListItemToViewerControl(targetRole)) {
         event.preventDefault();
         if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
         refs.viewerGrid.querySelectorAll(".role-drop-target").forEach((node) => {
@@ -1868,8 +1900,7 @@ export function createBrowserModule({
     refs.viewerGrid.addEventListener("drop", (event) => {
       const card = event.target.closest(".image-card");
       if (!card) return;
-      const sourceName = event.dataTransfer?.getData(ITEM_DRAG_TYPE) || "";
-      const sourceItemRole = event.dataTransfer?.getData(ITEM_ROLE_DRAG_TYPE) || "result";
+      const { sourceName, sourceRole: sourceItemRole } = itemDragPayload(event);
       const sourceRole = event.dataTransfer?.getData(VIEWER_ROLE_DRAG_TYPE) || "";
       const file = droppedImageFile(event.dataTransfer);
       const targetRole = card.dataset.role || "";
@@ -1970,18 +2001,19 @@ export function createBrowserModule({
   }
 
   async function refreshItems(options = {}) {
-    const { skipDirtyCheck = false, suppressSelectionSync = false } = options;
+    const { skipDirtyCheck = false, suppressSelectionSync = false, includeGlobalSegments = true } = options;
     const loadPanelItems = async (panelId) => apiGet("/api/items", {
       filter: panelFilter(panelId),
       tag: panelSegmentQuery(panelId),
       search_mode: panelSearchMode(panelId) === "name" ? "name" : "phrase",
       match_mode: panelSearchMatchMode(panelId) === "exact" ? "exact" : "contains",
+      global_segments: panelId === "primary" && includeGlobalSegments ? "1" : "0",
     });
     const data = await loadPanelItems("primary");
     if (data.workspace) state.workspace = data.workspace;
     setPanelItems("primary", data.items || []);
     state.itemStats = data.stats;
-    state.globalSegments = data.global_segments || data.global_tags || [];
+    if (includeGlobalSegments) state.globalSegments = data.global_segments || data.global_tags || [];
     if (state.splitListOpen) {
       const secondaryData = await loadPanelItems("secondary");
       setPanelItems("secondary", secondaryData.items || []);
@@ -1993,7 +2025,7 @@ export function createBrowserModule({
     }
     renderFilters();
     renderItemList();
-    renderGlobalTags();
+    if (includeGlobalSegments) renderGlobalTags();
     renderWorkspaceSummary();
 
     const activePanel = rememberedSelection?.panel || activeListPanelId();

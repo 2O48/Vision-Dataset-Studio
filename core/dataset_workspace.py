@@ -674,7 +674,8 @@ class DatasetWorkspace:
         parts = [part for part in str(raw_name or "").replace("\\", "/").split("/") if part]
         if not parts:
             parts = ["untitled"]
-        return root.joinpath(*parts).with_suffix(suffix)
+        parts[-1] = f"{parts[-1]}{suffix}"
+        return root.joinpath(*parts)
 
     def _clean_rename_basename(self, value: str) -> str:
         raw = str(value or "").strip()
@@ -799,9 +800,26 @@ class DatasetWorkspace:
         self._image_sizes[cache_key] = size
         return size
 
+    def _refresh_item_resolution_flag(self, name: str):
+        if not self._resolution_index_ready:
+            return
+        for role in IMAGE_ROLES:
+            self._image_sizes.pop((role, name), None)
+        result_size = self._get_image_size("result", name)
+        mismatch = bool(
+            result_size
+            and any(
+                self._get_image_size(role, name) and self._get_image_size(role, name) != result_size
+                for role in CONTROL_ROLES[: self.control_count]
+            )
+        )
+        if mismatch:
+            self._resolution_mismatch.add(name)
+        else:
+            self._resolution_mismatch.discard(name)
+
     def get_workspace_summary(self) -> dict:
         with self._lock:
-            self._ensure_resolution_index()
             visible_names = set(self.file_names)
             return {
                 "workspace_key": self.workspace_key or self._compute_workspace_key(),
@@ -817,7 +835,7 @@ class DatasetWorkspace:
                     "result": sum(1 for name in visible_names if name in self.files["result"]),
                     "txt": sum(1 for name in self.file_names if self._has_caption(name)),
                     "all": len(self.file_names),
-                    "resolution_mismatch": len(self._resolution_mismatch),
+                    "resolution_mismatch": len(self._resolution_mismatch) if self._resolution_index_ready else 0,
                     "edited": sum(1 for name in self.file_names if name in self.caption_overrides),
                     "excluded": len(self.excluded_names),
                 },
@@ -831,9 +849,9 @@ class DatasetWorkspace:
         search_mode: str = "all",
         match_mode: str = "contains",
         detail: bool = False,
+        include_global_segments: bool = True,
     ) -> dict:
         with self._lock:
-            self._ensure_resolution_index()
             names = list(self.file_names)
             control1_files = self.files["control1"]
             control2_files = self.files["control2"]
@@ -851,6 +869,7 @@ class DatasetWorkspace:
             elif filter_mode == "no_txt":
                 names = [name for name in names if not self._has_caption(name)]
             elif filter_mode == "res_mismatch":
+                self._ensure_resolution_index()
                 names = [name for name in names if name in self._resolution_mismatch]
 
             tag_query = (tag_query or "").strip().lower()
@@ -894,7 +913,7 @@ class DatasetWorkspace:
                 self._serialize_item(name) if detail else self._serialize_item_summary(name, search_query=tag_query, search_mode=search_mode, match_mode=match_mode)
                 for name in names
             ]
-            global_segments = self.get_global_segments()
+            global_segments = self.get_global_segments() if include_global_segments and not tag_query else []
             return {
                 "items": items,
                 "stats": self._build_stats(filtered_count=len(items)),
@@ -964,7 +983,7 @@ class DatasetWorkspace:
             "no_control3": sum(1 for name in self.file_names if name not in control3_files) if self.control_count >= 3 else 0,
             "no_result": sum(1 for name in self.file_names if name not in result_files),
             "no_txt": sum(1 for name in self.file_names if not self._has_caption(name)),
-            "resolution_mismatch": len(self._resolution_mismatch),
+            "resolution_mismatch": len(self._resolution_mismatch) if self._resolution_index_ready else 0,
             "edited": sum(1 for name in self.file_names if name in self.caption_overrides),
             "excluded": len(self.excluded_names),
         }
@@ -976,6 +995,24 @@ class DatasetWorkspace:
         control2_path = self.files["control2"].get(name)
         control3_path = self.files["control3"].get(name)
         result_path = self.files["result"].get(name)
+        resolution = {
+            "control1": self._get_image_size("control1", name),
+            "control2": self._get_image_size("control2", name),
+            "control3": self._get_image_size("control3", name),
+            "result": self._get_image_size("result", name),
+        }
+        result_size = resolution["result"]
+        item_resolution_mismatch = bool(
+            result_size
+            and any(
+                resolution[role] and resolution[role] != result_size
+                for role in CONTROL_ROLES[: self.control_count]
+            )
+        )
+        if item_resolution_mismatch:
+            self._resolution_mismatch.add(name)
+        else:
+            self._resolution_mismatch.discard(name)
         return {
             "name": name,
             "paths": {
@@ -996,14 +1033,9 @@ class DatasetWorkspace:
             "tags": segments,
             "segments": segments,
             "text": text,
-            "resolution": {
-                "control1": self._get_image_size("control1", name),
-                "control2": self._get_image_size("control2", name),
-                "control3": self._get_image_size("control3", name),
-                "result": self._get_image_size("result", name),
-            },
+            "resolution": resolution,
             "flags": {
-                "resolution_mismatch": name in self._resolution_mismatch,
+                "resolution_mismatch": item_resolution_mismatch,
             },
         }
 
@@ -1011,7 +1043,6 @@ class DatasetWorkspace:
         with self._lock:
             if name not in self.file_names:
                 raise KeyError(name)
-            self._ensure_resolution_index()
             return self._serialize_item(name)
 
     def get_global_segments(self) -> list[dict]:
@@ -1693,6 +1724,18 @@ class DatasetWorkspace:
             return path
         raise FileNotFoundError(f"No {role} image found for item: {name}")
 
+    def _item_image_path_for_preferred_role(self, name: str, role: str) -> tuple[Path, str]:
+        if role:
+            try:
+                return self._item_image_path_for_role(name, role), role
+            except FileNotFoundError:
+                pass
+        for fallback_role in ("result", "control1", "control2", "control3"):
+            path = self.files.get(fallback_role, {}).get(name)
+            if path and path.exists():
+                return path, fallback_role
+        raise FileNotFoundError(f"No image found for item: {name}")
+
     def _derive_control_dir(self, role: str) -> Path:
         for reference_role in CONTROL_ROLES:
             reference_dir = self.dirs.get(reference_role)
@@ -1778,10 +1821,9 @@ class DatasetWorkspace:
     def _next_control_drop_path(self, target_name: str, target_role: str, suffix: str) -> Path:
         target_dir = self._control_dir_for_role(target_role)
         reference_raw_name = self._reference_raw_name_for_control_drop(target_name)
-        name_suffix = f"_{target_role}"
         index = 1
         while True:
-            target_raw_name = self._append_name_suffix(reference_raw_name, name_suffix, index)
+            target_raw_name = reference_raw_name if index <= 1 else self._append_name_suffix(reference_raw_name, "", index)
             target_path = self._image_path_for_raw_name(target_dir, target_raw_name, suffix)
             if not target_path.exists():
                 return target_path
@@ -1808,6 +1850,13 @@ class DatasetWorkspace:
             return target_path, existing_path
         return self._next_control_drop_path(target_name, target_role, suffix), None
 
+    def _apply_control_drop_result(self, target_name: str, target_role: str, target_path: Path):
+        self.files[target_role][target_name] = target_path
+        self.workspace_key = self._compute_workspace_key()
+        self._refresh_item_resolution_flag(target_name)
+        self._mark_global_segments_dirty()
+        return self.get_workspace_summary()
+
     def assign_control_image(self, source_name: str, target_name: str, target_role: str, source_role: str = "") -> dict:
         with self._lock:
             source_name = str(source_name or "").strip()
@@ -1818,7 +1867,7 @@ class DatasetWorkspace:
                 raise KeyError(source_name)
             self._validate_control_drop_target(target_name, target_role, allow_replace=True)
 
-            source_path = self._item_image_path_for_role(source_name, source_role) if source_role else self._first_item_image_path(source_name)
+            source_path, actual_source_role = self._item_image_path_for_preferred_role(source_name, source_role)
             target_path, replaced_path = self._control_drop_target_path(target_name, target_role, source_path.suffix)
             target_path.parent.mkdir(parents=True, exist_ok=True)
             if source_path.resolve() != target_path.resolve():
@@ -1826,10 +1875,11 @@ class DatasetWorkspace:
                 if replaced_path and replaced_path != target_path and replaced_path.exists():
                     replaced_path.unlink()
 
-            summary = self.open_dirs()
+            summary = self._apply_control_drop_result(target_name, target_role, target_path)
             return {
                 "source_name": source_name,
-                "source_role": source_role,
+                "source_role": actual_source_role,
+                "requested_source_role": source_role,
                 "target_name": target_name,
                 "target_role": target_role,
                 "copied": {"from": str(source_path), "to": str(target_path)},
@@ -1862,7 +1912,7 @@ class DatasetWorkspace:
             if replaced_path and replaced_path != target_path and replaced_path.exists():
                 replaced_path.unlink()
 
-            summary = self.open_dirs()
+            summary = self._apply_control_drop_result(target_name, target_role, target_path)
             return {
                 "target_name": target_name,
                 "target_role": target_role,
@@ -1896,10 +1946,16 @@ class DatasetWorkspace:
             target_path = self._next_role_drop_path(role, filename, suffix)
             target_path.parent.mkdir(parents=True, exist_ok=True)
             target_path.write_bytes(payload)
-
-            summary = self.open_dirs()
             root = self.dirs.get(role)
             saved_name = self._relative_stem(root, target_path) if root else target_path.stem
+            self.files[role][saved_name] = target_path
+            if saved_name not in self.file_names and saved_name not in self.excluded_names:
+                self.file_names.append(saved_name)
+                self.file_names = sorted(self.file_names, key=_natural_key)
+            self.workspace_key = self._compute_workspace_key()
+            self._refresh_item_resolution_flag(saved_name)
+            self._mark_global_segments_dirty()
+            summary = self.get_workspace_summary()
             return {
                 "name": saved_name,
                 "role": role,
