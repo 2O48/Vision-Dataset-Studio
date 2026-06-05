@@ -1711,6 +1711,62 @@ class DatasetWorkspace:
         self.dirs[role] = target_dir
         return target_dir
 
+    def _derive_result_dir(self) -> Path:
+        for reference_role in CONTROL_ROLES:
+            reference_dir = self.dirs.get(reference_role)
+            if reference_dir:
+                return reference_dir.parent / "result"
+        raise ValueError("At least one loaded image directory is required before creating a result folder.")
+
+    def _result_dir_for_drop(self) -> Path:
+        current = self.dirs.get("result")
+        target_dir = current if current else self._derive_result_dir()
+        target_dir.mkdir(parents=True, exist_ok=True)
+        self.dirs["result"] = target_dir
+        return target_dir
+
+    def _clean_upload_image_stem(self, filename: str) -> str:
+        stem = Path(str(filename or "")).stem.strip() or "dropped"
+        stem = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "_", stem)
+        stem = stem.strip(" .") or "dropped"
+        if stem in {".", ".."}:
+            stem = "dropped"
+        if stem.upper() in WINDOWS_RESERVED_NAMES:
+            stem = f"{stem}_image"
+        return stem
+
+    def _next_result_drop_path(self, filename: str, suffix: str) -> Path:
+        result_dir = self._result_dir_for_drop()
+        stem = self._clean_upload_image_stem(filename)
+        index = 1
+        while True:
+            raw_name = stem if index <= 1 else f"{stem}_{index}"
+            target_path = self._image_path_for_raw_name(result_dir, raw_name, suffix)
+            if not any(self._image_path_for_raw_name(result_dir, raw_name, ext).exists() for ext in IMAGE_EXTS):
+                return target_path
+            index += 1
+
+    def _image_dir_for_role_drop(self, role: str) -> Path:
+        if role == "result":
+            return self._result_dir_for_drop()
+        if role in CONTROL_ROLES:
+            role_index = CONTROL_ROLES.index(role) + 1
+            if self.control_count < role_index:
+                raise ValueError(f"{role} is not enabled in the current workspace.")
+            return self._control_dir_for_role(role)
+        raise ValueError("Target role must be an image role.")
+
+    def _next_role_drop_path(self, role: str, filename: str, suffix: str) -> Path:
+        target_dir = self._image_dir_for_role_drop(role)
+        stem = self._clean_upload_image_stem(filename)
+        index = 1
+        while True:
+            raw_name = stem if index <= 1 else f"{stem}_{index}"
+            target_path = self._image_path_for_raw_name(target_dir, raw_name, suffix)
+            if not any(self._image_path_for_raw_name(target_dir, raw_name, ext).exists() for ext in IMAGE_EXTS):
+                return target_path
+            index += 1
+
     def _reference_raw_name_for_control_drop(self, target_name: str) -> str:
         for role in ("result", "control1", "control2", "control3"):
             root = self.dirs.get(role)
@@ -1812,6 +1868,42 @@ class DatasetWorkspace:
                 "target_role": target_role,
                 "saved": {"filename": filename, "path": str(target_path)},
                 "replaced": str(replaced_path) if replaced_path else "",
+                "workspace": summary,
+            }
+
+    def upload_result_image(self, filename: str, image_data: str) -> dict:
+        return self.upload_role_image("result", filename, image_data)
+
+    def upload_role_image(self, role: str, filename: str, image_data: str) -> dict:
+        with self._lock:
+            role = str(role or "").strip()
+            if role not in IMAGE_ROLES:
+                raise ValueError("Target role must be an image role.")
+            filename = str(filename or "").strip() or "dropped.png"
+            suffix = Path(filename).suffix.lower()
+            if suffix not in IMAGE_EXTS:
+                raise ValueError("Dropped file must be an image.")
+            raw_data = str(image_data or "")
+            if "," in raw_data and raw_data.split(",", 1)[0].lower().startswith("data:"):
+                raw_data = raw_data.split(",", 1)[1]
+            try:
+                payload = base64.b64decode(raw_data, validate=True)
+            except Exception as exc:
+                raise ValueError(f"Invalid dropped image data: {exc}") from exc
+            if not payload:
+                raise ValueError("Dropped image is empty.")
+
+            target_path = self._next_role_drop_path(role, filename, suffix)
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            target_path.write_bytes(payload)
+
+            summary = self.open_dirs()
+            root = self.dirs.get(role)
+            saved_name = self._relative_stem(root, target_path) if root else target_path.stem
+            return {
+                "name": saved_name,
+                "role": role,
+                "saved": {"filename": filename, "path": str(target_path)},
                 "workspace": summary,
             }
 

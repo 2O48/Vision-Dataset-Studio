@@ -357,6 +357,52 @@ class DatasetWorkspaceTextTests(unittest.TestCase):
             self.assertTrue(new_control2_file.exists())
             self.assertEqual(workspace.get_item("sample")["paths"]["control2"], str(new_control2_file))
 
+    def test_upload_result_image_adds_new_result_and_avoids_duplicate_stem(self):
+        workspace = DatasetWorkspace()
+        with tempfile.TemporaryDirectory() as root_dir:
+            root = Path(root_dir)
+            result_path = root / "result"
+            result_path.mkdir()
+            Image.new("RGB", (16, 16), (0, 0, 255)).save(result_path / "sample.png")
+            dropped = root / "sample.webp"
+            Image.new("RGB", (16, 16), (0, 255, 0)).save(dropped)
+
+            workspace.open_dirs(result_dir=str(result_path), control_count=1)
+            payload = dataset_workspace.base64.b64encode(dropped.read_bytes()).decode("ascii")
+            result = workspace.upload_result_image("sample.webp", payload)
+
+            saved_file = result_path / "sample_2.webp"
+            self.assertEqual(result["name"], "sample_2")
+            self.assertEqual(result["saved"]["path"], str(saved_file))
+            self.assertTrue(saved_file.exists())
+            self.assertTrue(workspace.get_item("sample_2")["exists"]["result"])
+            self.assertEqual(workspace.get_workspace_summary()["counts"]["result"], 2)
+
+    def test_upload_role_image_adds_control_image_when_role_is_control(self):
+        workspace = DatasetWorkspace()
+        with tempfile.TemporaryDirectory() as root_dir:
+            root = Path(root_dir)
+            result_path = root / "result"
+            control1_path = root / "control1"
+            result_path.mkdir()
+            control1_path.mkdir()
+            Image.new("RGB", (16, 16), (0, 0, 255)).save(result_path / "sample.png")
+            Image.new("RGB", (16, 16), (255, 0, 0)).save(control1_path / "guide.png")
+            dropped = root / "guide.webp"
+            Image.new("RGB", (16, 16), (0, 255, 0)).save(dropped)
+
+            workspace.open_dirs(control1_dir=str(control1_path), result_dir=str(result_path), control_count=1)
+            payload = dataset_workspace.base64.b64encode(dropped.read_bytes()).decode("ascii")
+            result = workspace.upload_role_image("control1", "guide.webp", payload)
+
+            saved_file = control1_path / "guide_2.webp"
+            self.assertEqual(result["name"], "guide_2")
+            self.assertEqual(result["role"], "control1")
+            self.assertEqual(result["saved"]["path"], str(saved_file))
+            self.assertTrue(saved_file.exists())
+            self.assertTrue(workspace.get_item("guide_2")["exists"]["control1"])
+            self.assertEqual(workspace.get_workspace_summary()["counts"]["control1"], 2)
+
     def test_move_item_to_folder_changes_parent_only(self):
         workspace = DatasetWorkspace()
         with tempfile.TemporaryDirectory() as control_dir, tempfile.TemporaryDirectory() as result_dir:

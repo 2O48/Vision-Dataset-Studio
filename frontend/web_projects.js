@@ -63,6 +63,11 @@ export function createProjectsModule({
     saveStored(STORAGE_KEYS.exportIncludeControls, "true");
   }
 
+  function normalizeProjectThumbMode(value) {
+    const mode = `${value || "result"}`;
+    return /^(combined|control[1-3])$/.test(mode) ? mode : "result";
+  }
+
   function collectProjectUiState(projectName) {
     return {
       version: PROJECT_STATE_VERSION,
@@ -73,12 +78,13 @@ export function createProjectsModule({
       segment_query: refs.tagSearch?.value.trim() || state.segmentQuery || "",
       list_search_mode: state.listSearchMode === "name" ? "name" : "phrase",
       list_search_match_mode: state.listSearchMatchMode === "exact" ? "exact" : "contains",
+      list_thumb_mode: normalizeProjectThumbMode(state.listThumbMode),
       secondary_filter: state.secondaryFilter || "all",
       secondary_item_folder_filter: state.secondaryItemFolderFilter || "",
       secondary_segment_query: refs.secondaryTagSearch?.value.trim() || state.secondarySegmentQuery || "",
       secondary_list_search_mode: state.secondaryListSearchMode === "name" ? "name" : "phrase",
       secondary_list_search_match_mode: state.secondaryListSearchMatchMode === "exact" ? "exact" : "contains",
-      secondary_list_thumb_mode: state.secondaryListThumbMode === "combined" ? "combined" : "result",
+      secondary_list_thumb_mode: normalizeProjectThumbMode(state.secondaryListThumbMode),
       split_list_open: Boolean(state.splitListOpen),
       utility_panel: state.utilityPanel || "projects",
       view_mode: state.viewMode || "two",
@@ -226,6 +232,8 @@ export function createProjectsModule({
     saveStored(STORAGE_KEYS.listSearchMode, state.listSearchMode);
     state.listSearchMatchMode = uiState.list_search_match_mode === "exact" ? "exact" : "contains";
     saveStored(STORAGE_KEYS.listSearchMatchMode, state.listSearchMatchMode);
+    state.listThumbMode = normalizeProjectThumbMode(uiState.list_thumb_mode);
+    saveStored(STORAGE_KEYS.listThumbMode, state.listThumbMode);
     state.secondaryFilter = uiState.secondary_filter || "all";
     state.secondaryItemFolderFilter = uiState.secondary_item_folder_filter || "";
     state.secondarySegmentQuery = uiState.secondary_segment_query || "";
@@ -234,7 +242,7 @@ export function createProjectsModule({
     saveStored(STORAGE_KEYS.secondaryListSearchMode, state.secondaryListSearchMode);
     state.secondaryListSearchMatchMode = uiState.secondary_list_search_match_mode === "exact" ? "exact" : "contains";
     saveStored(STORAGE_KEYS.secondaryListSearchMatchMode, state.secondaryListSearchMatchMode);
-    state.secondaryListThumbMode = uiState.secondary_list_thumb_mode === "combined" ? "combined" : "result";
+    state.secondaryListThumbMode = normalizeProjectThumbMode(uiState.secondary_list_thumb_mode);
     saveStored(STORAGE_KEYS.secondaryListThumbMode, state.secondaryListThumbMode);
     state.splitListOpen = Boolean(uiState.split_list_open);
     saveStored(STORAGE_KEYS.splitListOpen, state.splitListOpen ? "1" : "0");

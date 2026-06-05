@@ -555,6 +555,23 @@ class AppHandler(BaseHTTPRequestHandler):
                 _touch_active_project_content()
                 return self._send_json({"ok": True, **result})
 
+            if path == "/api/item/upload-result-image":
+                result = WORKSPACE.upload_result_image(
+                    str(body.get("filename", "") or ""),
+                    str(body.get("data", "") or ""),
+                )
+                _touch_active_project_content()
+                return self._send_json({"ok": True, **result})
+
+            if path == "/api/item/upload-role-image":
+                result = WORKSPACE.upload_role_image(
+                    str(body.get("role", "") or ""),
+                    str(body.get("filename", "") or ""),
+                    str(body.get("data", "") or ""),
+                )
+                _touch_active_project_content()
+                return self._send_json({"ok": True, **result})
+
             if path == "/api/item/move-folder":
                 result = WORKSPACE.move_item_to_folder(
                     str(body.get("name", "") or ""),
