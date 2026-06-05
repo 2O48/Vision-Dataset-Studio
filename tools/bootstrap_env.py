@@ -29,6 +29,17 @@ def venv_python() -> Path:
     return VENV_DIR / ("Scripts/python.exe" if is_windows() else "bin/python")
 
 
+def pip_progress_mode(py: Path) -> str:
+    result = subprocess.run(
+        [str(py), "-m", "pip", "install", "--help"],
+        cwd=BASE_DIR,
+        text=True,
+        capture_output=True,
+    )
+    help_text = f"{result.stdout}\n{result.stderr}".lower()
+    return "raw" if "raw" in help_text else "on"
+
+
 def check_python_version() -> None:
     version = sys.version_info[:3]
     if version < MIN_VERSION or version >= MAX_VERSION:
@@ -183,9 +194,10 @@ def install_requirements(requirements: Path) -> None:
     py = venv_python()
     if not py.exists():
         raise BootstrapError(f"Virtual environment Python not found: {py}")
-    _stream_run([str(py), "-m", "pip", "install", "--progress-bar", "raw", "--upgrade", "pip", "setuptools", "wheel"], desc="Upgrade pip tooling")
+    progress_mode = pip_progress_mode(py)
+    _stream_run([str(py), "-m", "pip", "install", "--progress-bar", progress_mode, "--upgrade", "pip", "setuptools", "wheel"], desc="Upgrade pip tooling")
     _stream_run(
-        [str(py), "-m", "pip", "install", "--progress-bar", "raw", "--disable-pip-version-check", "-r", str(requirements)],
+        [str(py), "-m", "pip", "install", "--progress-bar", progress_mode, "--disable-pip-version-check", "-r", str(requirements)],
         desc=f"Install {requirements.name}",
     )
 
@@ -200,16 +212,17 @@ def ensure_base() -> None:
 def ensure_qwen() -> None:
     ensure_base()
     py = venv_python()
+    progress_mode = pip_progress_mode(py)
     _stream_run(
-        [str(py), "-m", "pip", "install", "--progress-bar", "raw", "--disable-pip-version-check", "-r", str(REQUIREMENTS_DIR / "qwen-cu124.txt")],
+        [str(py), "-m", "pip", "install", "--progress-bar", progress_mode, "--disable-pip-version-check", "-r", str(REQUIREMENTS_DIR / "qwen-cu126.txt")],
         desc="Install Qwen CUDA runtime requirements",
     )
     _stream_run(
-        [str(py), "-m", "pip", "install", "--progress-bar", "raw", "--disable-pip-version-check", "--upgrade", "-r", str(REQUIREMENTS_DIR / "qwen-common.txt")],
+        [str(py), "-m", "pip", "install", "--progress-bar", progress_mode, "--disable-pip-version-check", "--upgrade", "-r", str(REQUIREMENTS_DIR / "qwen-common.txt")],
         desc="Install Qwen common requirements",
     )
     _stream_run(
-        [str(py), "-m", "pip", "install", "--progress-bar", "raw", "--disable-pip-version-check", "--upgrade", "git+https://github.com/huggingface/transformers.git@main"],
+        [str(py), "-m", "pip", "install", "--progress-bar", progress_mode, "--disable-pip-version-check", "--upgrade", "git+https://github.com/huggingface/transformers.git@main"],
         desc="Install latest Transformers for Qwen3.5",
     )
     print(f"[env] Local Qwen ready: {venv_python()}")

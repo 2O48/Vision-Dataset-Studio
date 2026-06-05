@@ -91,6 +91,18 @@ def progress(pct: int, message: str = ""):
     send({"type": "progress", "pct": int(pct), "msg": message})
 
 
+def _pip_progress_mode() -> str:
+    result = subprocess.run(
+        [sys.executable, "-m", "pip", "install", "--help"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+    )
+    help_text = f"{result.stdout}\n{result.stderr}".lower()
+    return "raw" if "raw" in help_text else "on"
+
+
 def _stream_pip_install(
     *packages: str,
     extra_index: str | None = None,
@@ -98,13 +110,14 @@ def _stream_pip_install(
     progress_end: int = 0,
     progress_label: str = "",
 ):
+    progress_mode = _pip_progress_mode()
     cmd = [
         sys.executable,
         "-m",
         "pip",
         "install",
         "--progress-bar",
-        "raw",
+        progress_mode,
         "--disable-pip-version-check",
         *packages,
     ]
@@ -268,6 +281,21 @@ def _model_dir_has_config(model_dir: Path) -> bool:
     return model_dir.is_dir() and (model_dir / "config.json").exists()
 
 
+def _cleanup_incomplete_model_dir(model_dir: Path) -> None:
+    if not model_dir.is_dir():
+        return
+    if (model_dir / "config.json").exists():
+        return
+    entries = [entry.name for entry in model_dir.iterdir()]
+    if not entries:
+        model_dir.rmdir()
+        return
+    if set(entries).issubset({".cache"}):
+        import shutil
+
+        shutil.rmtree(model_dir, ignore_errors=True)
+
+
 def _release_current_model():
     global _qwen_model, _qwen_processor, _qwen_model_key, _qwen_model_repo
 
@@ -294,14 +322,14 @@ def ensure_deps_qwen():
     try:
         import torch  # noqa: F401
     except Exception:
-        log("安装 PyTorch CUDA 12.4...")
+        log("安装 PyTorch CUDA 12.6...")
         _stream_pip_install(
-            "torch",
-            "torchvision",
-            extra_index="https://download.pytorch.org/whl/cu124",
+            "torch==2.7.1",
+            "torchvision==0.22.1",
+            extra_index="https://download.pytorch.org/whl/cu126",
             progress_start=3,
             progress_end=18,
-            progress_label="安装 PyTorch CUDA 12.4...",
+            progress_label="安装 PyTorch CUDA 12.6...",
         )
 
     try:
@@ -376,6 +404,8 @@ def load_qwen(model_key: str):
 
     source_path = None
     load_cache_dir = None
+
+    _cleanup_incomplete_model_dir(model_dir)
 
     if _model_dir_has_config(model_dir):
         source_path = str(model_dir)
