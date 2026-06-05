@@ -68,6 +68,7 @@ PROMPT_TEMPLATES = PromptTemplateStore(PROMPT_TEMPLATES_FILE)
 PROJECT_STORE = ProjectStore()
 THUMB_CACHE_LOCK = threading.RLock()
 THUMB_CACHE: OrderedDict[tuple[str, int, int, int, str], bytes] = OrderedDict()
+THUMB_RENDER_SEMAPHORE = threading.BoundedSemaphore(3)
 ACTIVE_PROJECT_LOCK = threading.RLock()
 ACTIVE_PROJECT_ID = ""
 
@@ -298,7 +299,15 @@ class AppHandler(BaseHTTPRequestHandler):
                 search_mode = query.get("search_mode", ["all"])[0]
                 match_mode = query.get("match_mode", ["contains"])[0]
                 detail = query.get("detail", ["0"])[0] in {"1", "true", "yes"}
-                data = WORKSPACE.list_items(filter_mode=filter_mode, tag_query=tag_query, search_mode=search_mode, match_mode=match_mode, detail=detail)
+                include_global_segments = query.get("global_segments", ["1"])[0] not in {"0", "false", "no"}
+                data = WORKSPACE.list_items(
+                    filter_mode=filter_mode,
+                    tag_query=tag_query,
+                    search_mode=search_mode,
+                    match_mode=match_mode,
+                    detail=detail,
+                    include_global_segments=include_global_segments,
+                )
                 return self._send_json({"ok": True, "workspace": WORKSPACE.get_workspace_summary(), **data})
             if path == "/api/item":
                 name = query.get("name", [""])[0]
@@ -982,19 +991,23 @@ class AppHandler(BaseHTTPRequestHandler):
             }.get(suffix, "application/octet-stream")
             return self._send_bytes(path.read_bytes(), content_type)
 
-        cache_key = _thumbnail_cache_key(path, max(width, 32), max(height, 32), query.get("refresh", [""])[0])
+        cache_key = _thumbnail_cache_key(path, max(width, 32), max(height, 32))
         cached = _get_cached_thumbnail(cache_key)
         if cached is not None:
             return self._send_bytes(cached, "image/jpeg")
 
-        with Image.open(path) as img:
-            if img.mode not in {"RGB", "RGBA"}:
-                img = img.convert("RGB")
-            img.thumbnail((cache_key[2], cache_key[3]))
-            if img.mode == "RGBA":
-                img = img.convert("RGB")
-            buf = io.BytesIO()
-            img.save(buf, format="JPEG", quality=88)
+        with THUMB_RENDER_SEMAPHORE:
+            cached = _get_cached_thumbnail(cache_key)
+            if cached is not None:
+                return self._send_bytes(cached, "image/jpeg")
+            with Image.open(path) as img:
+                if img.mode not in {"RGB", "RGBA"}:
+                    img = img.convert("RGB")
+                img.thumbnail((cache_key[2], cache_key[3]))
+                if img.mode == "RGBA":
+                    img = img.convert("RGB")
+                buf = io.BytesIO()
+                img.save(buf, format="JPEG", quality=88)
         data = buf.getvalue()
         _store_cached_thumbnail(cache_key, data)
         return self._send_bytes(data, "image/jpeg")

@@ -221,7 +221,7 @@ class DatasetWorkspaceTextTests(unittest.TestCase):
             workspace.open_dirs(control1_dir=str(control1_path), result_dir=str(result_path), control_count=2)
             result = workspace.assign_control_image("source", "sample", "control2")
 
-            control2_file = root / "control2" / "sample_control2.png"
+            control2_file = root / "control2" / "sample.png"
             self.assertTrue(control2_file.exists())
             self.assertTrue((result_path / "source.png").exists())
             self.assertEqual(result["copied"]["to"], str(control2_file))
@@ -241,7 +241,7 @@ class DatasetWorkspaceTextTests(unittest.TestCase):
             workspace.open_dirs(control1_dir=str(control1_path), control_count=2)
             workspace.assign_control_image("source", "sample", "control2")
 
-            control2_file = root / "control2" / "sample_control2.png"
+            control2_file = root / "control2" / "sample.png"
             self.assertTrue(control2_file.exists())
             item = workspace.get_item("sample")
             self.assertTrue(item["exists"]["control2"])
@@ -272,6 +272,76 @@ class DatasetWorkspaceTextTests(unittest.TestCase):
             self.assertEqual(result["source_role"], "result")
             with Image.open(target) as image:
                 self.assertEqual(image.getpixel((0, 0)), (0, 255, 0))
+
+    def test_assign_control_image_falls_back_when_requested_source_role_missing(self):
+        workspace = DatasetWorkspace()
+        with tempfile.TemporaryDirectory() as root_dir:
+            root = Path(root_dir)
+            control1_path = root / "control1"
+            result_path = root / "result"
+            control1_path.mkdir()
+            result_path.mkdir()
+            Image.new("RGB", (16, 16), (10, 20, 30)).save(control1_path / "source.png")
+            Image.new("RGB", (16, 16), (0, 255, 0)).save(result_path / "target.png")
+
+            workspace.open_dirs(control1_dir=str(control1_path), result_dir=str(result_path), control_count=1)
+            result = workspace.assign_control_image("source", "target", "control1", "result")
+
+            target = control1_path / "target.png"
+            self.assertEqual(result["requested_source_role"], "result")
+            self.assertEqual(result["source_role"], "control1")
+            self.assertEqual(result["copied"]["to"], str(target))
+            item = workspace.get_item("target")
+            self.assertTrue(item["exists"]["control1"])
+            self.assertTrue(item["exists"]["result"])
+
+    def test_assign_control_image_from_control_only_item_updates_target_without_rescan(self):
+        workspace = DatasetWorkspace()
+        with tempfile.TemporaryDirectory() as root_dir:
+            root = Path(root_dir)
+            control1_path = root / "control1"
+            result_path = root / "result"
+            control1_path.mkdir()
+            result_path.mkdir()
+            Image.new("RGB", (16, 16), (10, 20, 30)).save(control1_path / "guide.png")
+            Image.new("RGB", (16, 16), (0, 255, 0)).save(result_path / "target.png")
+
+            workspace.open_dirs(control1_dir=str(control1_path), result_dir=str(result_path), control_count=1)
+            with mock.patch.object(workspace, "open_dirs", side_effect=AssertionError("unexpected rescan")):
+                result = workspace.assign_control_image("guide", "target", "control1", "control1")
+
+            target = control1_path / "target.png"
+            self.assertEqual(result["source_role"], "control1")
+            self.assertEqual(result["copied"]["to"], str(target))
+            self.assertTrue(target.exists())
+            self.assertEqual(workspace.files["control1"]["target"], target)
+            item = workspace.get_item("target")
+            self.assertTrue(item["exists"]["control1"])
+            self.assertTrue(item["exists"]["result"])
+
+    def test_assign_control_image_preserves_numeric_dot_suffix_in_target_name(self):
+        workspace = DatasetWorkspace()
+        with tempfile.TemporaryDirectory() as root_dir:
+            root = Path(root_dir)
+            control1_path = root / "control1"
+            result_path = root / "Result"
+            control1_path.mkdir()
+            result_path.mkdir()
+            Image.new("RGB", (16, 16), (10, 20, 30)).save(control1_path / "星原-2026-05-26_15.45.13.2.jpg")
+            Image.new("RGB", (16, 16), (0, 255, 0)).save(result_path / "星原-2026-05-26_15.45.13.2.27.png")
+
+            workspace.open_dirs(control1_dir=str(control1_path), result_dir=str(result_path), control_count=1)
+            result = workspace.assign_control_image(
+                "星原-2026-05-26_15.45.13.2",
+                "星原-2026-05-26_15.45.13.2.27",
+                "control1",
+                "control1",
+            )
+
+            target = control1_path / "星原-2026-05-26_15.45.13.2.27.jpg"
+            self.assertEqual(result["copied"]["to"], str(target))
+            self.assertTrue(target.exists())
+            self.assertTrue(workspace.get_item("星原-2026-05-26_15.45.13.2.27")["exists"]["control1"])
 
     def test_assign_control_image_replaces_existing_control_image(self):
         workspace = DatasetWorkspace()
@@ -319,7 +389,7 @@ class DatasetWorkspaceTextTests(unittest.TestCase):
             payload = dataset_workspace.base64.b64encode(dropped.read_bytes()).decode("ascii")
             result = workspace.upload_control_image("sample", "control2", "external.png", payload)
 
-            control2_file = root / "control2" / "sample_control2.png"
+            control2_file = root / "control2" / "sample.png"
             self.assertEqual(result["saved"]["path"], str(control2_file))
             self.assertTrue(control2_file.exists())
             self.assertTrue(workspace.get_item("sample")["exists"]["control2"])
