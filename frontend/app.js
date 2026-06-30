@@ -159,6 +159,7 @@ const refs = {
   saveProjectBtn: document.querySelector("#saveProjectBtn"),
   createProjectBtn: document.querySelector("#createProjectBtn"),
   refreshProjectsBtn: document.querySelector("#refreshProjectsBtn"),
+  refreshListBtn: document.querySelector("#refreshListBtn"),
   cleanupTmpBtn: document.querySelector("#cleanupTmpBtn"),
   projectNameInput: document.querySelector("#projectNameInput"),
   projectSearchInput: document.querySelector("#projectSearchInput"),
@@ -268,6 +269,7 @@ const refs = {
   captionMode: document.querySelector("#captionMode"),
   maxTokens: document.querySelector("#maxTokens"),
   customPrompt: document.querySelector("#customPrompt"),
+  localThinkingMode: document.querySelector("#localThinkingMode"),
   localModelMeta: document.querySelector("#localModelMeta"),
   localPromptLabel: document.querySelector("#localPromptLabel"),
   localPromptModeHint: document.querySelector("#localPromptModeHint"),
@@ -291,6 +293,7 @@ const refs = {
   apiPrompt: document.querySelector("#apiPrompt"),
   apiPromptLabel: document.querySelector("#apiPromptLabel"),
   apiPromptModeHint: document.querySelector("#apiPromptModeHint"),
+  apiThinkingMode: document.querySelector("#apiThinkingMode"),
   loadApiModelsBtn: document.querySelector("#loadApiModelsBtn"),
   validateApiBtn: document.querySelector("#validateApiBtn"),
   ollamaBaseUrl: document.querySelector("#ollamaBaseUrl"),
@@ -306,6 +309,7 @@ const refs = {
   ollamaPrompt: document.querySelector("#ollamaPrompt"),
   ollamaPromptLabel: document.querySelector("#ollamaPromptLabel"),
   ollamaPromptModeHint: document.querySelector("#ollamaPromptModeHint"),
+  ollamaThinkingMode: document.querySelector("#ollamaThinkingMode"),
   loadOllamaModelsBtn: document.querySelector("#loadOllamaModelsBtn"),
   validateOllamaBtn: document.querySelector("#validateOllamaBtn"),
   topAiProgressBar: document.querySelector("#topAiProgressBar"),
@@ -627,6 +631,15 @@ function renderLocateSelectedState() {
   button.disabled = false;
 }
 renderLocateSelectedState();
+
+function renderRefreshListState() {
+  const button = refs.refreshListBtn;
+  if (!button) return;
+  button.disabled = false;
+  button.setAttribute("aria-label", "刷新本地数据");
+  button.title = "刷新本地数据";
+}
+renderRefreshListState();
 
 const shellModule = createShellModule({
   state,

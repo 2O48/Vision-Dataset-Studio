@@ -477,6 +477,16 @@
                       stroke-linecap="round" stroke-linejoin="round" stroke-width="16" />
                   </svg>
                 </button>
+                <button class="icon-button list-refresh-btn" id="refreshListBtn" type="button"
+                  aria-label="刷新本地数据" title="刷新本地数据">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" aria-hidden="true">
+                    <rect width="256" height="256" fill="none" />
+                    <polyline points="184 104 232 104 232 56" fill="none" stroke="currentColor" stroke-linecap="round"
+                      stroke-linejoin="round" stroke-width="16" />
+                    <path d="M188.4,192a88,88,0,1,1,1.83-126.23L232,104" fill="none" stroke="currentColor"
+                      stroke-linecap="round" stroke-linejoin="round" stroke-width="16" />
+                  </svg>
+                </button>
               </div>
             </div>
           </div>
@@ -794,6 +804,10 @@
                   <span>模型</span>
                   <select id="aiModel"></select>
                 </label>
+                <label class="checkbox-row">
+                  <input id="localThinkingMode" type="checkbox">
+                  <span>思考模式</span>
+                </label>
               </div>
               <p class="card-note" id="localModelMeta">选择模型后可直接加载或验证，验证会做一次真实推理试跑。</p>
             </section>
@@ -831,6 +845,10 @@
                     </div>
                   </div>
                 </label>
+                <label class="checkbox-row">
+                  <input id="apiThinkingMode" type="checkbox">
+                  <span>思考模式</span>
+                </label>
               </div>
             </section>
 
@@ -862,6 +880,10 @@
                       <div class="model-picker-list" id="ollamaModelList"></div>
                     </div>
                   </div>
+                </label>
+                <label class="checkbox-row">
+                  <input id="ollamaThinkingMode" type="checkbox">
+                  <span>思考模式</span>
                 </label>
               </div>
             </section>
@@ -953,6 +975,15 @@
           stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16" />
       </svg>
       <span>在文件管理器中打开</span>
+    </button>
+    <button type="button" data-action="create-folder">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" aria-hidden="true">
+        <rect width="256" height="256" fill="none" />
+        <path d="M224,88V200.89a7.11,7.11,0,0,1-7.11,7.11H40a8,8,0,0,1-8-8V64a8,8,0,0,1,8-8H93.33a8,8,0,0,1,4.8,1.6L128,80h88A8,8,0,0,1,224,88Z" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="24"/>
+        <line x1="104" y1="144" x2="152" y2="144" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="24"/>
+        <line x1="128" y1="120" x2="128" y2="168" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="24"/>
+      </svg>
+      <span>新建文件夹</span>
     </button>
     <button class="danger" type="button" data-action="trash">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" aria-hidden="true">

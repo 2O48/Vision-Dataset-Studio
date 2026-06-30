@@ -1251,7 +1251,8 @@ textarea:focus {
 }
 
 .list-split-toggle,
-.list-locate-toggle {
+.list-locate-toggle,
+.list-refresh-btn {
   flex: 0 0 auto;
   width: 30px;
   height: 30px;
@@ -1261,7 +1262,8 @@ textarea:focus {
 }
 
 .list-split-toggle svg,
-.list-locate-toggle svg {
+.list-locate-toggle svg,
+.list-refresh-btn svg {
   width: 18px;
   height: 18px;
   color: inherit;
@@ -1273,24 +1275,30 @@ textarea:focus {
 
 .list-split-toggle svg line,
 .list-locate-toggle svg line,
-.list-locate-toggle svg circle {
+.list-locate-toggle svg circle,
+.list-refresh-btn svg line,
+.list-refresh-btn svg polyline,
+.list-refresh-btn svg path {
   stroke: currentColor;
 }
 
 .list-split-toggle svg rect[width="256"][height="256"],
-.list-locate-toggle svg rect[width="256"][height="256"] {
+.list-locate-toggle svg rect[width="256"][height="256"],
+.list-refresh-btn svg rect[width="256"][height="256"] {
   fill: none;
   stroke: none;
 }
 
 .list-split-toggle[aria-pressed="true"],
-.list-locate-toggle[aria-pressed="true"] {
+.list-locate-toggle[aria-pressed="true"],
+.list-refresh-btn[aria-pressed="true"] {
   background: var(--accent-soft);
   color: var(--accent-strong);
 }
 
 .list-split-toggle[aria-pressed="true"]:hover,
-.list-locate-toggle[aria-pressed="true"]:hover {
+.list-locate-toggle[aria-pressed="true"]:hover,
+.list-refresh-btn[aria-pressed="true"]:hover {
   background: var(--ink);
   color: var(--ink-contrast);
 }

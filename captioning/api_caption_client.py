@@ -210,6 +210,7 @@ class APICaptionClient:
         mode: str = "natural",
         prompt: str = "",
         max_tokens: int = 512,
+        thinking: bool = False,
         timeout: float = 180.0,
     ) -> str:
         if not (model or "").strip():
@@ -243,6 +244,8 @@ class APICaptionClient:
                 ],
                 "max_tokens": int(max_tokens or 512),
             }
+            if thinking:
+                payload["enable_thinking"] = True
 
             headers = {
                 "Content-Type": "application/json; charset=utf-8",
@@ -372,6 +375,7 @@ class APICaptionClient:
         mode: str = "natural",
         prompt: str = "",
         max_tokens: int = 128,
+        thinking: bool = False,
     ) -> dict:
         with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
             image_path = tmp.name
@@ -385,6 +389,7 @@ class APICaptionClient:
                 mode=mode,
                 prompt=prompt or "Describe this simple orange square image in one short sentence.",
                 max_tokens=max_tokens,
+                thinking=thinking,
             )
             return {
                 "ok": True,

@@ -321,7 +321,10 @@ export function createBootstrapModule({
     refs.overwriteMode.addEventListener("change", renderOverwriteModeHints);
     refs.captionMode.addEventListener("change", () => saveStored(STORAGE_KEYS.localCaptionMode, refs.captionMode.value));
     refs.maxTokens.addEventListener("change", () => saveStored(STORAGE_KEYS.localMaxTokens, refs.maxTokens.value));
+    refs.localThinkingMode?.addEventListener("change", () => saveStored(STORAGE_KEYS.localThinkingMode, refs.localThinkingMode.checked ? "true" : "false"));
     refs.customPrompt.addEventListener("change", () => saveStored(STORAGE_KEYS.localPrompt, refs.customPrompt.value));
+    refs.apiThinkingMode?.addEventListener("change", () => saveStored(STORAGE_KEYS.apiThinkingMode, refs.apiThinkingMode.checked ? "true" : "false"));
+    refs.ollamaThinkingMode?.addEventListener("change", () => saveStored(STORAGE_KEYS.ollamaThinkingMode, refs.ollamaThinkingMode.checked ? "true" : "false"));
 
     function renderCaptionBackendTabs() {
       const backend = refs.captionBackend?.value || readStored(STORAGE_KEYS.captionBackend, "local");
@@ -676,6 +679,7 @@ export function createBootstrapModule({
     refs.saveProjectBtn?.addEventListener("click", () => runWithStatus("正在保存项目...", () => saveCurrentProject()).catch(showError));
     refs.createProjectBtn?.addEventListener("click", () => createProject().catch(showError));
     refs.refreshProjectsBtn?.addEventListener("click", () => runWithStatus("正在刷新项目列表...", () => refreshProjects()).catch(showError));
+    refs.refreshListBtn?.addEventListener("click", () => runWithStatus("正在重扫本地数据...", () => rescanWorkspace()).catch(showError));
     refs.cleanupTmpBtn?.addEventListener("click", () => runWithStatus("正在清理回收项目...", () => cleanupTmpNow()).catch(showError));
     refs.openCaptionSettingsBtn?.addEventListener("click", () => toggleCaptionSettingsPanel());
     refs.closeCaptionSettingsBtn?.addEventListener("click", () => toggleCaptionSettingsPanel(false));

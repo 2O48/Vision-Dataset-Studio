@@ -38,6 +38,7 @@ export function createBrowserModule({
   const itemThumbObservers = new Map();
   let itemDragSource = null;
   let imagePreview = null;
+  let documentFileDropGuardBound = false;
 
   function listPanels() {
     return [
@@ -421,25 +422,63 @@ export function createBrowserModule({
   }
 
   function droppedImageFile(dataTransfer) {
-    return Array.from(dataTransfer?.files || []).find((entry) => (
+    const files = Array.from(dataTransfer?.files || []);
+    const itemFiles = Array.from(dataTransfer?.items || [])
+      .filter((item) => item.kind === "file")
+      .map((item) => item.getAsFile())
+      .filter(Boolean);
+    return [...files, ...itemFiles].find((entry) => (
       entry.type.startsWith("image/")
-      || /\.(avif|bmp|gif|jpe?g|png|tiff?|webp)$/i.test(entry.name)
+      || /\.(avif|bmp|gif|jpe?g|png|tiff?|webp|jfif|heic|heif)$/i.test(entry.name)
     ));
+  }
+
+  function droppedImageFiles(dataTransfer) {
+    const files = Array.from(dataTransfer?.files || []);
+    const itemFiles = Array.from(dataTransfer?.items || [])
+      .filter((item) => item.kind === "file")
+      .map((item) => item.getAsFile())
+      .filter(Boolean);
+    return [...files, ...itemFiles].filter((entry, index, list) => {
+      const key = `${entry.name || ""}::${entry.size || 0}::${entry.lastModified || 0}`;
+      return (entry.type.startsWith("image/")
+        || /\.(avif|bmp|gif|jpe?g|png|tiff?|webp|jfif|heic|heif)$/i.test(entry.name))
+        && list.findIndex((candidate) => `${candidate.name || ""}::${candidate.size || 0}::${candidate.lastModified || 0}` === key) === index;
+    });
   }
 
   function dragEventHasControlImagePayload(event) {
     const types = Array.from(event.dataTransfer?.types || []);
-    return Boolean(itemDragSource?.name) || types.includes(ITEM_DRAG_TYPE) || types.includes("Files");
+    return Boolean(itemDragSource?.name) || types.includes(ITEM_DRAG_TYPE) || droppedImageFiles(event.dataTransfer).length === 1;
   }
 
   function dragEventHasFilePayload(event) {
-    return Array.from(event.dataTransfer?.types || []).includes("Files");
+    const types = Array.from(event.dataTransfer?.types || []);
+    return types.includes("Files")
+      || types.includes("text/uri-list")
+      || types.includes("public.file-url")
+      || types.includes("application/x-moz-file")
+      || Array.from(event.dataTransfer?.items || []).some((item) => item.kind === "file");
   }
 
   function clearItemListDropClasses() {
     for (const panel of listPanels()) {
       panel.itemList?.classList.remove("result-drop-over");
     }
+  }
+
+  function bindDocumentFileDropGuard() {
+    if (documentFileDropGuardBound) return;
+    documentFileDropGuardBound = true;
+    const guard = (event) => {
+      if (!dragEventHasFilePayload(event)) return;
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+    };
+    document.addEventListener("dragover", guard, true);
+    document.addEventListener("drop", guard, true);
+    window.addEventListener("dragover", guard, true);
+    window.addEventListener("drop", guard, true);
   }
 
   function bindItemControlDropTarget(target, item, role) {
@@ -459,8 +498,10 @@ export function createBrowserModule({
     });
     target.addEventListener("drop", (event) => {
       const { sourceName, sourceRole } = itemDragPayload(event);
-      const file = droppedImageFile(event.dataTransfer);
+      const files = droppedImageFiles(event.dataTransfer);
+      const file = files[0];
       if (!sourceName && !file) return;
+      if (!sourceName && files.length !== 1) return;
       event.preventDefault();
       event.stopPropagation();
       target.classList.remove("drag-over");
@@ -571,7 +612,13 @@ export function createBrowserModule({
   }
 
   function displayItemListName(name, panelId = "primary") {
-    return panelFolderFilter(panelId) ? displayItemBasename(name) : displayItemName(name);
+    const currentFolder = normalizeFolderPath(panelFolderFilter(panelId));
+    const fullName = displayItemName(name);
+    if (!currentFolder) return fullName;
+    const currentPrefix = `${currentFolder}/`;
+    if (!fullName.startsWith(currentPrefix)) return displayItemBasename(name);
+    const relative = fullName.slice(currentPrefix.length);
+    return relative || displayItemBasename(name);
   }
 
   function appendHighlightedText(parent, text, query) {
@@ -613,8 +660,28 @@ export function createBrowserModule({
   }
 
   function itemFolders(panelId = "primary") {
-    return [...new Set(panelItems(panelId).map((item) => itemFolder(item.name)).filter(Boolean))]
+    const workspaceFolders = Array.isArray(state.workspace?.folders) ? state.workspace.folders : [];
+    const folders = new Set(workspaceFolders.filter(Boolean));
+    for (const item of panelItems(panelId)) {
+      const parts = itemFolder(item.name).split("/").filter(Boolean);
+      let current = "";
+      for (const part of parts) {
+        current = current ? `${current}/${part}` : part;
+        folders.add(current);
+      }
+    }
+    return [...folders]
       .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
+  }
+
+  function normalizeFolderPath(folder) {
+    return `${folder || ""}`.trim().replace(/\\/g, "/").replace(/\/+$/, "");
+  }
+
+  function folderParentPath(folder) {
+    const parts = normalizeFolderPath(folder).split("/").filter(Boolean);
+    parts.pop();
+    return parts.join("/");
   }
 
   function filteredItems(panelId = "primary") {
@@ -623,12 +690,35 @@ export function createBrowserModule({
     const items = panelItems(panelId).filter((item) => (
       !/^(?:result|control[1-3])$/.test(mode) || item.exists?.[mode]
     ));
-    return folder ? items.filter((item) => itemFolder(item.name) === folder) : [...items];
+    if (!folder) return [...items];
+    const prefix = `${folder}/`;
+    return items.filter((item) => {
+      const itemPath = itemFolder(item.name);
+      return itemPath === folder || itemPath.startsWith(prefix);
+    });
+  }
+
+  function syncWorkspaceFolders() {
+    const folders = new Set(Array.isArray(state.workspace?.folders) ? state.workspace.folders : []);
+    for (const panelId of ["primary", "secondary"]) {
+      if (panelId === "secondary" && !state.splitListOpen) continue;
+      for (const item of panelItems(panelId)) {
+        const folder = itemFolder(item.name);
+        if (folder) folders.add(folder);
+      }
+    }
+    state.workspace = { ...(state.workspace || {}), folders: [...folders].sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" })) };
   }
 
   function itemDragRoleForPanel(item, panelId = "primary") {
     const visibleRoles = thumbRolesForMode(panelThumbMode(panelId));
     return visibleRoles.find((role) => item.exists?.[role]) || "";
+  }
+
+  function itemDragNamesForPanel(item, panelId = "primary") {
+    const selection = selectedBatchNames(panelId);
+    if (selection.length && selection.includes(item.name)) return selection;
+    return [item.name];
   }
 
   function batchSelection() {
@@ -765,14 +855,31 @@ export function createBrowserModule({
       });
       button.addEventListener("drop", (event) => {
         const name = event.dataTransfer?.getData(ITEM_DRAG_TYPE) || "";
-        if (!name) return;
+        const names = event.dataTransfer?.getData("application/x-vds-item-names") || "";
+        const payloadNames = names ? names.split("\n").map((value) => value.trim()).filter(Boolean) : [];
+        const targetNames = payloadNames.length ? payloadNames : (name ? [name] : []);
+        if (!targetNames.length) return;
         event.preventDefault();
         button.classList.remove("drag-over");
-        moveItemToFolder(name, folder).catch(showError || console.error);
+        moveItemsToFolder(targetNames, folder).catch(showError || console.error);
+      });
+      button.addEventListener("contextmenu", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        openFolderContextMenu(event, folder, panelId);
       });
       group.appendChild(button);
     }
     panel.folderFilters.appendChild(group);
+  }
+
+  function openFolderContextMenu(event, folder, panelId = activeListPanelId()) {
+    if (!itemContextMenu) return;
+    event.preventDefault();
+    event.stopPropagation();
+    itemContextTarget = { mode: "folder", folder: normalizeFolderPath(folder), panelId };
+    configureItemContextMenu("folder");
+    positionItemContextMenu(event);
   }
 
   async function moveItemToFolder(name, folder) {
@@ -785,6 +892,24 @@ export function createBrowserModule({
     setAiStatusLine(`已移动到子文件夹：${folder}`);
     await refreshItems({ skipDirtyCheck: true, suppressSelectionSync: true });
     await selectItem(data.new_name || name, true, { skipDirtyCheck: true, panelId: activeListPanelId() });
+  }
+
+  async function moveItemsToFolder(names, folder) {
+    const targets = [...new Set(Array.isArray(names) ? names : [names])].filter(Boolean);
+    if (!targets.length || !folder) return;
+    if (targets.length === 1) {
+      await moveItemToFolder(targets[0], folder);
+      return;
+    }
+    if (targets.includes(state.selectedName) && !(await confirmDiscardCaptionChanges())) return;
+    const data = await apiPost("/api/item/move-folder", { names: targets, folder });
+    if (data.workspace) applyWorkspaceSummary(data.workspace);
+    clearBatchSelection();
+    setPanelFilter(activeListPanelId(), panelFilter(activeListPanelId()));
+    setAiStatusLine(`已移动到子文件夹：${folder}（${targets.length} 项）`);
+    await refreshItems({ skipDirtyCheck: true, suppressSelectionSync: true });
+    const nextName = data.moved?.[data.moved.length - 1]?.new_name || targets[0];
+    if (nextName) await selectItem(nextName, true, { skipDirtyCheck: true, panelId: activeListPanelId() });
   }
 
   function closeItemContextMenu() {
@@ -829,14 +954,23 @@ export function createBrowserModule({
       const action = button.dataset.action;
       const label = button.querySelector("span");
       if (mode === "batch") {
-        button.hidden = !["clone", "trash"].includes(action);
+        button.hidden = !["clone", "trash", "create-folder"].includes(action);
         if (action === "clone" && label) label.textContent = `克隆所选 ${count} 项`;
         if (action === "trash" && label) label.textContent = `删除所选 ${count} 项`;
+        if (action === "create-folder" && label) label.textContent = "新建文件夹";
+        return;
+      }
+      if (mode === "folder") {
+        button.hidden = !["rename", "trash", "create-folder"].includes(action);
+        if (action === "rename" && label) label.textContent = "重命名文件夹";
+        if (action === "trash" && label) label.textContent = "删除文件夹";
+        if (action === "create-folder" && label) label.textContent = "新建文件夹";
         return;
       }
       button.hidden = false;
       if (action === "clone" && label) label.textContent = "克隆";
       if (action === "trash" && label) label.textContent = "删除";
+      if (action === "create-folder" && label) label.textContent = "新建文件夹";
     });
   }
 
@@ -863,6 +997,48 @@ export function createBrowserModule({
     if (!item?.name) return;
     const data = await apiPost("/api/item/reveal", { name: item.name });
     setAiStatusLine(`已在文件管理器中定位：${data.path || item.name}`);
+  }
+
+  async function createFolderFromContext(menuFolder = "") {
+    const baseFolder = normalizeFolderPath(menuFolder || panelFolderFilter(activeListPanelId()) || "");
+    const defaultName = baseFolder ? `${baseFolder.split("/").pop() || "new_folder"}` : "new_folder";
+    const input = await window.appPrompt("输入文件夹名称", defaultName);
+    if (!input || !input.trim()) return;
+    const raw = input.trim().replace(/\\/g, "/").replace(/\/+$/, "");
+    const targetFolder = baseFolder && !raw.includes("/") ? `${baseFolder}/${raw}` : raw;
+    const data = await apiPost("/api/item/create-folder", { folder: targetFolder });
+    if (data.workspace) applyWorkspaceSummary(data.workspace);
+    setAiStatusLine(`已新建文件夹：${data.folder || targetFolder}`);
+    await refreshItems({ skipDirtyCheck: true, suppressSelectionSync: true });
+  }
+
+  async function renameFolderFromContext(folder) {
+    const cleanFolder = normalizeFolderPath(folder);
+    if (!cleanFolder) return;
+    const parent = folderParentPath(cleanFolder);
+    const currentName = cleanFolder.split("/").pop() || cleanFolder;
+    const input = await window.appPrompt("重命名文件夹", currentName);
+    if (!input || !input.trim()) return;
+    const nextName = normalizeFolderPath(input);
+    if (!nextName) return;
+    const targetFolder = parent ? `${parent}/${nextName}` : nextName;
+    const data = await apiPost("/api/item/rename-folder", { folder: cleanFolder, new_folder: targetFolder });
+    if (data.workspace) applyWorkspaceSummary(data.workspace);
+    setPanelFolderFilter(activeListPanelId(), panelFolderFilter(activeListPanelId()) === cleanFolder ? targetFolder : panelFolderFilter(activeListPanelId()));
+    setAiStatusLine(`已重命名文件夹：${cleanFolder} -> ${targetFolder}`);
+    await rescanWorkspace();
+  }
+
+  async function deleteFolderFromContext(folder) {
+    const cleanFolder = normalizeFolderPath(folder);
+    if (!cleanFolder) return;
+    const ok = await window.appConfirm(`确定删除文件夹「${cleanFolder}」？`, "删除文件夹");
+    if (!ok) return;
+    const data = await apiPost("/api/item/delete-folder", { folder: cleanFolder });
+    if (data.workspace) applyWorkspaceSummary(data.workspace);
+    if (panelFolderFilter(activeListPanelId()) === cleanFolder) setPanelFolderFilter(activeListPanelId(), "");
+    setAiStatusLine(`已删除文件夹：${cleanFolder}`);
+    await refreshItems({ skipDirtyCheck: true, suppressSelectionSync: true });
   }
 
   async function cloneItemFiles(item) {
@@ -939,13 +1115,19 @@ export function createBrowserModule({
     itemContextMenu.addEventListener("click", (event) => {
       const button = event.target.closest("button[data-action]");
       if (!button || !itemContextTarget) return;
-      const { item, title, names, mode } = itemContextTarget;
+      const { item, title, names, mode, folder } = itemContextTarget;
       closeItemContextMenu();
       const action = button.dataset.action;
       if (mode === "batch" && action === "clone") {
         cloneBatchItems(names).catch(showError || console.error);
       } else if (mode === "batch" && action === "trash") {
         trashBatchItems(names).catch(showError || console.error);
+      } else if (mode === "folder" && action === "rename") {
+        renameFolderFromContext(folder).catch(showError || console.error);
+      } else if (mode === "folder" && action === "trash") {
+        deleteFolderFromContext(folder).catch(showError || console.error);
+      } else if (action === "create-folder") {
+        createFolderFromContext(folder).catch(showError || console.error);
       } else if (action === "rename") {
         beginInlineItemRename(item, title).catch(showError || console.error);
       } else if (action === "clone") {
@@ -1547,6 +1729,7 @@ export function createBrowserModule({
       target_name: targetName,
       target_role: targetRole,
       filename: file.name || "dropped.png",
+      mime_type: file.type || "",
       data: arrayBufferToBase64(await file.arrayBuffer()),
     });
     if (data.workspace) applyWorkspaceSummary(data.workspace);
@@ -1555,18 +1738,24 @@ export function createBrowserModule({
     setAiStatusLine?.(`已把 ${file.name || "拖入图片"} 设置为 ${targetName} 的 ${ROLE_LABELS[targetRole] || targetRole}`);
   }
 
-  async function uploadRoleImageFile(file, role = "result") {
+  async function uploadRoleImageFile(file, role = "result", folder = "", options = {}) {
     if (!file) return;
+    const { refresh = true } = options || {};
     const targetRole = /^control[1-3]$/.test(role) ? role : "result";
     const data = await apiPost("/api/item/upload-role-image", {
       role: targetRole,
       filename: file.name || "dropped.png",
+      mime_type: file.type || "",
+      folder: normalizeFolderPath(folder || panelFolderFilter(activeListPanelId()) || ""),
       data: arrayBufferToBase64(await file.arrayBuffer()),
     });
     if (data.workspace) applyWorkspaceSummary(data.workspace);
     state.imageRefreshToken = `${Date.now()}-upload-${targetRole}-${data.name || file.name || "dropped"}`;
-    await refreshItems({ skipDirtyCheck: true, suppressSelectionSync: true, includeGlobalSegments: false });
+    if (refresh) {
+      await refreshItems({ skipDirtyCheck: true, suppressSelectionSync: true, includeGlobalSegments: false });
+    }
     setAiStatusLine?.(`已添加${ROLE_LABELS[targetRole] || targetRole}：${data.name || file.name || "拖入图片"}`);
+    return data;
   }
 
   function dropRoleForPanel(panelId) {
@@ -1578,8 +1767,10 @@ export function createBrowserModule({
     const list = panel?.itemList;
     if (!list || list.dataset.resultDropBound === "true") return;
     list.dataset.resultDropBound = "true";
+    bindDocumentFileDropGuard();
     list.addEventListener("dragover", (event) => {
-      if (!dragEventHasFilePayload(event) || closestElement(event.target, ".item-thumb-drop")) return;
+      const files = droppedImageFiles(event.dataTransfer);
+      if (!files.length) return;
       event.preventDefault();
       list.classList.add("result-drop-over");
       if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
@@ -1588,14 +1779,30 @@ export function createBrowserModule({
       if (list.contains(event.relatedTarget)) return;
       list.classList.remove("result-drop-over");
     });
-    list.addEventListener("drop", (event) => {
-      if (closestElement(event.target, ".item-thumb-drop")) return;
-      const file = droppedImageFile(event.dataTransfer);
-      if (!file) return;
+    list.addEventListener("drop", async (event) => {
+      const files = droppedImageFiles(event.dataTransfer);
+      if (!files.length) return;
       event.preventDefault();
       event.stopPropagation();
       clearItemListDropClasses();
-      uploadRoleImageFile(file, dropRoleForPanel(panel.id || "primary")).catch(showError || console.error);
+      const targetRole = dropRoleForPanel(panel.id || "primary");
+      const folder = panelFolderFilter(panel.id || "primary");
+      const errors = [];
+      for (const file of files) {
+        try {
+          await uploadRoleImageFile(file, targetRole, folder, { refresh: false });
+        } catch (error) {
+          errors.push(error);
+        }
+      }
+      try {
+        await refreshItems({ skipDirtyCheck: true, suppressSelectionSync: true, includeGlobalSegments: false });
+      } catch (error) {
+        errors.push(error);
+      }
+      if (errors.length) {
+        (showError || console.error)(errors[0]);
+      }
     });
   }
 
@@ -1638,7 +1845,9 @@ export function createBrowserModule({
             event.preventDefault();
             return;
           }
+          const dragNames = itemDragNamesForPanel(item, panelId);
           event.dataTransfer?.setData(ITEM_DRAG_TYPE, item.name);
+          event.dataTransfer?.setData("application/x-vds-item-names", dragNames.join("\n"));
           event.dataTransfer?.setData(ITEM_ROLE_DRAG_TYPE, dragRole);
           event.dataTransfer?.setData("text/plain", item.name);
           if (event.dataTransfer) event.dataTransfer.effectAllowed = "copyMove";
@@ -1873,7 +2082,17 @@ export function createBrowserModule({
       const types = Array.from(event.dataTransfer?.types || []);
       if (!card) return;
       const targetRole = card.dataset.role || "";
-      if ((itemDragSource?.name || types.includes(ITEM_DRAG_TYPE) || types.includes("Files")) && canAssignListItemToViewerControl(targetRole)) {
+      const files = droppedImageFiles(event.dataTransfer);
+      if ((itemDragSource?.name || types.includes(ITEM_DRAG_TYPE)) && canAssignListItemToViewerControl(targetRole)) {
+        event.preventDefault();
+        if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+        refs.viewerGrid.querySelectorAll(".role-drop-target").forEach((node) => {
+          if (node !== card) node.classList.remove("role-drop-target");
+        });
+        card.classList.add("role-drop-target");
+        return;
+      }
+      if (files.length === 1 && canAssignListItemToViewerControl(targetRole)) {
         event.preventDefault();
         if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
         refs.viewerGrid.querySelectorAll(".role-drop-target").forEach((node) => {
@@ -1902,7 +2121,7 @@ export function createBrowserModule({
       if (!card) return;
       const { sourceName, sourceRole: sourceItemRole } = itemDragPayload(event);
       const sourceRole = event.dataTransfer?.getData(VIEWER_ROLE_DRAG_TYPE) || "";
-      const file = droppedImageFile(event.dataTransfer);
+      const files = droppedImageFiles(event.dataTransfer);
       const targetRole = card.dataset.role || "";
       state.viewerRoleDragging = "";
       clearViewerRoleDragClasses();
@@ -1911,9 +2130,9 @@ export function createBrowserModule({
         assignItemControlImage(sourceName, state.currentItem.name, targetRole, sourceItemRole).catch(showError || console.error);
         return;
       }
-      if (file && canAssignListItemToViewerControl(targetRole)) {
+      if (files.length === 1 && canAssignListItemToViewerControl(targetRole)) {
         event.preventDefault();
-        uploadControlImageFile(file, state.currentItem.name, targetRole).catch(showError || console.error);
+        uploadControlImageFile(files[0], state.currentItem.name, targetRole).catch(showError || console.error);
         return;
       }
       if (!canSwapViewerRoles(sourceRole, targetRole)) return;
@@ -2018,6 +2237,7 @@ export function createBrowserModule({
       const secondaryData = await loadPanelItems("secondary");
       setPanelItems("secondary", secondaryData.items || []);
     }
+    syncWorkspaceFolders();
     const rememberedSelection = storedListViewStateForActiveWorkspace();
     if (rememberedSelection) {
       state.itemFolderFilter = rememberedSelection.folderFilter;

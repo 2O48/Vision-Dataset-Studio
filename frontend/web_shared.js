@@ -55,6 +55,7 @@ export const STORAGE_KEYS = {
   localOverwriteMode: storageKey("local-overwrite-mode"),
   localCaptionMode: storageKey("local-caption-mode"),
   localMaxTokens: storageKey("local-max-tokens"),
+  localThinkingMode: storageKey("local-thinking-mode"),
   localPrompt: storageKey("local-prompt"),
   apiBaseUrl: storageKey("api-base-url"),
   apiKey: storageKey("api-key"),
@@ -62,12 +63,14 @@ export const STORAGE_KEYS = {
   apiOverwriteMode: storageKey("api-overwrite-mode"),
   apiCaptionMode: storageKey("api-caption-mode"),
   apiMaxTokens: storageKey("api-max-tokens"),
+  apiThinkingMode: storageKey("api-thinking-mode"),
   apiPrompt: storageKey("api-prompt"),
   ollamaBaseUrl: storageKey("ollama-base-url"),
   ollamaModelName: storageKey("ollama-model-name"),
   ollamaOverwriteMode: storageKey("ollama-overwrite-mode"),
   ollamaCaptionMode: storageKey("ollama-caption-mode"),
   ollamaMaxTokens: storageKey("ollama-max-tokens"),
+  ollamaThinkingMode: storageKey("ollama-thinking-mode"),
   ollamaPrompt: storageKey("ollama-prompt"),
 };
 

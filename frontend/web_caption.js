@@ -442,7 +442,7 @@ export function createCaptionModule({
       mode: refs.captionMode.value,
       prompt: refs.customPrompt.value,
       max_tokens: Number(refs.maxTokens.value || 512),
-      thinking: false,
+      thinking: Boolean(refs.localThinkingMode?.checked),
     };
   }
 
@@ -456,6 +456,7 @@ export function createCaptionModule({
       mode: refs.captionMode.value,
       prompt: refs.customPrompt.value,
       max_tokens: Number(refs.maxTokens.value || 512),
+      thinking: Boolean(refs.apiThinkingMode?.checked),
     };
   }
 
@@ -468,6 +469,7 @@ export function createCaptionModule({
       mode: refs.captionMode.value,
       prompt: refs.customPrompt.value,
       max_tokens: Number(refs.maxTokens.value || 512),
+      thinking: Boolean(refs.ollamaThinkingMode?.checked),
     };
   }
 
@@ -728,13 +730,16 @@ export function createCaptionModule({
     refs.overwriteMode.value = readStored(STORAGE_KEYS.localOverwriteMode, refs.overwriteMode.value);
     refs.captionMode.value = readStored(STORAGE_KEYS.localCaptionMode, refs.captionMode.value);
     refs.maxTokens.value = readStored(STORAGE_KEYS.localMaxTokens, refs.maxTokens.value);
+    if (refs.localThinkingMode) refs.localThinkingMode.checked = readStored(STORAGE_KEYS.localThinkingMode, "false") === "true";
     refs.customPrompt.value = readStored(STORAGE_KEYS.localPrompt, refs.customPrompt.value);
 
     refs.apiBaseUrl.value = readStored(STORAGE_KEYS.apiBaseUrl, "");
     refs.apiKey.value = readStored(STORAGE_KEYS.apiKey, "");
     refs.apiModelName.value = readStored(STORAGE_KEYS.apiModelName, "");
+    if (refs.apiThinkingMode) refs.apiThinkingMode.checked = readStored(STORAGE_KEYS.apiThinkingMode, "false") === "true";
     refs.ollamaBaseUrl.value = readStored(STORAGE_KEYS.ollamaBaseUrl, DEFAULT_OLLAMA_URL);
     refs.ollamaModelName.value = readStored(STORAGE_KEYS.ollamaModelName, "");
+    if (refs.ollamaThinkingMode) refs.ollamaThinkingMode.checked = readStored(STORAGE_KEYS.ollamaThinkingMode, "false") === "true";
   }
 
   return {
