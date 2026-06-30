@@ -137,6 +137,7 @@ class OllamaCaptionClient:
         mode: str = "natural",
         prompt: str = "",
         max_tokens: int = 512,
+        thinking: bool = False,
         timeout: float = 180.0,
     ) -> str:
         if not (model or "").strip():
@@ -155,7 +156,7 @@ class OllamaCaptionClient:
             payload = {
                 "model": model.strip(),
                 "stream": False,
-                "think": False,
+                "think": bool(thinking),
                 "options": {
                     "num_predict": int(max_tokens or 512),
                 },
@@ -214,6 +215,7 @@ class OllamaCaptionClient:
         mode: str = "natural",
         prompt: str = "",
         max_tokens: int = 128,
+        thinking: bool = False,
     ) -> dict:
         with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
             image_path = tmp.name
@@ -226,6 +228,7 @@ class OllamaCaptionClient:
                 mode=mode,
                 prompt=prompt or "Describe this simple blue square image in one short sentence.",
                 max_tokens=max_tokens,
+                thinking=thinking,
             )
             return {
                 "ok": True,
@@ -249,4 +252,10 @@ class OllamaCaptionClient:
         )
         with urllib.request.urlopen(request, timeout=timeout) as response:
             data = json.loads(response.read().decode("utf-8"))
-        return [item.get("name", "") for item in data.get("models", []) if item.get("name")]
+        models = [
+            item
+            for item in data.get("models", [])
+            if isinstance(item, dict) and item.get("name")
+        ]
+        models.sort(key=lambda item: (int(item.get("size") or 0) or 10**18, str(item.get("name", "")).lower()))
+        return [item["name"] for item in models]

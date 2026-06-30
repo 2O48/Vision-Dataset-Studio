@@ -104,6 +104,7 @@ def caption_with_backend(
             mode=mode,
             prompt=prompt,
             max_tokens=max_tokens,
+            thinking=thinking,
         )
     if backend == "ollama":
         return ollama_client.caption(
@@ -116,6 +117,7 @@ def caption_with_backend(
             mode=mode,
             prompt=prompt,
             max_tokens=max_tokens,
+            thinking=thinking,
         )
     local_client.load_model(model)
     return local_client.caption(

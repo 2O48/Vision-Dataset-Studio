@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 import zipfile
+import base64
 from pathlib import Path
 from unittest import mock
 
@@ -495,6 +496,142 @@ class DatasetWorkspaceTextTests(unittest.TestCase):
             self.assertTrue((result_path / "icons" / "sample.txt").exists())
             self.assertIn("icons/sample", workspace.file_names)
             self.assertEqual(workspace.get_item("icons/sample")["text"], "nested caption")
+
+    def test_move_items_to_folder_moves_batch(self):
+        workspace = DatasetWorkspace()
+        with tempfile.TemporaryDirectory() as control_dir, tempfile.TemporaryDirectory() as result_dir:
+            control_path = Path(control_dir)
+            result_path = Path(result_dir)
+            for name in ("sample1", "sample2"):
+                Image.new("RGB", (32, 32), (10, 20, 30)).save(control_path / f"{name}.png")
+                Image.new("RGB", (32, 32), (30, 20, 10)).save(result_path / f"{name}.webp")
+                (result_path / f"{name}.txt").write_text(f"caption {name}", encoding="utf-8")
+
+            workspace.open_dirs(control1_dir=str(control_path), result_dir=str(result_path), control_count=1)
+            result = workspace.move_items_to_folder(["sample1", "sample2"], "icons")
+
+            self.assertEqual([item["old_name"] for item in result["moved"]], ["sample1", "sample2"])
+            self.assertIn("icons/sample1", workspace.file_names)
+            self.assertIn("icons/sample2", workspace.file_names)
+            self.assertTrue((control_path / "icons" / "sample1.png").exists())
+            self.assertTrue((control_path / "icons" / "sample2.png").exists())
+            self.assertTrue((result_path / "icons" / "sample1.webp").exists())
+            self.assertTrue((result_path / "icons" / "sample2.webp").exists())
+            self.assertTrue((result_path / "icons" / "sample1.txt").exists())
+            self.assertTrue((result_path / "icons" / "sample2.txt").exists())
+
+    def test_create_folder_persists_workspace_folder(self):
+        workspace = DatasetWorkspace()
+        with tempfile.TemporaryDirectory() as control_dir, tempfile.TemporaryDirectory() as result_dir:
+            control_path = Path(control_dir)
+            result_path = Path(result_dir)
+            Image.new("RGB", (32, 32), (10, 20, 30)).save(control_path / "sample.png")
+            Image.new("RGB", (32, 32), (30, 20, 10)).save(result_path / "sample.webp")
+
+            workspace.open_dirs(control1_dir=str(control_path), result_dir=str(result_path), control_count=1)
+            result = workspace.create_folder("icons")
+
+            self.assertIn("icons", result["workspace"]["folders"])
+            self.assertTrue((control_path / "icons").is_dir())
+            self.assertTrue((result_path / "icons").is_dir())
+            self.assertIn("icons", workspace.get_workspace_summary()["folders"])
+
+    def test_create_folder_persists_after_reload(self):
+        workspace = DatasetWorkspace()
+        with tempfile.TemporaryDirectory() as control_dir, tempfile.TemporaryDirectory() as result_dir, tempfile.TemporaryDirectory() as state_dir:
+            control_path = Path(control_dir)
+            result_path = Path(result_dir)
+            state_path = Path(state_dir)
+            old_state_dir = dataset_workspace.WORKSPACE_STATE_DIR
+            dataset_workspace.WORKSPACE_STATE_DIR = state_path / "workspaces"
+            try:
+                Image.new("RGB", (32, 32), (10, 20, 30)).save(control_path / "sample.png")
+                Image.new("RGB", (32, 32), (30, 20, 10)).save(result_path / "sample.webp")
+
+                workspace.open_dirs(control1_dir=str(control_path), result_dir=str(result_path), control_count=1)
+                workspace.create_folder("icons")
+
+                reloaded = DatasetWorkspace()
+                reloaded.open_dirs(control1_dir=str(control_path), result_dir=str(result_path), control_count=1)
+                self.assertIn("icons", reloaded.get_workspace_summary()["folders"])
+            finally:
+                dataset_workspace.WORKSPACE_STATE_DIR = old_state_dir
+
+    def test_refresh_drops_removed_empty_folder_from_workspace_summary(self):
+        workspace = DatasetWorkspace()
+        with tempfile.TemporaryDirectory() as control_dir, tempfile.TemporaryDirectory() as result_dir:
+            control_path = Path(control_dir)
+            result_path = Path(result_dir)
+            Image.new("RGB", (32, 32), (10, 20, 30)).save(control_path / "sample.png")
+            Image.new("RGB", (32, 32), (30, 20, 10)).save(result_path / "sample.webp")
+
+            workspace.open_dirs(control1_dir=str(control_path), result_dir=str(result_path), control_count=1)
+            workspace.create_folder("icons")
+            (control_path / "icons").rmdir()
+            (result_path / "icons").rmdir()
+
+            self.assertNotIn("icons", workspace.get_workspace_summary()["folders"])
+
+    def test_upload_role_image_accepts_image_mime_without_standard_extension(self):
+        workspace = DatasetWorkspace()
+        with tempfile.TemporaryDirectory() as result_dir:
+            result_path = Path(result_dir)
+            workspace.open_dirs(result_dir=str(result_path), control_count=1)
+            image = Image.new("RGB", (16, 16), (255, 0, 0))
+            temp_file = Path(result_dir) / "upload.jfif"
+            image.save(temp_file, format="JPEG")
+            payload = base64.b64encode(temp_file.read_bytes()).decode("ascii")
+            result = workspace.upload_role_image("result", "upload.jfif", payload, "image/jpeg")
+            self.assertEqual(result["role"], "result")
+            self.assertTrue(result["saved"]["path"].endswith(".jfif"))
+
+    def test_upload_role_image_can_save_into_folder(self):
+        workspace = DatasetWorkspace()
+        with tempfile.TemporaryDirectory() as result_dir:
+            result_path = Path(result_dir)
+            workspace.open_dirs(result_dir=str(result_path), control_count=1)
+            workspace.create_folder("icons")
+            image = Image.new("RGB", (16, 16), (255, 0, 0))
+            temp_file = Path(result_dir) / "upload.png"
+            image.save(temp_file, format="PNG")
+            payload = base64.b64encode(temp_file.read_bytes()).decode("ascii")
+            result = workspace.upload_role_image("result", "upload.png", payload, "image/png", "icons")
+            self.assertIn("icons", Path(result["saved"]["path"]).parts)
+            self.assertIn("icons/upload", [item["name"] for item in workspace.list_items()["items"]])
+
+    def test_list_items_keeps_nested_folder_names_for_parent_folder_filter(self):
+        workspace = DatasetWorkspace()
+        with tempfile.TemporaryDirectory() as result_dir:
+            result_path = Path(result_dir)
+            (result_path / "icons" / "nested").mkdir(parents=True)
+            Image.new("RGB", (16, 16), (255, 0, 0)).save(result_path / "icons" / "nested" / "upload.png")
+            workspace.open_dirs(result_dir=str(result_path), control_count=1)
+            names = [item["name"] for item in workspace.list_items()["items"]]
+            self.assertIn("icons/nested/upload", names)
+
+    def test_display_nested_path_keeps_relative_prefix(self):
+        workspace = DatasetWorkspace()
+        with tempfile.TemporaryDirectory() as result_dir:
+            result_path = Path(result_dir)
+            (result_path / "A" / "B").mkdir(parents=True)
+            Image.new("RGB", (16, 16), (255, 0, 0)).save(result_path / "A" / "B" / "test.png")
+            workspace.open_dirs(result_dir=str(result_path), control_count=1)
+            item = workspace.get_item("A/B/test")
+            self.assertEqual(item["name"], "A/B/test")
+
+    def test_upload_role_image_multiple_files_create_multiple_items(self):
+        workspace = DatasetWorkspace()
+        with tempfile.TemporaryDirectory() as result_dir:
+            result_path = Path(result_dir)
+            workspace.open_dirs(result_dir=str(result_path), control_count=1)
+            created = []
+            for idx in range(3):
+                temp_file = result_path / f"upload_{idx}.png"
+                Image.new("RGB", (16, 16), (idx * 40, 0, 0)).save(temp_file)
+                payload = base64.b64encode(temp_file.read_bytes()).decode("ascii")
+                created.append(workspace.upload_role_image("result", temp_file.name, payload, "image/png")["name"])
+            self.assertEqual(len(created), 3)
+            self.assertEqual(len(workspace.list_items()["items"]), 3)
 
     def test_trash_item_files_removes_source_files_and_workspace_item(self):
         workspace = DatasetWorkspace()

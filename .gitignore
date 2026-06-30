@@ -47,3 +47,4 @@ datasets/workspaces/*
 prompt_templates.json
 
 .history/
+.codex_tmp/remote_exec.py

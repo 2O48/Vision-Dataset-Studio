@@ -23,7 +23,7 @@ except Exception:
     send2trash = None
 
 
-IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".tiff", ".avif"}
+IMAGE_EXTS = {".jpg", ".jpeg", ".jfif", ".png", ".gif", ".webp", ".bmp", ".tiff", ".tif", ".avif", ".heic", ".heif"}
 IMAGE_ROLES = ("control1", "control2", "control3", "result")
 CONTROL_ROLES = ("control1", "control2", "control3")
 INVALID_BASENAME_CHARS = set('<>:"/\\|?*')
@@ -176,6 +176,40 @@ def _send_to_trash(path: Path):
         raise RuntimeError("send2trash is not available; refusing to permanently delete files.")
 
 
+def _looks_like_image_file(path: Path) -> bool:
+    suffix = path.suffix.lower()
+    if suffix in IMAGE_EXTS:
+        return True
+    try:
+        with Image.open(path) as img:
+            img.verify()
+        return True
+    except Exception:
+        return False
+
+
+def _infer_image_suffix(filename: str, mime_type: str = "") -> str:
+    suffix = Path(str(filename or "")).suffix.lower()
+    if suffix in IMAGE_EXTS:
+        return suffix
+    mime = str(mime_type or "").lower()
+    mime_suffixes = {
+        "image/jpeg": ".jpg",
+        "image/jpg": ".jpg",
+        "image/png": ".png",
+        "image/gif": ".gif",
+        "image/webp": ".webp",
+        "image/bmp": ".bmp",
+        "image/tiff": ".tiff",
+        "image/avif": ".avif",
+        "image/heic": ".heic",
+        "image/heif": ".heif",
+        "image/x-icon": ".ico",
+        "image/vnd.microsoft.icon": ".ico",
+    }
+    return mime_suffixes.get(mime, ".png")
+
+
 def _parse_ignore_tokens(value) -> list[str]:
     if value is None:
         return []
@@ -212,6 +246,7 @@ class DatasetWorkspace:
         self._resolution_index_ready = False
         self._global_segments_cache: list[dict] = []
         self._global_segments_dirty = True
+        self._workspace_folders: set[str] = set()
         self.control_count = 1
         self.ignore_tokens: list[str] = []
         self.workspace_key = ""
@@ -488,6 +523,7 @@ class DatasetWorkspace:
         self.caption_overrides = {}
         self.caption_deleted = set()
         self.excluded_names = set()
+        self._workspace_folders = set()
         state_path = self._workspace_state_path()
         if not state_path.exists():
             return
@@ -507,6 +543,9 @@ class DatasetWorkspace:
         excluded = data.get("excluded", [])
         if isinstance(excluded, list):
             self.excluded_names = {str(name) for name in excluded}
+        folders = data.get("folders", [])
+        if isinstance(folders, list):
+            self._workspace_folders = {self._clean_relative_folder(folder) for folder in folders if str(folder or "").strip()}
 
     def _save_workspace_state(self):
         if not self.workspace_key:
@@ -518,6 +557,7 @@ class DatasetWorkspace:
             "captions": dict(sorted(self.caption_overrides.items())),
             "caption_deleted": sorted(self.caption_deleted, key=_natural_key),
             "excluded": sorted(self.excluded_names, key=_natural_key),
+            "folders": sorted(self._workspace_folders, key=_natural_key),
         }
         self._workspace_state_path().write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -660,6 +700,66 @@ class DatasetWorkspace:
             for file in path.rglob("*")
             if file.is_file() and file.suffix.lower() in IMAGE_EXTS
         }
+
+    def _workspace_roots(self) -> list[Path]:
+        roots = []
+        for path in self.dirs.values():
+            if path and path.exists():
+                roots.append(path)
+        return roots
+
+    def _folder_item_names(self, folder: str) -> list[str]:
+        clean_folder = self._clean_relative_folder(folder)
+        prefix = f"{clean_folder}/"
+        return [name for name in self.file_names if name == clean_folder or name.startswith(prefix)]
+
+    def _refresh_workspace_folders(self):
+        folders = set(self._workspace_folders)
+        for name in self.file_names:
+            folder = Path(str(name).replace("\\", "/")).parent.as_posix()
+            if folder and folder != ".":
+                folders.add(folder)
+        visible: set[str] = set()
+        roots = self._workspace_roots()
+        for folder in folders:
+            folder_path = Path(folder)
+            if any((root / folder_path).is_dir() for root in roots):
+                visible.add(folder)
+        self._workspace_folders = visible
+        return visible
+
+    def _folder_exists_on_disk(self, folder: str) -> bool:
+        clean_folder = self._clean_relative_folder(folder)
+        folder_path = Path(clean_folder)
+        return any((root / folder_path).is_dir() for root in self._workspace_roots())
+
+    def _rewrite_workspace_folder_prefix(self, source_folder: str, target_folder: str):
+        source = self._clean_relative_folder(source_folder)
+        target = self._clean_relative_folder(target_folder) if str(target_folder or "").strip() else ""
+        source_prefix = f"{source}/"
+        updated: set[str] = set()
+        for folder in self._workspace_folders:
+            if folder == source:
+                if target:
+                    updated.add(target)
+                continue
+            if folder.startswith(source_prefix):
+                suffix = folder[len(source_prefix):]
+                new_folder = f"{target}/{suffix}" if target else suffix
+                if new_folder:
+                    updated.add(new_folder)
+                continue
+            updated.add(folder)
+        self._workspace_folders = updated
+
+    def _prune_empty_dir(self, directory: Path, root: Path):
+        current = directory
+        while current != root and current.exists():
+            try:
+                current.rmdir()
+            except OSError:
+                break
+            current = current.parent
 
     def _group_images_by_match_key(self, images: dict[str, Path]) -> dict[str, dict]:
         groups: dict[str, dict] = {}
@@ -820,6 +920,7 @@ class DatasetWorkspace:
 
     def get_workspace_summary(self) -> dict:
         with self._lock:
+            self._refresh_workspace_folders()
             visible_names = set(self.file_names)
             return {
                 "workspace_key": self.workspace_key or self._compute_workspace_key(),
@@ -839,6 +940,7 @@ class DatasetWorkspace:
                     "edited": sum(1 for name in self.file_names if name in self.caption_overrides),
                     "excluded": len(self.excluded_names),
                 },
+                "folders": sorted(self._workspace_folders, key=_natural_key),
             }
 
     def list_items(
@@ -1673,6 +1775,163 @@ class DatasetWorkspace:
                 "workspace": self.get_workspace_summary(),
             }
 
+    def move_items_to_folder(self, names: list[str], target_folder: str) -> dict:
+        with self._lock:
+            selected = [str(name or "").strip() for name in names if str(name or "").strip()]
+            if not selected:
+                raise ValueError("No items selected.")
+            clean_folder = self._clean_relative_folder(target_folder)
+            moved_items: list[dict] = []
+            for name in selected:
+                result = self.move_item_to_folder(name, clean_folder)
+                moved_items.append({
+                    "old_name": result["old_name"],
+                    "new_name": result["new_name"],
+                    "moved": result["moved"],
+                })
+            return {
+                "moved": moved_items,
+                "workspace": self.get_workspace_summary(),
+            }
+
+    def create_folder(self, folder: str) -> dict:
+        with self._lock:
+            clean_folder = self._clean_relative_folder(folder)
+            self._workspace_folders.add(clean_folder)
+            self._save_workspace_state()
+            created: list[str] = []
+            for role in IMAGE_ROLES:
+                root = self.dirs.get(role)
+                if not root:
+                    continue
+                target = root.joinpath(*clean_folder.split("/"))
+                target.mkdir(parents=True, exist_ok=True)
+                created.append(str(target))
+            return {
+                "folder": clean_folder,
+                "created": created,
+                "workspace": self.get_workspace_summary(),
+            }
+
+    def rename_folder(self, folder: str, new_folder: str) -> dict:
+        with self._lock:
+            source = self._clean_relative_folder(folder)
+            target = self._clean_relative_folder(new_folder)
+            if source == target:
+                return {
+                    "old_folder": source,
+                    "new_folder": target,
+                    "renamed": [],
+                    "workspace": self.get_workspace_summary(),
+                }
+
+            source_prefix = f"{source}/"
+            if target == source or target.startswith(source_prefix):
+                raise ValueError("Target folder cannot be inside the source folder.")
+
+            matched_names = [name for name in self.file_names if name == source or name.startswith(source_prefix)]
+            if not matched_names and not self._folder_exists_on_disk(source):
+                raise FileNotFoundError(f"Folder does not exist: {source}")
+
+            rename_pairs: list[tuple[Path, Path]] = []
+            roots = self._workspace_roots()
+            for root in roots:
+                source_path = root / Path(source)
+                if not source_path.exists():
+                    continue
+                target_path = root / Path(target)
+                if target_path.exists():
+                    raise FileExistsError(f"Target folder already exists: {target}")
+                rename_pairs.append((source_path, target_path))
+
+            moved_roots: list[tuple[Path, Path]] = []
+            try:
+                for source_path, target_path in rename_pairs:
+                    target_path.parent.mkdir(parents=True, exist_ok=True)
+                    source_path.rename(target_path)
+                    moved_roots.append((source_path, target_path))
+            except Exception:
+                for source_path, target_path in reversed(moved_roots):
+                    try:
+                        if target_path.exists() and not source_path.exists():
+                            target_path.rename(source_path)
+                    except Exception:
+                        pass
+                raise
+
+            updated_names: dict[str, str] = {}
+            for name in self.file_names:
+                if name == source:
+                    updated_names[name] = target
+                elif name.startswith(source_prefix):
+                    suffix = name[len(source_prefix):]
+                    updated_names[name] = f"{target}/{suffix}"
+
+            if updated_names:
+                self.file_names = [updated_names.get(name, name) for name in self.file_names]
+                for role in IMAGE_ROLES:
+                    self.files[role] = {
+                        updated_names.get(name, name): path
+                        for name, path in self.files[role].items()
+                    }
+                self.txt_files = {
+                    updated_names.get(name, name): path
+                    for name, path in self.txt_files.items()
+                }
+                self.txt_content = {
+                    updated_names.get(name, name): content
+                    for name, content in self.txt_content.items()
+                }
+                self.caption_overrides = {
+                    updated_names.get(name, name): content
+                    for name, content in self.caption_overrides.items()
+                }
+                self.caption_deleted = {updated_names.get(name, name) for name in self.caption_deleted}
+                self.excluded_names = {updated_names.get(name, name) for name in self.excluded_names}
+
+            self._rewrite_workspace_folder_prefix(source, target)
+            self._refresh_workspace_folders()
+            self._image_sizes.clear()
+            self._resolution_mismatch.clear()
+            self._resolution_index_ready = False
+            self._mark_global_segments_dirty()
+            self.file_names = sorted(self.file_names, key=_natural_key)
+            self._save_workspace_state()
+            self._ensure_resolution_index()
+            return {
+                "old_folder": source,
+                "new_folder": target,
+                "renamed": [{"from": str(source_path), "to": str(target_path)} for source_path, target_path in moved_roots],
+                "workspace": self.get_workspace_summary(),
+            }
+
+    def delete_folder(self, folder: str) -> dict:
+        with self._lock:
+            clean_folder = self._clean_relative_folder(folder)
+            folder_prefix = f"{clean_folder}/"
+            if any(name == clean_folder or name.startswith(folder_prefix) for name in self.file_names):
+                raise ValueError("Folder is not empty. Move or delete its items first.")
+            roots = self._workspace_roots()
+            removed: list[str] = []
+            for root in roots:
+                target = root / Path(clean_folder)
+                if not target.exists():
+                    continue
+                self._prune_empty_dir(target, root)
+                removed.append(str(target))
+            self._workspace_folders = {
+                folder_name
+                for folder_name in self._workspace_folders
+                if not (folder_name == clean_folder or folder_name.startswith(folder_prefix))
+            }
+            self._refresh_workspace_folders()
+            self._save_workspace_state()
+            return {
+                "folder": clean_folder,
+                "removed": removed,
+                "workspace": self.get_workspace_summary(),
+            }
+
     def delete_item(self, name: str) -> dict:
         with self._lock:
             if name not in self.file_names:
@@ -1789,18 +2048,26 @@ class DatasetWorkspace:
                 return target_path
             index += 1
 
-    def _image_dir_for_role_drop(self, role: str) -> Path:
+    def _image_dir_for_role_drop(self, role: str, folder: str = "") -> Path:
         if role == "result":
-            return self._result_dir_for_drop()
+            target = self._result_dir_for_drop()
+            if folder:
+                target = target.joinpath(*self._clean_relative_folder(folder).split("/"))
+                target.mkdir(parents=True, exist_ok=True)
+            return target
         if role in CONTROL_ROLES:
             role_index = CONTROL_ROLES.index(role) + 1
             if self.control_count < role_index:
                 raise ValueError(f"{role} is not enabled in the current workspace.")
-            return self._control_dir_for_role(role)
+            target = self._control_dir_for_role(role)
+            if folder:
+                target = target.joinpath(*self._clean_relative_folder(folder).split("/"))
+                target.mkdir(parents=True, exist_ok=True)
+            return target
         raise ValueError("Target role must be an image role.")
 
-    def _next_role_drop_path(self, role: str, filename: str, suffix: str) -> Path:
-        target_dir = self._image_dir_for_role_drop(role)
+    def _next_role_drop_path(self, role: str, filename: str, suffix: str, folder: str = "") -> Path:
+        target_dir = self._image_dir_for_role_drop(role, folder)
         stem = self._clean_upload_image_stem(filename)
         index = 1
         while True:
@@ -1887,12 +2154,12 @@ class DatasetWorkspace:
                 "workspace": summary,
             }
 
-    def upload_control_image(self, target_name: str, target_role: str, filename: str, image_data: str) -> dict:
+    def upload_control_image(self, target_name: str, target_role: str, filename: str, image_data: str, mime_type: str = "") -> dict:
         with self._lock:
             target_name = str(target_name or "").strip()
             target_role = str(target_role or "").strip()
             filename = str(filename or "").strip() or "dropped.png"
-            suffix = Path(filename).suffix.lower()
+            suffix = _infer_image_suffix(filename, mime_type)
             if suffix not in IMAGE_EXTS:
                 raise ValueError("Dropped file must be an image.")
             self._validate_control_drop_target(target_name, target_role, allow_replace=True)
@@ -1924,15 +2191,16 @@ class DatasetWorkspace:
     def upload_result_image(self, filename: str, image_data: str) -> dict:
         return self.upload_role_image("result", filename, image_data)
 
-    def upload_role_image(self, role: str, filename: str, image_data: str) -> dict:
+    def upload_role_image(self, role: str, filename: str, image_data: str, mime_type: str = "", folder: str = "") -> dict:
         with self._lock:
             role = str(role or "").strip()
             if role not in IMAGE_ROLES:
                 raise ValueError("Target role must be an image role.")
             filename = str(filename or "").strip() or "dropped.png"
-            suffix = Path(filename).suffix.lower()
+            suffix = _infer_image_suffix(filename, mime_type)
             if suffix not in IMAGE_EXTS:
                 raise ValueError("Dropped file must be an image.")
+            clean_folder = self._clean_relative_folder(folder) if str(folder or "").strip() else ""
             raw_data = str(image_data or "")
             if "," in raw_data and raw_data.split(",", 1)[0].lower().startswith("data:"):
                 raw_data = raw_data.split(",", 1)[1]
@@ -1943,7 +2211,7 @@ class DatasetWorkspace:
             if not payload:
                 raise ValueError("Dropped image is empty.")
 
-            target_path = self._next_role_drop_path(role, filename, suffix)
+            target_path = self._next_role_drop_path(role, filename, suffix, clean_folder)
             target_path.parent.mkdir(parents=True, exist_ok=True)
             target_path.write_bytes(payload)
             root = self.dirs.get(role)

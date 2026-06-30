@@ -229,7 +229,10 @@ class ProjectStoreTests(unittest.TestCase):
                     "local_overwrite_mode": "skip",
                     "local_caption_mode": "tag",
                     "local_max_tokens": "1024",
+                    "local_thinking_mode": True,
                     "local_prompt": "只输出短标签",
+                    "api_thinking_mode": True,
+                    "ollama_thinking_mode": True,
                 },
                 "template_selections": {
                     "customPrompt": "template-tag",
@@ -247,7 +250,7 @@ class ProjectStoreTests(unittest.TestCase):
             self.assertEqual(touched["updated_at"], "2099-01-02T03:04:05")
             self.assertEqual(
                 (root / "app" / "projects" / project_id / "state" / "caption_config.json").read_text(encoding="utf-8"),
-                '{\n  "local_overwrite_mode": "skip",\n  "local_caption_mode": "tag",\n  "local_max_tokens": "1024",\n  "local_prompt": "只输出短标签"\n}',
+                '{\n  "local_overwrite_mode": "skip",\n  "local_caption_mode": "tag",\n  "local_max_tokens": "1024",\n  "local_thinking_mode": true,\n  "local_prompt": "只输出短标签",\n  "api_thinking_mode": true,\n  "ollama_thinking_mode": true\n}',
             )
 
     def test_legacy_project_store_directory_is_migrated_to_new_brand_path(self):

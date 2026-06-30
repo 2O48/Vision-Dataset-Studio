@@ -104,6 +104,7 @@ export function createProjectsModule({
         local_overwrite_mode: refs.overwriteMode?.value || "",
         local_caption_mode: refs.captionMode?.value || "",
         local_max_tokens: refs.maxTokens?.value || "",
+        local_thinking_mode: Boolean(refs.localThinkingMode?.checked),
         local_prompt: refs.customPrompt?.value || "",
         api_base_url: refs.apiBaseUrl?.value || "",
         api_key: refs.apiKey?.value || "",
@@ -111,12 +112,14 @@ export function createProjectsModule({
         api_overwrite_mode: refs.apiOverwriteMode?.value || "",
         api_caption_mode: refs.apiCaptionMode?.value || "",
         api_max_tokens: refs.apiMaxTokens?.value || "",
+        api_thinking_mode: Boolean(refs.apiThinkingMode?.checked),
         api_prompt: refs.apiPrompt?.value || "",
         ollama_base_url: refs.ollamaBaseUrl?.value || "",
         ollama_model_name: refs.ollamaModelName?.value || "",
         ollama_overwrite_mode: refs.ollamaOverwriteMode?.value || "",
         ollama_caption_mode: refs.ollamaCaptionMode?.value || "",
         ollama_max_tokens: refs.ollamaMaxTokens?.value || "",
+        ollama_thinking_mode: Boolean(refs.ollamaThinkingMode?.checked),
         ollama_prompt: refs.ollamaPrompt?.value || "",
       },
       processing_settings: {
@@ -181,6 +184,7 @@ export function createProjectsModule({
     setValue(refs.overwriteMode, captionSettings.local_overwrite_mode, STORAGE_KEYS.localOverwriteMode);
     setValue(refs.captionMode, captionSettings.local_caption_mode, STORAGE_KEYS.localCaptionMode);
     setValue(refs.maxTokens, captionSettings.local_max_tokens, STORAGE_KEYS.localMaxTokens);
+    setChecked(refs.localThinkingMode, captionSettings.local_thinking_mode ?? false, STORAGE_KEYS.localThinkingMode);
     setValue(refs.customPrompt, captionSettings.local_prompt, STORAGE_KEYS.localPrompt);
     setValue(refs.apiBaseUrl, captionSettings.api_base_url, STORAGE_KEYS.apiBaseUrl);
     setValue(refs.apiKey, captionSettings.api_key, STORAGE_KEYS.apiKey);
@@ -188,12 +192,14 @@ export function createProjectsModule({
     setValue(refs.apiOverwriteMode, captionSettings.api_overwrite_mode, STORAGE_KEYS.apiOverwriteMode);
     setValue(refs.apiCaptionMode, captionSettings.api_caption_mode, STORAGE_KEYS.apiCaptionMode);
     setValue(refs.apiMaxTokens, captionSettings.api_max_tokens, STORAGE_KEYS.apiMaxTokens);
+    setChecked(refs.apiThinkingMode, captionSettings.api_thinking_mode ?? false, STORAGE_KEYS.apiThinkingMode);
     setValue(refs.apiPrompt, captionSettings.api_prompt, STORAGE_KEYS.apiPrompt);
     setValue(refs.ollamaBaseUrl, captionSettings.ollama_base_url, STORAGE_KEYS.ollamaBaseUrl);
     setValue(refs.ollamaModelName, captionSettings.ollama_model_name, STORAGE_KEYS.ollamaModelName);
     setValue(refs.ollamaOverwriteMode, captionSettings.ollama_overwrite_mode, STORAGE_KEYS.ollamaOverwriteMode);
     setValue(refs.ollamaCaptionMode, captionSettings.ollama_caption_mode, STORAGE_KEYS.ollamaCaptionMode);
     setValue(refs.ollamaMaxTokens, captionSettings.ollama_max_tokens, STORAGE_KEYS.ollamaMaxTokens);
+    setChecked(refs.ollamaThinkingMode, captionSettings.ollama_thinking_mode ?? false, STORAGE_KEYS.ollamaThinkingMode);
     setValue(refs.ollamaPrompt, captionSettings.ollama_prompt, STORAGE_KEYS.ollamaPrompt);
 
     setValue(refs.viewerTargetPixels, processingSettings.viewer_target_pixels, STORAGE_KEYS.viewerTargetPixels);
@@ -446,6 +452,9 @@ export function createProjectsModule({
     bind(refs.captionMode, "change");
     bind(refs.maxTokens, "input");
     bind(refs.maxTokens, "change");
+    bind(refs.localThinkingMode, "change");
+    bind(refs.apiThinkingMode, "change");
+    bind(refs.ollamaThinkingMode, "change");
     bind(refs.customPrompt, "input");
     bind(refs.customPrompt, "change");
     document.querySelectorAll(".template-row .promptTemplateSelect").forEach((select) => {

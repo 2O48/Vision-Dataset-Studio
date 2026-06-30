@@ -57,6 +57,7 @@ STYLES_FILE = FRONTEND_DIR / "styles.css"
 FAVICON_FILE = FRONTEND_DIR / "assets" / "favicon.png"
 PROMPT_TEMPLATES_FILE = BASE_DIR / "prompt_templates.json"
 THUMB_CACHE_MAX_ITEMS = 256
+THUMB_CACHE_MIME = "image/png"
 
 
 WORKSPACE = DatasetWorkspace()
@@ -145,6 +146,16 @@ def _store_cached_thumbnail(key: tuple[str, int, int, int, str], data: bytes):
         THUMB_CACHE.move_to_end(key)
         while len(THUMB_CACHE) > THUMB_CACHE_MAX_ITEMS:
             THUMB_CACHE.popitem(last=False)
+
+
+def _render_thumbnail_bytes(path: Path, width: int, height: int) -> bytes:
+    with Image.open(path) as img:
+        if img.mode not in {"RGB", "RGBA"}:
+            img = img.convert("RGBA" if "A" in img.getbands() else "RGB")
+        img.thumbnail((max(width, 32), max(height, 32)))
+        buf = io.BytesIO()
+        img.save(buf, format="PNG", optimize=True)
+        return buf.getvalue()
 
 
 BATCH_MANAGER = BatchCaptionManager(WORKSPACE, CAPTION_CLIENT, API_CAPTION_CLIENT, OLLAMA_CAPTION_CLIENT, on_content_change=_touch_active_project_content)
@@ -577,17 +588,44 @@ class AppHandler(BaseHTTPRequestHandler):
                     str(body.get("role", "") or ""),
                     str(body.get("filename", "") or ""),
                     str(body.get("data", "") or ""),
+                    str(body.get("mime_type", "") or ""),
+                    str(body.get("folder", "") or ""),
                 )
                 _touch_active_project_content()
                 return self._send_json({"ok": True, **result})
 
             if path == "/api/item/move-folder":
+                folder = str(body.get("folder", "") or "")
+                names = body.get("names", [])
+                if isinstance(names, list) and names:
+                    result = WORKSPACE.move_items_to_folder(names, folder)
+                    if result.get("moved"):
+                        _touch_active_project_content()
+                    return self._send_json({"ok": True, **result})
                 result = WORKSPACE.move_item_to_folder(
                     str(body.get("name", "") or ""),
-                    str(body.get("folder", "") or ""),
+                    folder,
                 )
                 if result.get("moved"):
                     _touch_active_project_content()
+                return self._send_json({"ok": True, **result})
+
+            if path == "/api/item/create-folder":
+                result = WORKSPACE.create_folder(str(body.get("folder", "") or ""))
+                _touch_active_project_content()
+                return self._send_json({"ok": True, **result})
+
+            if path == "/api/item/rename-folder":
+                result = WORKSPACE.rename_folder(
+                    str(body.get("folder", "") or ""),
+                    str(body.get("new_folder", "") or ""),
+                )
+                _touch_active_project_content()
+                return self._send_json({"ok": True, **result})
+
+            if path == "/api/item/delete-folder":
+                result = WORKSPACE.delete_folder(str(body.get("folder", "") or ""))
+                _touch_active_project_content()
                 return self._send_json({"ok": True, **result})
 
             if path == "/api/item/reveal":
@@ -880,6 +918,7 @@ class AppHandler(BaseHTTPRequestHandler):
                         mode=body.get("mode", "natural"),
                         prompt=validation_request["prompt"],
                         max_tokens=int(body.get("max_tokens", 128)),
+                        thinking=bool(body.get("thinking", False)),
                     )
                 elif backend == "ollama":
                     validation = OLLAMA_CAPTION_CLIENT.validate(
@@ -888,6 +927,7 @@ class AppHandler(BaseHTTPRequestHandler):
                         mode=body.get("mode", "natural"),
                         prompt=validation_request["prompt"],
                         max_tokens=int(body.get("max_tokens", 128)),
+                        thinking=bool(body.get("thinking", False)),
                     )
                 else:
                     validation_images = _create_validation_images()
@@ -994,23 +1034,15 @@ class AppHandler(BaseHTTPRequestHandler):
         cache_key = _thumbnail_cache_key(path, max(width, 32), max(height, 32))
         cached = _get_cached_thumbnail(cache_key)
         if cached is not None:
-            return self._send_bytes(cached, "image/jpeg")
+            return self._send_bytes(cached, THUMB_CACHE_MIME)
 
         with THUMB_RENDER_SEMAPHORE:
             cached = _get_cached_thumbnail(cache_key)
             if cached is not None:
-                return self._send_bytes(cached, "image/jpeg")
-            with Image.open(path) as img:
-                if img.mode not in {"RGB", "RGBA"}:
-                    img = img.convert("RGB")
-                img.thumbnail((cache_key[2], cache_key[3]))
-                if img.mode == "RGBA":
-                    img = img.convert("RGB")
-                buf = io.BytesIO()
-                img.save(buf, format="JPEG", quality=88)
-        data = buf.getvalue()
+                return self._send_bytes(cached, THUMB_CACHE_MIME)
+            data = _render_thumbnail_bytes(path, cache_key[2], cache_key[3])
         _store_cached_thumbnail(cache_key, data)
-        return self._send_bytes(data, "image/jpeg")
+        return self._send_bytes(data, THUMB_CACHE_MIME)
 
     def _send_project_thumbnail(self, path: Path, query: dict[str, list[str]]):
         width = int(query.get("width", ["420"])[0])
@@ -1018,19 +1050,11 @@ class AppHandler(BaseHTTPRequestHandler):
         cache_key = _thumbnail_cache_key(path, max(width, 32), max(height, 32))
         cached = _get_cached_thumbnail(cache_key)
         if cached is not None:
-            return self._send_bytes(cached, "image/jpeg")
+            return self._send_bytes(cached, THUMB_CACHE_MIME)
 
-        with Image.open(path) as img:
-            if img.mode not in {"RGB", "RGBA"}:
-                img = img.convert("RGB")
-            img.thumbnail((cache_key[2], cache_key[3]))
-            if img.mode == "RGBA":
-                img = img.convert("RGB")
-            buf = io.BytesIO()
-            img.save(buf, format="JPEG", quality=88)
-        data = buf.getvalue()
+        data = _render_thumbnail_bytes(path, cache_key[2], cache_key[3])
         _store_cached_thumbnail(cache_key, data)
-        return self._send_bytes(data, "image/jpeg")
+        return self._send_bytes(data, THUMB_CACHE_MIME)
 
 
 def _get_bind_urls(host: str, port: int) -> list[str]:
