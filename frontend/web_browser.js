@@ -824,6 +824,26 @@ export function createBrowserModule({
         selectItem(next.name, false, { panelId }).catch(showError || console.error);
       }
     });
+    allButton.addEventListener("dragover", (event) => {
+      if (!Array.from(event.dataTransfer?.types || []).includes(ITEM_DRAG_TYPE)) return;
+      event.preventDefault();
+      allButton.classList.add("drag-over");
+      event.dataTransfer.dropEffect = "move";
+    });
+    allButton.addEventListener("dragleave", () => {
+      allButton.classList.remove("drag-over");
+    });
+    allButton.addEventListener("drop", (event) => {
+      const name = event.dataTransfer?.getData(ITEM_DRAG_TYPE) || "";
+      const names = event.dataTransfer?.getData("application/x-vds-item-names") || "";
+      const payloadNames = names ? names.split("\n").map((value) => value.trim()).filter(Boolean) : [];
+      const targetNames = payloadNames.length ? payloadNames : (name ? [name] : []);
+      if (!targetNames.length) return;
+      event.preventDefault();
+      event.stopPropagation();
+      allButton.classList.remove("drag-over");
+      moveItemsToFolder(targetNames, "").catch(showError || console.error);
+    });
     panel.folderFilters.appendChild(allButton);
 
     if (!folders.length) return;
@@ -883,20 +903,20 @@ export function createBrowserModule({
   }
 
   async function moveItemToFolder(name, folder) {
-    if (!name || !folder) return;
+    if (!name || folder == null) return;
     if (itemFolder(name) === folder) return;
     if (!(await confirmDiscardCaptionChanges())) return;
     const data = await apiPost("/api/item/move-folder", { name, folder });
     if (data.workspace) applyWorkspaceSummary(data.workspace);
     setPanelFolderFilter(activeListPanelId(), folder);
-    setAiStatusLine(`已移动到子文件夹：${folder}`);
+    setAiStatusLine(folder ? `已移动到子文件夹：${folder}` : "已移动到项目根目录");
     await refreshItems({ skipDirtyCheck: true, suppressSelectionSync: true });
     await selectItem(data.new_name || name, true, { skipDirtyCheck: true, panelId: activeListPanelId() });
   }
 
   async function moveItemsToFolder(names, folder) {
     const targets = [...new Set(Array.isArray(names) ? names : [names])].filter(Boolean);
-    if (!targets.length || !folder) return;
+    if (!targets.length || folder == null) return;
     if (targets.length === 1) {
       await moveItemToFolder(targets[0], folder);
       return;
@@ -906,7 +926,7 @@ export function createBrowserModule({
     if (data.workspace) applyWorkspaceSummary(data.workspace);
     clearBatchSelection();
     setPanelFilter(activeListPanelId(), panelFilter(activeListPanelId()));
-    setAiStatusLine(`已移动到子文件夹：${folder}（${targets.length} 项）`);
+    setAiStatusLine(folder ? `已移动到子文件夹：${folder}（${targets.length} 项）` : `已移动到项目根目录（${targets.length} 项）`);
     await refreshItems({ skipDirtyCheck: true, suppressSelectionSync: true });
     const nextName = data.moved?.[data.moved.length - 1]?.new_name || targets[0];
     if (nextName) await selectItem(nextName, true, { skipDirtyCheck: true, panelId: activeListPanelId() });

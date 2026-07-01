@@ -158,7 +158,6 @@ export function createBootstrapModule({
         if (event.key === "Escape") closeMenus();
       });
       window.addEventListener("resize", () => closeMenus());
-      document.addEventListener("scroll", () => closeMenus(), true);
       enhanceSelectMenus.bound = true;
     }
 

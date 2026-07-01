@@ -67,6 +67,23 @@
   --backdrop-accent: rgba(47, 111, 115, 0.1);
   --backdrop-sheen: rgba(255, 255, 255, 0.6);
   --project-thumb-bg: #dfe5df;
+  --cursor-default: url("/assets/cursors/default.cur"), default;
+  --cursor-pointer: url("/assets/cursors/pointer.cur"), pointer;
+  --cursor-help: url("/assets/cursors/help.cur"), help;
+  --cursor-text: url("/assets/cursors/text.cur"), text;
+  --cursor-copy: url("/assets/cursors/copy.cur"), copy;
+  --cursor-grab: url("/assets/cursors/grab.cur"), grab;
+  --cursor-grabbing: url("/assets/cursors/grabbing.cur"), grabbing;
+  --cursor-move: url("/assets/cursors/move.cur"), move;
+  --cursor-all-scroll: url("/assets/cursors/all-scroll.cur"), all-scroll;
+  --cursor-col-resize: url("/assets/cursors/ew-resize.cur"), col-resize;
+  --cursor-row-resize: url("/assets/cursors/ns-resize.cur"), row-resize;
+  --cursor-nwse-resize: url("/assets/cursors/nwse-resize.cur"), nwse-resize;
+  --cursor-nesw-resize: url("/assets/cursors/nesw-resize.cur"), nesw-resize;
+  --cursor-zoom-in: url("/assets/cursors/zoom-in.cur"), zoom-in;
+  --cursor-progress: url("/assets/cursors/progress.ani"), progress;
+  --cursor-wait: url("/assets/cursors/wait.ani"), wait;
+  --cursor-not-allowed: url("/assets/cursors/not-allowed.cur"), not-allowed;
 }
 
 :root[data-theme="dark"] {
@@ -176,6 +193,26 @@ body {
     linear-gradient(135deg, var(--bg) 0%, var(--bg-deep) 100%);
   color: var(--ink);
   font-family: "-apple-system-body", "ui-sans-serif", "-apple-system", "HarmonyOS Sans SC", "SF Pro", "Pingfang SC", "system-ui", "Segoe UI", Helvetica, "Apple Color Emoji", Arial, sans-serif, "Segoe UI Emoji", "Segoe UI Symbol";
+  cursor: var(--cursor-default);
+}
+
+input:not([type="range"]),
+textarea,
+[contenteditable="true"] {
+  cursor: var(--cursor-text);
+}
+
+select,
+a,
+summary,
+[role="button"] {
+  cursor: var(--cursor-pointer);
+}
+
+button:disabled,
+[aria-disabled="true"],
+:disabled {
+  cursor: var(--cursor-not-allowed);
 }
 
 @property --workbench-left-gap {
@@ -223,7 +260,7 @@ button {
 }
 
 button {
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
 }
 
 .site-shell {
@@ -283,7 +320,7 @@ button {
   color: var(--ink-soft);
   text-align: left;
   white-space: nowrap;
-  cursor: help;
+  cursor: var(--cursor-help);
 }
 
 .bottom-status-item+.bottom-status-item {
@@ -330,7 +367,7 @@ button {
   font-size: 12px;
   line-height: 1.2;
   white-space: nowrap;
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
   transition: opacity 160ms ease, transform 160ms ease;
 }
 
@@ -615,7 +652,7 @@ button {
   font-size: 13px;
   font-weight: 700;
   line-height: 1.1;
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
 }
 
 .native-select-hidden {
@@ -740,6 +777,7 @@ button {
   font-size: 13px;
   line-height: 1.15;
   text-align: left;
+  cursor: var(--cursor-pointer);
 }
 
 .custom-select-option:hover,
@@ -750,7 +788,7 @@ button {
 
 .custom-select-option:disabled {
   color: var(--ink-faint);
-  cursor: not-allowed;
+  cursor: var(--cursor-not-allowed);
   opacity: 0.6;
 }
 
@@ -1559,6 +1597,7 @@ textarea:focus {
 
 .item-list.result-drop-over {
   background: rgba(47, 111, 115, 0.08);
+  cursor: var(--cursor-copy);
   box-shadow: inset 0 0 0 1px rgba(47, 111, 115, 0.24);
 }
 
@@ -1581,7 +1620,7 @@ textarea:focus {
   padding: 8px;
   border-radius: var(--radius-lg);
   background: var(--green-surface);
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
   transition:
     transform 160ms ease,
     border-color 160ms ease,
@@ -1612,6 +1651,7 @@ textarea:focus {
 }
 
 .item-card.dragging {
+  cursor: var(--cursor-grabbing);
   opacity: 0.58;
 }
 
@@ -1621,7 +1661,7 @@ textarea:focus {
   width: 88px;
   height: 72px;
   border-radius: calc(var(--radius-lg) - 8px);
-  cursor: text;
+  cursor: var(--cursor-pointer);
 }
 
 .item-thumb-single {
@@ -1677,7 +1717,7 @@ textarea:focus {
 
 .item-thumb-drop {
   border: 1px dashed rgba(47, 111, 115, 0.34);
-  cursor: copy;
+  cursor: var(--cursor-copy);
   transition:
     border-color 160ms ease,
     background 160ms ease,
@@ -1792,6 +1832,7 @@ textarea:focus {
   color: var(--ink-soft);
   font-size: 12px;
   line-height: 1.2;
+  cursor: var(--cursor-pointer);
 }
 
 .folder-filter-chip.active {
@@ -1803,6 +1844,7 @@ textarea:focus {
   border-color: var(--accent);
   background: var(--accent-soft);
   color: var(--accent-strong);
+  cursor: var(--cursor-copy);
 }
 
 .flag.ok {
@@ -1858,7 +1900,7 @@ textarea:focus {
 }
 
 .content-resizer.vertical-resizer {
-  cursor: col-resize;
+  cursor: var(--cursor-col-resize);
 }
 
 .content-resizer.vertical-resizer::after {
@@ -1870,7 +1912,7 @@ textarea:focus {
 }
 
 .content-resizer.horizontal-resizer {
-  cursor: row-resize;
+  cursor: var(--cursor-row-resize);
 }
 
 .content-resizer.horizontal-resizer::after {
@@ -1962,16 +2004,18 @@ textarea:focus {
 }
 
 .image-card.role-draggable {
-  cursor: grab;
+  cursor: var(--cursor-grab);
 }
 
 .image-card.role-dragging {
+  cursor: var(--cursor-grabbing);
   opacity: 0.58;
 }
 
 .image-card.role-drop-target {
   background: rgba(47, 111, 115, 0.16);
   border-color: rgba(47, 111, 115, 0.46);
+  cursor: var(--cursor-copy);
 }
 
 .image-meta {
@@ -2007,7 +2051,7 @@ textarea:focus {
   max-height: none;
   border-radius: var(--radius-md);
   background: var(--green-surface-strong);
-  cursor: zoom-in;
+  cursor: var(--cursor-zoom-in);
 }
 
 .image-preview-open {
@@ -2035,12 +2079,12 @@ textarea:focus {
   border: 0;
   border-radius: var(--radius-sm);
   background: transparent;
-  cursor: grab;
+  cursor: var(--cursor-grab);
   touch-action: none;
 }
 
 .image-preview-overlay.dragging .image-preview-stage {
-  cursor: grabbing;
+  cursor: var(--cursor-grabbing);
 }
 
 .image-preview-main {
@@ -2052,6 +2096,7 @@ textarea:focus {
   max-height: none;
   border-radius: var(--radius-sm);
   user-select: none;
+  cursor: inherit;
   -webkit-user-drag: none;
   transition: opacity 120ms ease;
   will-change: transform;
@@ -2123,6 +2168,7 @@ textarea:focus {
   background: transparent;
   opacity: 0;
   pointer-events: none;
+  cursor: var(--cursor-grab);
   transition: opacity 180ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
@@ -2145,13 +2191,13 @@ textarea:focus {
   border-radius: var(--radius-sm);
   background: rgba(223, 250, 242, 0.16);
   box-shadow: 0 0 0 1px rgba(3, 6, 5, 0.34);
-  cursor: grab;
+  cursor: var(--cursor-grab);
   pointer-events: auto;
   touch-action: none;
 }
 
 .image-preview-overlay.minimap-dragging .image-preview-viewport {
-  cursor: grabbing;
+  cursor: var(--cursor-grabbing);
 }
 
 .image-preview-viewport[hidden] {
@@ -2257,6 +2303,7 @@ textarea:focus {
 .caption-editor.drag-over {
   border-color: var(--accent);
   background: var(--accent-soft);
+  cursor: var(--cursor-copy);
 }
 
 .chip-editor {
@@ -2294,6 +2341,7 @@ textarea:focus {
 }
 
 .chip.dragging {
+  cursor: var(--cursor-grabbing);
   opacity: 0.58;
 }
 
@@ -2319,12 +2367,24 @@ textarea:focus {
   display: grid;
   place-items: center;
   align-self: stretch;
-  min-width: 30px;
-  margin: -8px -8px -8px 0;
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
+  margin: 0 -2px 0 2px;
   border: 0;
+  border-radius: 999px;
   background: transparent;
   color: var(--danger);
-  padding: 0 8px;
+  padding: 0;
+  line-height: 1;
+  transition: background 160ms ease, transform 160ms ease;
+}
+
+.chip-x:hover,
+.chip-x:focus-visible {
+  background: rgba(180, 54, 54, 0.2);
+  transform: translateY(-1px);
+  outline: none;
 }
 
 .inline-form {
@@ -2364,6 +2424,7 @@ textarea:focus {
 .quick-tag-grid.drop-ready {
   outline: 1px dashed rgba(47, 111, 115, 0.28);
   outline-offset: 6px;
+  cursor: var(--cursor-copy);
 }
 
 .quick-tag-panel.collapsed .quick-tag-grid {
@@ -2381,6 +2442,7 @@ textarea:focus {
 }
 
 .quick-tag-item.dragging {
+  cursor: var(--cursor-grabbing);
   opacity: 0.32;
 }
 
@@ -2400,7 +2462,7 @@ textarea:focus {
 
 .quick-tag-handle {
   color: var(--ink-faint);
-  cursor: grab;
+  cursor: var(--cursor-grab);
   font-size: 13px;
   text-align: center;
   user-select: none;
@@ -2472,7 +2534,7 @@ textarea:focus {
   border-radius: var(--radius-sm);
   background: var(--surface-fill);
   color: var(--ink);
-  cursor: grab;
+  cursor: var(--cursor-grab);
   transition: border-color 160ms ease, background 160ms ease, color 160ms ease;
 }
 
@@ -2498,7 +2560,7 @@ textarea:focus {
 }
 
 .global-tag-row.dragging {
-  cursor: grabbing;
+  cursor: var(--cursor-grabbing);
   opacity: 0.58;
 }
 
@@ -2574,7 +2636,7 @@ textarea:focus {
 
 .workbench-shell.caption-settings-resizer-hidden .right-panel-resizer {
   display: block;
-  cursor: default;
+  cursor: var(--cursor-default);
   opacity: 0;
   pointer-events: none;
   visibility: hidden;

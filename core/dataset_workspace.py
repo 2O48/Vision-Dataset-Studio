@@ -107,8 +107,8 @@ def _merge_text_with_segments(existing: str, segments: list[str], position: str 
     if not additions:
         return current_text
     if position == "before":
-        return ", ".join(additions) + f"; {current_text.lstrip(',，;；。 ')}"
-    return f"{current_text.rstrip(',，;；。 ')}; " + ", ".join(additions)
+        return ", ".join(additions) + f", {current_text.lstrip(',，;；。 ')}"
+    return f"{current_text.rstrip(',，;；。 ')}, " + ", ".join(additions)
 
 
 def _split_caption_parts(content: str) -> list[tuple[str, str]]:
@@ -1682,12 +1682,12 @@ class DatasetWorkspace:
             if name not in self.file_names:
                 raise KeyError(name)
 
-            clean_folder = self._clean_relative_folder(target_folder)
+            clean_folder = self._clean_relative_folder(target_folder) if str(target_folder or "").strip() else ""
             old_name_path = Path(str(name).replace("\\", "/"))
             basename = old_name_path.name
             current_folder = old_name_path.parent.as_posix()
             current_folder = "" if current_folder == "." else current_folder
-            new_name = f"{clean_folder}/{basename}"
+            new_name = f"{clean_folder}/{basename}" if clean_folder else basename
             if clean_folder == current_folder:
                 return {
                     "old_name": name,
@@ -1700,7 +1700,7 @@ class DatasetWorkspace:
                 raise FileExistsError(f"Item already exists: {new_name}")
 
             move_pairs: list[tuple[Path, Path]] = []
-            folder_parts = clean_folder.split("/")
+            folder_parts = clean_folder.split("/") if clean_folder else []
             for role in IMAGE_ROLES:
                 source = self.files[role].get(name)
                 root = self.dirs.get(role)
@@ -1780,7 +1780,7 @@ class DatasetWorkspace:
             selected = [str(name or "").strip() for name in names if str(name or "").strip()]
             if not selected:
                 raise ValueError("No items selected.")
-            clean_folder = self._clean_relative_folder(target_folder)
+            clean_folder = self._clean_relative_folder(target_folder) if str(target_folder or "").strip() else ""
             moved_items: list[dict] = []
             for name in selected:
                 result = self.move_item_to_folder(name, clean_folder)
