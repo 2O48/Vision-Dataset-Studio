@@ -25,7 +25,7 @@ export function createEditorModule({
   const QUICK_TAG_DRAG_TYPE = "application/x-vds-quick-tag";
   const CAPTION_SEGMENT_DRAG_TYPE = "application/x-vds-caption-segment";
   const GLOBAL_TAG_ROW_HEIGHT = 42;
-  const GLOBAL_TAG_ROW_GAP = 8;
+  const GLOBAL_TAG_ROW_GAP = 4;
   const GLOBAL_TAG_IDLE_OVERSCAN = 1;
   const GLOBAL_TAG_SCROLL_OVERSCAN = 5;
   const GLOBAL_TAG_SCROLL_IDLE_MS = 140;
@@ -34,6 +34,11 @@ export function createEditorModule({
   let globalTagScrollEndTimer = 0;
   let globalTagViewportSignature = "";
   let globalTagScrolling = false;
+
+  function setNativeDragFeedbackActive(active) {
+    document.documentElement.classList.toggle("html5-dragging", Boolean(active));
+    document.body?.classList.toggle("html5-dragging", Boolean(active));
+  }
 
   function normalizeGlobalTagQuery(value = state.globalTagQuery) {
     return `${value || ""}`.trim().toLowerCase();
@@ -198,11 +203,13 @@ export function createEditorModule({
         };
         state.quickTagDragging = { type: "caption", value: segment };
         row.classList.add("dragging");
+        setNativeDragFeedbackActive(true);
         event.dataTransfer?.setData(CAPTION_SEGMENT_DRAG_TYPE, segment);
         event.dataTransfer?.setData("text/plain", segment);
         if (event.dataTransfer) event.dataTransfer.effectAllowed = "copyMove";
       });
       row.addEventListener("dragend", () => {
+        setNativeDragFeedbackActive(false);
         if (state.captionTagDragging?.moved) persistCaptionTagOrder();
         cleanupCaptionTagDragState();
         scheduleCaptionDragEndCleanup();
@@ -230,7 +237,7 @@ export function createEditorModule({
       const remove = document.createElement("button");
       remove.type = "button";
       remove.className = "chip-x";
-      remove.textContent = "×";
+      remove.setAttribute("aria-label", "删除标签");
       remove.addEventListener("click", () => {
         const next = state.currentSegments.filter((_, i) => i !== index);
         writeSegmentsToText(next);
@@ -443,7 +450,7 @@ export function createEditorModule({
     refs.quickTagPanel?.classList.toggle("collapsed", state.quickTagsCollapsed);
     refs.quickTagToggleBtn?.setAttribute("aria-expanded", state.quickTagsCollapsed ? "false" : "true");
     if (refs.quickTagToggleBtn) {
-      refs.quickTagToggleBtn.textContent = state.quickTagsCollapsed ? "快捷标注 +" : "快捷标注 -";
+      refs.quickTagToggleBtn.textContent = "快捷标注";
     }
     refs.quickTagGrid.textContent = "";
 
@@ -483,11 +490,13 @@ export function createEditorModule({
           deleting: false,
         };
         row.classList.add("dragging");
+        setNativeDragFeedbackActive(true);
         event.dataTransfer?.setData(QUICK_TAG_DRAG_TYPE, String(state.quickTagDragIndex));
         event.dataTransfer?.setData("text/plain", String(state.quickTagDragIndex));
         if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
       });
       row.addEventListener("dragend", () => {
+        setNativeDragFeedbackActive(false);
         if (state.quickTagDragging?.type === "quick" && state.quickTagDragging.moved && !state.quickTagDragging.deleting) {
           persistQuickTags();
           renderQuickTags();
@@ -1073,11 +1082,13 @@ export function createEditorModule({
     button.addEventListener("dragstart", (event) => {
       state.globalTagDragging = segment;
       button.classList.add("dragging");
+      setNativeDragFeedbackActive(true);
       event.dataTransfer?.setData(GLOBAL_TAG_DRAG_TYPE, segment);
       event.dataTransfer?.setData("text/plain", segment);
       if (event.dataTransfer) event.dataTransfer.effectAllowed = "copy";
     });
     button.addEventListener("dragend", () => {
+      setNativeDragFeedbackActive(false);
       state.globalTagDragging = "";
       button.classList.remove("dragging");
       refs.captionEditor?.classList.remove("drag-over");

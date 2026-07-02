@@ -92,6 +92,365 @@ export function createBootstrapModule({
   syncCaptionDirty,
   restoreCaptionSettings,
 }) {
+  function enhanceTextareaResizers() {
+    const textareas = Array.from(document.querySelectorAll("textarea"));
+
+    const createHandle = (host, textarea) => {
+      const handle = document.createElement("button");
+      handle.type = "button";
+      handle.className = "textarea-resize-handle";
+      handle.tabIndex = -1;
+      handle.setAttribute("aria-hidden", "true");
+
+      handle.addEventListener("pointerdown", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+
+        const computed = getComputedStyle(textarea);
+        const minHeight = parseFloat(computed.minHeight) || textarea.getBoundingClientRect().height || 100;
+        const startHeight = textarea.getBoundingClientRect().height;
+        const startY = event.clientY;
+        const hostComputed = getComputedStyle(host);
+        const hostBorder =
+          (parseFloat(hostComputed.borderTopWidth) || 0) +
+          (parseFloat(hostComputed.borderBottomWidth) || 0);
+
+        textarea.focus({ preventScroll: true });
+        handle.setPointerCapture?.(event.pointerId);
+
+        const applyHeight = (nextHeight) => {
+          const resolvedHeight = Math.max(minHeight, Math.round(nextHeight));
+          textarea.style.height = `${resolvedHeight}px`;
+          if (host.classList.contains("caption-editor-wrap")) {
+            host.style.height = `${resolvedHeight + hostBorder}px`;
+          }
+        };
+
+        const onMove = (moveEvent) => {
+          applyHeight(startHeight + (moveEvent.clientY - startY));
+        };
+
+        const onUp = (upEvent) => {
+          handle.releasePointerCapture?.(upEvent.pointerId);
+          document.removeEventListener("pointermove", onMove);
+          document.removeEventListener("pointerup", onUp);
+        };
+
+        document.addEventListener("pointermove", onMove);
+        document.addEventListener("pointerup", onUp);
+      });
+
+      host.appendChild(handle);
+    };
+
+    textareas.forEach((textarea) => {
+      if (!textarea || textarea.dataset.resizeEnhanced === "true") return;
+      textarea.dataset.resizeEnhanced = "true";
+
+      let host = textarea.closest(".caption-editor-wrap");
+      if (host && host.contains(textarea)) {
+        host.classList.add("multiline-resize-host");
+      } else if (textarea.parentElement?.classList.contains("textarea-resize-shell")) {
+        host = textarea.parentElement;
+        host.classList.add("multiline-resize-host");
+      } else {
+        host = document.createElement("div");
+        host.className = "textarea-resize-shell multiline-resize-host";
+        textarea.parentNode?.insertBefore(host, textarea);
+        host.appendChild(textarea);
+      }
+
+      if (!Array.from(host.children).some((child) => child.classList?.contains("textarea-resize-handle"))) {
+        createHandle(host, textarea);
+      }
+    });
+  }
+
+  function enhanceFloatingScrollbars() {
+    const selector = [
+      ".utility-page-shell .utility-panel>.card",
+      ".caption-settings-shell>.card",
+      ".bottom-status-bar",
+      ".viewer-card",
+      ".edit-card-body",
+      ".item-list",
+      ".item-thumb-grid",
+      ".global-tag-list",
+      ".folder-browser-list",
+      ".custom-select-menu",
+      ".model-picker-menu",
+      ".model-picker-list",
+      ".project-grid",
+      ".workspace-browser-list",
+      ".image-preview-controls",
+    ].join(", ");
+    const trimmedSelector = [
+      ".utility-page-shell .utility-panel>.card",
+      ".caption-settings-shell>.card",
+    ].join(", ");
+
+    const hosts = new Set();
+    let rafId = 0;
+    const resizeObserver = "ResizeObserver" in window ? new ResizeObserver(() => schedule()) : null;
+
+    const setActive = (el, active) => {
+      if (!el?.__floatingScrollbar) return;
+      const { rails } = el.__floatingScrollbar;
+      const value = active ? "true" : "false";
+      el.dataset.fsbActive = value;
+      rails.vertical.dataset.fsbActive = value;
+      rails.horizontal.dataset.fsbActive = value;
+    };
+
+    const resolveActive = (el, canScrollY, canScrollX) => {
+      if (!canScrollY && !canScrollX) return false;
+      return Boolean(el.__floatingScrollbar?.dragging || el.__floatingScrollbar?.hovering || el.matches(":hover") || document.activeElement && el.contains(document.activeElement));
+    };
+
+    const shouldSuppressHost = (el) => {
+      if (!el) return true;
+      if (el.closest(".utility-page-shell")?.getAttribute("aria-hidden") === "true") return true;
+      if (el.closest(".caption-settings-shell") && !document.querySelector("#workbenchShell")?.classList.contains("caption-settings-open")) return true;
+      const rect = el.getBoundingClientRect();
+      if (rect.width <= 1 || rect.height <= 1) return true;
+      const computed = getComputedStyle(el);
+      return computed.display === "none" || computed.visibility === "hidden";
+    };
+
+    const updateThumbs = (el) => {
+      if (!el?.__floatingScrollbar) return;
+      const { thumbs, metrics } = el.__floatingScrollbar;
+      if (metrics?.vertical) {
+        const { maxTop, scrollRange } = metrics.vertical;
+        const top = scrollRange <= 0 ? 0 : Math.round(maxTop * el.scrollTop / scrollRange);
+        thumbs.vertical.style.transform = `translate3d(0, ${top}px, 0)`;
+      }
+      if (metrics?.horizontal) {
+        const { maxLeft, scrollRange } = metrics.horizontal;
+        const left = scrollRange <= 0 ? 0 : Math.round(maxLeft * el.scrollLeft / scrollRange);
+        thumbs.horizontal.style.transform = `translate3d(${left}px, 0, 0)`;
+      }
+    };
+
+    const beginThumbDrag = (el, event) => {
+      const thumb = event.target.closest(".floating-scrollbar-thumb");
+      if (!thumb || !el.__floatingScrollbar) return;
+      const orientation = thumb.parentElement?.dataset.orientation;
+      const metrics = el.__floatingScrollbar.metrics?.[orientation];
+      if (!orientation || !metrics) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const startPointer = orientation === "vertical" ? event.clientY : event.clientX;
+      const startScroll = orientation === "vertical" ? el.scrollTop : el.scrollLeft;
+      const scrollRange = Math.max(1, metrics.scrollRange);
+      const dragRange = Math.max(1, orientation === "vertical" ? metrics.maxTop : metrics.maxLeft);
+
+      el.__floatingScrollbar.dragging = true;
+      setActive(el, true);
+      thumb.setPointerCapture?.(event.pointerId);
+      const onMove = (moveEvent) => {
+        const currentPointer = orientation === "vertical" ? moveEvent.clientY : moveEvent.clientX;
+        const delta = currentPointer - startPointer;
+        const nextScroll = startScroll + (delta / dragRange) * scrollRange;
+        if (orientation === "vertical") {
+          el.scrollTop = nextScroll;
+        } else {
+          el.scrollLeft = nextScroll;
+        }
+        updateThumbs(el);
+      };
+      const onUp = (upEvent) => {
+        el.__floatingScrollbar.dragging = false;
+        thumb.releasePointerCapture?.(upEvent.pointerId);
+        document.removeEventListener("pointermove", onMove);
+        document.removeEventListener("pointerup", onUp);
+        schedule();
+      };
+      document.addEventListener("pointermove", onMove);
+      document.addEventListener("pointerup", onUp);
+    };
+
+    const ensureHost = (el) => {
+      if (!el) return el;
+      el.classList.add("floating-scrollbar-host");
+      if (hosts.has(el) && el.__floatingScrollbar?.rails?.vertical?.isConnected && el.__floatingScrollbar?.rails?.horizontal?.isConnected) return el;
+      hosts.add(el);
+      const rails = {
+        vertical: document.createElement("div"),
+        horizontal: document.createElement("div"),
+      };
+      rails.vertical.className = "floating-scrollbar-rail";
+      rails.vertical.dataset.orientation = "vertical";
+      rails.horizontal.className = "floating-scrollbar-rail";
+      rails.horizontal.dataset.orientation = "horizontal";
+      const thumbs = {
+        vertical: document.createElement("div"),
+        horizontal: document.createElement("div"),
+      };
+      thumbs.vertical.className = "floating-scrollbar-thumb";
+      thumbs.horizontal.className = "floating-scrollbar-thumb";
+      rails.vertical.appendChild(thumbs.vertical);
+      rails.horizontal.appendChild(thumbs.horizontal);
+      rails.vertical.setAttribute("aria-hidden", "true");
+      rails.horizontal.setAttribute("aria-hidden", "true");
+      thumbs.vertical.addEventListener("pointerdown", (event) => beginThumbDrag(el, event));
+      thumbs.horizontal.addEventListener("pointerdown", (event) => beginThumbDrag(el, event));
+      const keepActive = () => {
+        el.__floatingScrollbar.hovering = true;
+        setActive(el, true);
+      };
+      const releaseActive = () => {
+        el.__floatingScrollbar.hovering = false;
+        setActive(el, resolveActive(el, el.dataset.fsbVertical === "true", el.dataset.fsbHorizontal === "true"));
+      };
+      [rails.vertical, rails.horizontal, thumbs.vertical, thumbs.horizontal].forEach((node) => {
+        node.addEventListener("pointerenter", keepActive, { passive: true });
+        node.addEventListener("pointerleave", releaseActive, { passive: true });
+      });
+      document.body.append(rails.vertical, rails.horizontal);
+      el.__floatingScrollbar = { rails, thumbs, metrics: {} };
+      return el;
+    };
+
+    const syncHost = (el) => {
+      if (!el || !el.__floatingScrollbar) return;
+      if (!el.isConnected) {
+        el.__floatingScrollbar.rails.vertical.remove();
+        el.__floatingScrollbar.rails.horizontal.remove();
+        hosts.delete(el);
+        return;
+      }
+      const { rails, thumbs } = el.__floatingScrollbar;
+      if (shouldSuppressHost(el)) {
+        el.dataset.fsbVertical = "false";
+        el.dataset.fsbHorizontal = "false";
+        rails.vertical.hidden = true;
+        rails.horizontal.hidden = true;
+        el.__floatingScrollbar.metrics = {};
+        setActive(el, false);
+        return;
+      }
+      const viewH = el.clientHeight;
+      const viewW = el.clientWidth;
+      const scrollH = el.scrollHeight;
+      const scrollW = el.scrollWidth;
+      const canScrollY = scrollH > viewH + 1;
+      const canScrollX = scrollW > viewW + 1;
+      const rect = el.getBoundingClientRect();
+      const computed = getComputedStyle(el);
+      const zIndex = Number.parseInt(computed.zIndex, 10);
+      const railZ = Number.isFinite(zIndex) ? Math.min(199999, zIndex + 1) : 50000;
+      const borderTop = el.clientTop || 0;
+      const borderLeft = el.clientLeft || 0;
+      const shouldTrimToPanelRadius = el.matches(trimmedSelector);
+      const verticalTrim = shouldTrimToPanelRadius ? 32 : 2;
+      const horizontalTrim = shouldTrimToPanelRadius ? 32 : 2;
+
+      el.dataset.fsbVertical = canScrollY ? "true" : "false";
+      el.dataset.fsbHorizontal = canScrollX ? "true" : "false";
+      setActive(el, resolveActive(el, canScrollY, canScrollX));
+
+      rails.vertical.hidden = !canScrollY;
+      rails.horizontal.hidden = !canScrollX;
+
+      el.__floatingScrollbar.metrics = {};
+
+      if (canScrollY) {
+        const railWidth = 4;
+        const railInset = 2;
+        const railBottom = canScrollX ? 8 : railInset;
+        const trackTopTrim = verticalTrim;
+        const trackBottomTrim = canScrollX ? Math.max(verticalTrim, horizontalTrim + railWidth) : verticalTrim;
+        const trackHeight = Math.max(0, viewH - trackTopTrim - trackBottomTrim);
+        const thumbHeight = Math.max(36, Math.round(trackHeight * viewH / scrollH));
+        const maxTop = Math.max(0, trackHeight - thumbHeight);
+        rails.vertical.style.top = `${Math.round(rect.top + borderTop + trackTopTrim)}px`;
+        rails.vertical.style.left = `${Math.round(rect.left + borderLeft + viewW - railWidth - railInset)}px`;
+        rails.vertical.style.right = "auto";
+        rails.vertical.style.bottom = "auto";
+        rails.vertical.style.width = `${railWidth}px`;
+        rails.vertical.style.height = `${Math.round(trackHeight)}px`;
+        rails.vertical.style.zIndex = String(railZ);
+        thumbs.vertical.style.height = `${thumbHeight}px`;
+        thumbs.vertical.style.width = "100%";
+        el.__floatingScrollbar.metrics.vertical = {
+          maxTop,
+          scrollRange: Math.max(1, scrollH - viewH),
+        };
+      }
+
+      if (canScrollX) {
+        const railHeight = 4;
+        const railInset = 2;
+        const railRight = canScrollY ? 8 : railInset;
+        const trackLeftTrim = horizontalTrim;
+        const trackRightTrim = canScrollY ? Math.max(horizontalTrim, verticalTrim + railHeight) : horizontalTrim;
+        const trackWidth = Math.max(0, viewW - trackLeftTrim - trackRightTrim);
+        const thumbWidth = Math.max(36, Math.round(trackWidth * viewW / scrollW));
+        const maxLeft = Math.max(0, trackWidth - thumbWidth);
+        rails.horizontal.style.left = `${Math.round(rect.left + borderLeft + trackLeftTrim)}px`;
+        rails.horizontal.style.top = `${Math.round(rect.top + borderTop + viewH - railHeight - railInset)}px`;
+        rails.horizontal.style.right = "auto";
+        rails.horizontal.style.bottom = "auto";
+        rails.horizontal.style.width = `${Math.round(trackWidth)}px`;
+        rails.horizontal.style.height = `${railHeight}px`;
+        rails.horizontal.style.zIndex = String(railZ);
+        thumbs.horizontal.style.width = `${thumbWidth}px`;
+        thumbs.horizontal.style.height = "100%";
+        el.__floatingScrollbar.metrics.horizontal = {
+          maxLeft,
+          scrollRange: Math.max(1, scrollW - viewW),
+        };
+      }
+
+      updateThumbs(el);
+    };
+
+    const schedule = () => {
+      if (rafId) return;
+      rafId = window.requestAnimationFrame(() => {
+        rafId = 0;
+        hosts.forEach(syncHost);
+      });
+    };
+
+    const bindHost = (el) => {
+      ensureHost(el);
+      if (el.__floatingScrollbarBound) return;
+      el.__floatingScrollbarBound = true;
+      el.addEventListener("scroll", () => updateThumbs(el), { passive: true });
+      el.addEventListener("mouseenter", schedule, { passive: true });
+      el.addEventListener("mouseleave", schedule, { passive: true });
+      el.addEventListener("focusin", schedule);
+      el.addEventListener("focusout", schedule);
+      resizeObserver?.observe(el);
+    };
+
+    document.querySelectorAll(selector).forEach(bindHost);
+
+    const observer = new MutationObserver(() => {
+      document.querySelectorAll(selector).forEach(bindHost);
+      schedule();
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+
+    const stateObserver = new MutationObserver(schedule);
+    [
+      document.querySelector("#workbenchShell"),
+      document.querySelector("#utilityPageShell"),
+      document.querySelector(".caption-settings-shell"),
+    ].filter(Boolean).forEach((node) => {
+      stateObserver.observe(node, { attributes: true, attributeFilter: ["class", "aria-hidden", "hidden"] });
+    });
+    document.addEventListener("click", schedule, true);
+    document.addEventListener("scroll", (event) => {
+      if (!hosts.has(event.target)) schedule();
+    }, { capture: true, passive: true });
+    window.addEventListener("resize", schedule, { passive: true });
+    window.addEventListener("load", schedule, { once: true });
+    schedule();
+  }
+
   function enhanceSelectMenus() {
     const viewportPadding = 8;
     const menuGap = 6;
@@ -250,7 +609,7 @@ export function createBootstrapModule({
     refs.exportIncludeControls.checked = readStored(STORAGE_KEYS.exportIncludeControls, "true") !== "false";
     ensureExportIncludeControlsForActiveControls();
     refs.exportPreserveSubfolders.checked = readStored(STORAGE_KEYS.exportPreserveSubfolders, "false") === "true";
-    refs.viewerTargetPixels.value = readStored(STORAGE_KEYS.viewerTargetPixels, "4");
+    refs.viewerTargetPixels.value = normalizeViewerTargetPixelsValue(readStored(STORAGE_KEYS.viewerTargetPixels, "4"));
     refs.processProjectName.value = "";
     refs.processIncludeControls.checked = readStored(STORAGE_KEYS.processIncludeControls, "true") !== "false";
     refs.processLoadWorkspace.checked = readStored(STORAGE_KEYS.processLoadWorkspace, "true") !== "false";
@@ -259,7 +618,7 @@ export function createBootstrapModule({
     if (refs.swapResultDir) refs.swapResultDir.value = readStored(STORAGE_KEYS.swapResultDir, "");
     if (refs.swapSuffix) refs.swapSuffix.value = readStored(STORAGE_KEYS.swapSuffix, "_swap") || "_swap";
     state.quickTags = readQuickTags();
-    state.quickTagsCollapsed = readStored(STORAGE_KEYS.quickTagsCollapsed, "true") !== "false";
+    state.quickTagsCollapsed = readStored(STORAGE_KEYS.quickTagsCollapsed, "false") === "true";
     restoreCaptionSettings();
   }
 
@@ -268,6 +627,12 @@ export function createBootstrapModule({
     if (!refs.exportIncludeControls || !Number.isFinite(controlCount) || controlCount < 1) return;
     refs.exportIncludeControls.checked = true;
     saveStored(STORAGE_KEYS.exportIncludeControls, "true");
+  }
+
+  function normalizeViewerTargetPixelsValue(rawValue) {
+    const parsed = Number.parseFloat(rawValue);
+    if (!Number.isFinite(parsed)) return "4";
+    return String(Math.min(64, Math.max(1, Math.round(parsed))));
   }
 
   function bindSettingsPersistence() {
@@ -303,7 +668,10 @@ export function createBootstrapModule({
     refs.exportProcessImages.addEventListener("change", () => saveStored(STORAGE_KEYS.exportProcessImages, refs.exportProcessImages.checked ? "true" : "false"));
     refs.exportIncludeControls.addEventListener("change", () => saveStored(STORAGE_KEYS.exportIncludeControls, refs.exportIncludeControls.checked ? "true" : "false"));
     refs.exportPreserveSubfolders.addEventListener("change", () => saveStored(STORAGE_KEYS.exportPreserveSubfolders, refs.exportPreserveSubfolders.checked ? "true" : "false"));
-    refs.viewerTargetPixels.addEventListener("change", () => saveStored(STORAGE_KEYS.viewerTargetPixels, refs.viewerTargetPixels.value));
+    refs.viewerTargetPixels.addEventListener("change", () => {
+      refs.viewerTargetPixels.value = normalizeViewerTargetPixelsValue(refs.viewerTargetPixels.value);
+      saveStored(STORAGE_KEYS.viewerTargetPixels, refs.viewerTargetPixels.value);
+    });
     refs.processIncludeControls.addEventListener("change", () => saveStored(STORAGE_KEYS.processIncludeControls, refs.processIncludeControls.checked ? "true" : "false"));
     refs.processLoadWorkspace.addEventListener("change", () => saveStored(STORAGE_KEYS.processLoadWorkspace, refs.processLoadWorkspace.checked ? "true" : "false"));
     refs.processOnlyMismatched.addEventListener("change", () => saveStored(STORAGE_KEYS.processOnlyMismatched, refs.processOnlyMismatched.checked ? "true" : "false"));
@@ -332,15 +700,18 @@ export function createBootstrapModule({
         button.classList.toggle("active", isActive);
         button.setAttribute("aria-selected", String(isActive));
       });
-      document.querySelectorAll("[data-caption-backend-panel]").forEach((panel) => {
-        const isActive = panel.dataset.captionBackendPanel === backend;
-        panel.classList.toggle("active", isActive);
-        panel.hidden = !isActive;
+      document.querySelectorAll("[data-caption-backend-section]").forEach((section) => {
+        const isActive = section.dataset.captionBackendSection === backend;
+        section.classList.toggle("active", isActive);
+        section.hidden = !isActive;
       });
     }
 
     function setCaptionBackend(backend) {
-      if (refs.captionBackend) refs.captionBackend.value = backend;
+      if (refs.captionBackend) {
+        refs.captionBackend.value = backend;
+        refs.captionBackend.dispatchEvent(new Event("vds-select-sync"));
+      }
       saveStored(STORAGE_KEYS.captionBackend, backend);
       renderCaptionBackendTabs();
       setAiStatusLine(`当前标注引擎：${activeCaptionBackendLabel()}`);
@@ -459,6 +830,7 @@ export function createBootstrapModule({
   }
 
   function bindEvents() {
+    enhanceFloatingScrollbars();
     enhanceSelectMenus();
 
     function numericCssVar(name, fallback) {
@@ -605,7 +977,9 @@ export function createBootstrapModule({
       setUtilityPanel(button.dataset.panel);
     });
 
-    refs.closeUtilityBtn.addEventListener("click", closeUtilityPanel);
+    refs.closeUtilityBtn?.addEventListener("click", () => {
+      closeUtilityPanel();
+    });
 
     refs.workspaceBrowseBtn.addEventListener("click", () => {
       browseWorkspacePath().catch(showError);
@@ -681,7 +1055,6 @@ export function createBootstrapModule({
     refs.refreshListBtn?.addEventListener("click", () => runWithStatus("正在重扫本地数据...", () => rescanWorkspace()).catch(showError));
     refs.cleanupTmpBtn?.addEventListener("click", () => runWithStatus("正在清理回收项目...", () => cleanupTmpNow()).catch(showError));
     refs.openCaptionSettingsBtn?.addEventListener("click", () => toggleCaptionSettingsPanel());
-    refs.closeCaptionSettingsBtn?.addEventListener("click", () => toggleCaptionSettingsPanel(false));
 
     refs.toggleSplitListBtn?.addEventListener("click", () => {
       (async () => {
@@ -978,7 +1351,7 @@ export function createBootstrapModule({
       }
     });
 
-    refs.addTagBtn.addEventListener("click", () => {
+    refs.addTagBtn?.addEventListener("click", () => {
       const segments = splitSegmentInput(refs.newTagInput.value);
       if (!segments.length) return;
       appendSegmentsToCaption(segments);
@@ -1001,10 +1374,10 @@ export function createBootstrapModule({
       renderTags();
       scheduleCaptionAutosave?.();
     });
-    refs.newTagInput.addEventListener("keydown", (event) => {
+    refs.newTagInput?.addEventListener("keydown", (event) => {
       if (event.key === "Enter") {
         event.preventDefault();
-        refs.addTagBtn.click();
+        refs.addTagBtn?.click();
       }
     });
 
@@ -1066,6 +1439,7 @@ export function createBootstrapModule({
   }
 
   async function bootstrap() {
+    enhanceTextareaResizers();
     restorePersistedSettings();
     bindEvents();
     bindSettingsPersistence();
