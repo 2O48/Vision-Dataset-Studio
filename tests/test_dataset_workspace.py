@@ -207,6 +207,43 @@ class DatasetWorkspaceTextTests(unittest.TestCase):
             with Image.open(result_path / "sample.png") as image:
                 self.assertEqual(image.getpixel((0, 0)), (255, 0, 0))
 
+    def test_swap_item_images_exchanges_existing_result_slots(self):
+        workspace = DatasetWorkspace()
+        with tempfile.TemporaryDirectory() as result_dir:
+            result_path = Path(result_dir)
+            Image.new("RGB", (16, 16), (255, 0, 0)).save(result_path / "source.png")
+            Image.new("RGB", (16, 16), (0, 0, 255)).save(result_path / "target.png")
+
+            workspace.open_dirs(result_dir=str(result_path), control_count=1)
+            result = workspace.swap_item_images("source", "result", "target", "result")
+
+            self.assertEqual(result["source_item"]["paths"]["result"], str(result_path / "source.png"))
+            self.assertEqual(result["target_item"]["paths"]["result"], str(result_path / "target.png"))
+            with Image.open(result_path / "source.png") as image:
+                self.assertEqual(image.getpixel((0, 0)), (0, 0, 255))
+            with Image.open(result_path / "target.png") as image:
+                self.assertEqual(image.getpixel((0, 0)), (255, 0, 0))
+
+    def test_swap_item_images_preserves_content_suffix_across_roles(self):
+        workspace = DatasetWorkspace()
+        with tempfile.TemporaryDirectory() as control_dir, tempfile.TemporaryDirectory() as result_dir:
+            control_path = Path(control_dir)
+            result_path = Path(result_dir)
+            Image.new("RGB", (16, 16), (255, 0, 0)).save(control_path / "source.png")
+            Image.new("RGB", (16, 16), (0, 0, 255)).save(result_path / "target.bmp")
+
+            workspace.open_dirs(control1_dir=str(control_path), result_dir=str(result_path), control_count=1)
+            result = workspace.swap_item_images("source", "control1", "target", "result")
+
+            self.assertEqual(result["source_item"]["paths"]["control1"], str(control_path / "source.bmp"))
+            self.assertEqual(result["target_item"]["paths"]["result"], str(result_path / "target.png"))
+            self.assertFalse((control_path / "source.png").exists())
+            self.assertFalse((result_path / "target.bmp").exists())
+            with Image.open(control_path / "source.bmp") as image:
+                self.assertEqual(image.getpixel((0, 0)), (0, 0, 255))
+            with Image.open(result_path / "target.png") as image:
+                self.assertEqual(image.getpixel((0, 0)), (255, 0, 0))
+
     def test_assign_control_image_creates_missing_control_dir_from_result_name(self):
         workspace = DatasetWorkspace()
         with tempfile.TemporaryDirectory() as root_dir:

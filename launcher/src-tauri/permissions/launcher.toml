@@ -1,0 +1,18 @@
+[[permission]]
+identifier = "allow-launcher-commands"
+description = "Allows the launcher webviews to control windows and open the built-in terminal."
+commands.allow = [
+  "launcher_minimize",
+  "launcher_maximize",
+  "launcher_close",
+  "launcher_drag",
+  "launcher_open_terminal",
+  "launcher_terminal_logs",
+  "launcher_log_status",
+  "launcher_project_root",
+  "launcher_set_project_root",
+  "launcher_pick_project_root",
+  "launcher_start_backend",
+  "launcher_set_terminal_theme",
+  "launcher_terminal_theme",
+]

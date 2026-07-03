@@ -48,3 +48,13 @@ prompt_templates.json
 
 .history/
 .codex_tmp/
+
+# Launcher build artifacts
+launcher/node_modules/
+launcher/src-tauri/target/
+launcher/src-tauri/target-*/
+launcher/src-tauri/Cargo.lock
+launcher/src-tauri/gen/
+launcher/src-tauri/.cargo/
+launcher/src-tauri/*.pdb
+launcher/dist/

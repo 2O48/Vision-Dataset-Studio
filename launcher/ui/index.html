@@ -1,0 +1,442 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Vision Dataset Studio</title>
+    <link rel="icon" type="image/png" href="vds-logo.png">
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+        background: transparent;
+        color: #eef3f7;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        width: 100%;
+        min-width: 100%;
+        min-height: 100%;
+        margin: 0;
+        overflow: hidden;
+        background: transparent;
+      }
+
+      body {
+        min-height: 100vh;
+        display: grid;
+        place-items: stretch;
+        -webkit-user-select: none;
+        user-select: none;
+      }
+
+      button {
+        font: inherit;
+      }
+
+      .shell {
+        position: relative;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        overflow: hidden;
+        background: #37383c;
+        color: #eef3f7;
+      }
+
+      .titlebar {
+        z-index: 2;
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 12px;
+        height: 44px;
+        padding: 8px 10px 8px 18px;
+        color: rgba(238, 243, 247, 0.54);
+      }
+
+      .brand {
+        display: none;
+        min-width: 0;
+        align-items: center;
+        gap: 10px;
+        pointer-events: none;
+      }
+
+      .mark {
+        width: 16px;
+        height: 16px;
+        border-radius: 5px;
+        background: rgba(175, 184, 200, 0.22);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14);
+      }
+
+      .brand span {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 13px;
+        font-weight: 600;
+        letter-spacing: 0;
+      }
+
+      .window-controls {
+        display: grid;
+        grid-template-columns: repeat(3, 32px);
+        height: 32px;
+        flex: 0 0 auto;
+        color: rgba(238, 243, 247, 0.48);
+      }
+
+      .window-controls button {
+        width: 32px;
+        height: 32px;
+        display: grid;
+        place-items: center;
+        margin: 0;
+        border: 0;
+        border-radius: 999px;
+        padding: 0;
+        background: transparent;
+        color: inherit;
+      }
+
+      .window-controls button:hover {
+        background: rgba(238, 243, 247, 0.08);
+        color: #eef3f7;
+      }
+
+      .window-controls button[data-action="close"]:hover {
+        background: #d93025;
+        color: #ffffff;
+      }
+
+      .window-controls svg {
+        width: 18px;
+        height: 18px;
+        display: block;
+        fill: currentColor;
+        pointer-events: none;
+      }
+
+      .content {
+        position: relative;
+        z-index: 1;
+        display: grid;
+        justify-items: center;
+        gap: 24px;
+        padding: 0 min(8vw, 72px);
+        text-align: center;
+      }
+
+      .logo {
+        width: 100px;
+        height: 100px;
+        display: block;
+        border-radius: 18px;
+        filter: drop-shadow(0 18px 28px rgba(19, 22, 27, 0.22));
+      }
+
+      main {
+        width: min(560px, calc(100vw - 56px));
+      }
+
+      .setup-panel {
+        width: min(560px, calc(100vw - 48px));
+        display: none;
+        gap: 14px;
+        margin-top: 8px;
+        text-align: left;
+      }
+
+      .shell.needs-root .setup-panel {
+        display: grid;
+      }
+
+      .shell.needs-root h1 {
+        animation: none;
+        color: #dfe5ef;
+        background: none;
+      }
+
+      .setup-copy {
+        margin: 0;
+        color: rgba(238, 243, 247, 0.68);
+        font-size: 13px;
+        line-height: 20px;
+      }
+
+      .setup-row {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 8px;
+      }
+
+      .setup-input {
+        min-width: 0;
+        height: 38px;
+        border: 1px solid rgba(238, 243, 247, 0.14);
+        border-radius: 8px;
+        padding: 0 12px;
+        background: rgba(238, 243, 247, 0.08);
+        color: #eef3f7;
+        font: inherit;
+        user-select: text;
+        -webkit-user-select: text;
+      }
+
+      .setup-actions {
+        display: flex;
+        gap: 8px;
+        justify-content: flex-end;
+      }
+
+      .setup-button {
+        height: 38px;
+        border: 1px solid rgba(238, 243, 247, 0.14);
+        border-radius: 8px;
+        padding: 0 14px;
+        background: rgba(238, 243, 247, 0.1);
+        color: #eef3f7;
+      }
+
+      .setup-button.primary {
+        background: #eef3f7;
+        color: #37383c;
+      }
+
+      .setup-error {
+        min-height: 18px;
+        color: #ffb4ab;
+        font-size: 12px;
+        line-height: 18px;
+      }
+
+      h1 {
+        margin: 0;
+        font-family: "HarmonyOS Sans SC", "HarmonyOS Sans", "HarmonyOS_Sans_SC", "Segoe UI", system-ui, sans-serif;
+        font-size: 32px;
+        line-height: 36px;
+        font-weight: 700;
+        letter-spacing: 0;
+        color: #ffffff;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0;
+        white-space: nowrap;
+      }
+
+      .title-char {
+        color: #ffffff;
+        transition: color 180ms ease;
+      }
+
+      .title-char.is-soft {
+        color: #b8bec8;
+      }
+
+      .title-char.space {
+        width: 0.34em;
+      }
+
+      @media (max-width: 720px) {
+        .content {
+          padding-inline: 24px;
+        }
+
+        .logo {
+          width: 80px;
+          height: 80px;
+          border-radius: 14px;
+        }
+
+        h1 {
+          font-size: 24px;
+          line-height: 30px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell" id="drag-surface">
+      <header class="titlebar" id="drag-titlebar">
+        <div class="brand" aria-hidden="true">
+          <span class="mark"></span>
+          <span>Vision Dataset Studio</span>
+        </div>
+        <div class="window-controls" id="window-controls">
+          <button type="button" data-action="minimize" aria-label="最小化" title="最小化">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" aria-hidden="true"><rect width="256" height="256" fill="none"/><path d="M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm40,112H88a8,8,0,0,1,0-16h80a8,8,0,0,1,0,16Z"/></svg>
+          </button>
+          <button type="button" data-action="maximize" aria-label="最大化/还原" title="最大化/还原">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" aria-hidden="true"><rect width="256" height="256" fill="none"/><path d="M128,24A104,104,0,1,0,232,128,104.13,104.13,0,0,0,128,24Zm40,112H136v32a8,8,0,0,1-16,0V136H88a8,8,0,0,1,0-16h32V88a8,8,0,0,1,16,0v32h32a8,8,0,0,1,0,16Z"/></svg>
+          </button>
+          <button type="button" data-action="close" aria-label="关闭" title="关闭">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" aria-hidden="true"><rect width="256" height="256" fill="none"/><path d="M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm37.66,130.34a8,8,0,0,1-11.32,11.32L128,139.31l-26.34,26.35a8,8,0,0,1-11.32-11.32L116.69,128,90.34,101.66a8,8,0,0,1,11.32-11.32L128,116.69l26.34-26.35a8,8,0,0,1,11.32,11.32L139.31,128Z"/></svg>
+          </button>
+        </div>
+      </header>
+      <section class="content">
+        <img class="logo" src="vds-logo.png" alt="">
+        <main>
+          <h1 id="launcher-title">VISION DATASET STUDIO</h1>
+        </main>
+        <section class="setup-panel" aria-label="设置项目路径">
+          <p class="setup-copy" id="setup-copy">请选择 Vision Dataset Studio 项目根目录。该目录需要包含 web_server.py、frontend 和 scripts。</p>
+          <div class="setup-row">
+            <input class="setup-input" id="project-root-input" placeholder="例如 C:\Users\win\Documents\GitHub\LoRA-Dataset-Edit">
+            <button class="setup-button" id="project-root-browse" type="button">浏览</button>
+          </div>
+          <div class="setup-actions">
+            <button class="setup-button primary" id="project-root-save" type="button">保存并启动</button>
+          </div>
+          <div class="setup-error" id="project-root-error"></div>
+        </section>
+      </section>
+    </div>
+    <script>
+      (function () {
+        function internalsInvoke(command, args) {
+          const internals = window.__TAURI_INTERNALS__;
+          if (!internals || typeof internals.invoke !== "function") {
+            return Promise.reject(new Error("Tauri internals unavailable"));
+          }
+          return internals.invoke(command, args);
+        }
+
+        function currentWindowLabel() {
+          return window.__TAURI_INTERNALS__ &&
+            window.__TAURI_INTERNALS__.metadata &&
+            window.__TAURI_INTERNALS__.metadata.currentWindow &&
+            window.__TAURI_INTERNALS__.metadata.currentWindow.label;
+        }
+
+        function tauriInvoke(command, args) {
+          const api = window.__TAURI__ && window.__TAURI__.core;
+          if (!api || typeof api.invoke !== "function") return Promise.reject(new Error("Tauri invoke unavailable"));
+          return api.invoke(command, args);
+        }
+
+        function launcherInvoke(command, args) {
+          return tauriInvoke(command, args).catch(function () {
+            return internalsInvoke(command, args);
+          });
+        }
+
+        function initTitleSweep() {
+          const title = document.getElementById("launcher-title");
+          if (!title) return;
+          const rawText = title.textContent || "";
+          const chars = [];
+          title.textContent = "";
+          for (const char of rawText) {
+            const span = document.createElement("span");
+            span.className = char === " " ? "title-char space" : "title-char";
+            span.textContent = char === " " ? "\u00A0" : char;
+            title.appendChild(span);
+            if (char !== " ") chars.push(span);
+          }
+          if (!chars.length) return;
+          const windowSize = Math.min(5, chars.length);
+          let offset = 0;
+          const paint = () => {
+            chars.forEach((node, index) => {
+              const relative = (index - offset + chars.length) % chars.length;
+              node.classList.toggle("is-soft", relative < windowSize);
+            });
+          };
+          paint();
+          window.setInterval(() => {
+            offset = (offset + 1) % chars.length;
+            paint();
+          }, 120);
+        }
+
+        async function control(action) {
+          const label = currentWindowLabel();
+          try {
+            if (action === "minimize") await internalsInvoke("plugin:window|minimize", { label });
+            if (action === "close") await internalsInvoke("plugin:window|close", { label });
+            if (action === "drag") await internalsInvoke("plugin:window|start_dragging");
+            if (action === "maximize") await internalsInvoke("plugin:window|internal_toggle_maximize");
+            return;
+          } catch (_) {
+            try {
+              await tauriInvoke("launcher_" + action);
+            } catch (_) {}
+          }
+        }
+
+        initTitleSweep();
+
+        function isInteractive(target) {
+          return Boolean(target.closest("button, input, select, textarea, label, a, summary, [role='button'], [tabindex]"));
+        }
+
+        function bindDragRegion(node) {
+          node.addEventListener("mousedown", function (event) {
+            if (event.button !== 0 || isInteractive(event.target)) return;
+            event.preventDefault();
+            if (event.detail === 2) control("maximize");
+            else control("drag");
+          });
+        }
+
+        const shell = document.getElementById("drag-surface");
+        const rootInput = document.getElementById("project-root-input");
+        const rootError = document.getElementById("project-root-error");
+        const rootCopy = document.getElementById("setup-copy");
+
+        window.__vdsShowProjectRootSetup = function (message) {
+          shell.classList.add("needs-root");
+          rootCopy.textContent = message || "请选择 Vision Dataset Studio 项目根目录。该目录需要包含 web_server.py、frontend 和 scripts。";
+          launcherInvoke("launcher_project_root").then(function (path) {
+            if (path) rootInput.value = path;
+          }).catch(function () {});
+          window.setTimeout(function () {
+            rootInput.focus();
+          }, 30);
+        };
+
+        document.getElementById("project-root-browse").addEventListener("click", function () {
+          rootError.textContent = "";
+          launcherInvoke("launcher_pick_project_root").then(function (path) {
+            rootInput.value = path || rootInput.value;
+          }).catch(function (error) {
+            rootError.textContent = error && error.message ? error.message : String(error || "选择目录失败");
+          });
+        });
+
+        document.getElementById("project-root-save").addEventListener("click", function () {
+          rootError.textContent = "";
+          const path = rootInput.value.trim();
+          launcherInvoke("launcher_set_project_root", { path }).then(function () {
+            shell.classList.remove("needs-root");
+            return launcherInvoke("launcher_start_backend");
+          }).catch(function (error) {
+            rootError.textContent = error && error.message ? error.message : String(error || "保存路径失败");
+          });
+        });
+
+        document.getElementById("window-controls").addEventListener("click", function (event) {
+          const button = event.target.closest("button[data-action]");
+          if (!button) return;
+          control(button.getAttribute("data-action"));
+        });
+
+        bindDragRegion(document.getElementById("drag-titlebar"));
+        bindDragRegion(document.getElementById("drag-surface"));
+      })();
+    </script>
+  </body>
+</html>

@@ -900,6 +900,19 @@ class DatasetWorkspace:
         self._image_sizes[cache_key] = size
         return size
 
+    def _image_version(self, role: str, name: str) -> str:
+        path = self.files.get(role, {}).get(name)
+        if not path or not path.exists():
+            return ""
+        try:
+            stat = path.stat()
+        except OSError:
+            return ""
+        return f"{stat.st_mtime_ns}-{stat.st_size}"
+
+    def _item_image_versions(self, name: str) -> dict[str, str]:
+        return {role: version for role in IMAGE_ROLES if (version := self._image_version(role, name))}
+
     def _refresh_item_resolution_flag(self, name: str):
         if not self._resolution_index_ready:
             return
@@ -1066,6 +1079,7 @@ class DatasetWorkspace:
             "flags": {
                 "resolution_mismatch": name in self._resolution_mismatch,
             },
+            "image_versions": self._item_image_versions(name),
         }
         matches = self._item_search_matches(name, search_query, search_mode=search_mode, match_mode=match_mode)
         if matches:
@@ -1136,6 +1150,7 @@ class DatasetWorkspace:
             "segments": segments,
             "text": text,
             "resolution": resolution,
+            "image_versions": self._item_image_versions(name),
             "flags": {
                 "resolution_mismatch": item_resolution_mismatch,
             },
@@ -1602,6 +1617,61 @@ class DatasetWorkspace:
                 "workspace": self.get_workspace_summary(),
             }
 
+    def _swap_existing_image_paths(self, source_path: Path, target_path: Path) -> tuple[Path, Path]:
+        if not source_path.exists():
+            raise FileNotFoundError(f"Source image does not exist: {source_path}")
+        if not target_path.exists():
+            raise FileNotFoundError(f"Target image does not exist: {target_path}")
+        if source_path.resolve() == target_path.resolve():
+            raise ValueError("Source and target roles point to the same file.")
+
+        next_source_path = source_path.with_suffix(target_path.suffix)
+        next_target_path = target_path.with_suffix(source_path.suffix)
+        occupied = {source_path.resolve(), target_path.resolve()}
+        for path in {next_source_path, next_target_path}:
+            if path.exists() and path.resolve() not in occupied:
+                raise FileExistsError(f"Target file already exists: {path}")
+
+        temp_path = source_path.with_name(f".vds_role_swap_{uuid.uuid4().hex}{source_path.suffix}")
+        moved: list[tuple[Path, Path]] = []
+        try:
+            source_path.rename(temp_path)
+            moved.append((source_path, temp_path))
+            if target_path != next_source_path:
+                next_source_path.parent.mkdir(parents=True, exist_ok=True)
+                target_path.rename(next_source_path)
+                moved.append((target_path, next_source_path))
+            next_target_path.parent.mkdir(parents=True, exist_ok=True)
+            temp_path.rename(next_target_path)
+            moved.append((temp_path, next_target_path))
+        except Exception:
+            for original, current in reversed(moved):
+                try:
+                    if current.exists() and not original.exists():
+                        original.parent.mkdir(parents=True, exist_ok=True)
+                        current.rename(original)
+                except Exception:
+                    pass
+            raise
+        return next_source_path, next_target_path
+
+    def _touch_image_versions(self, *paths: Path):
+        for path in paths:
+            try:
+                if path.exists():
+                    path.touch()
+            except OSError:
+                pass
+
+    def _invalidate_image_state(self, *names: str):
+        dirty_names = {name for name in names if name}
+        for key in list(self._image_sizes.keys()):
+            if key[1] in dirty_names:
+                self._image_sizes.pop(key, None)
+        for name in dirty_names:
+            self._resolution_mismatch.discard(name)
+        self._resolution_index_ready = False
+
     def swap_item_roles(self, name: str, source_role: str, target_role: str) -> dict:
         with self._lock:
             if name not in self.file_names:
@@ -1624,45 +1694,13 @@ class DatasetWorkspace:
                 raise FileNotFoundError(f"Source role image does not exist: {source_role}")
             if not target_path or not target_path.exists():
                 raise FileNotFoundError(f"Target role image does not exist: {target_role}")
-            if source_path == target_path:
-                raise ValueError("Source and target roles point to the same file.")
 
-            next_source_path = source_path.with_suffix(target_path.suffix)
-            next_target_path = target_path.with_suffix(source_path.suffix)
-            occupied = {source_path, target_path}
-            for path in {next_source_path, next_target_path}:
-                if path not in occupied and path.exists():
-                    raise FileExistsError(f"Target file already exists: {path}")
-
-            temp_path = source_path.with_name(f".vds_role_swap_{uuid.uuid4().hex}{source_path.suffix}")
-            moved: list[tuple[Path, Path]] = []
-            try:
-                source_path.rename(temp_path)
-                moved.append((source_path, temp_path))
-                if target_path != next_source_path:
-                    next_source_path.parent.mkdir(parents=True, exist_ok=True)
-                    target_path.rename(next_source_path)
-                    moved.append((target_path, next_source_path))
-                next_target_path.parent.mkdir(parents=True, exist_ok=True)
-                temp_path.rename(next_target_path)
-                moved.append((temp_path, next_target_path))
-            except Exception:
-                for original, current in reversed(moved):
-                    try:
-                        if current.exists() and not original.exists():
-                            original.parent.mkdir(parents=True, exist_ok=True)
-                            current.rename(original)
-                    except Exception:
-                        pass
-                raise
+            next_source_path, next_target_path = self._swap_existing_image_paths(source_path, target_path)
 
             self.files[source_role][name] = next_source_path
             self.files[target_role][name] = next_target_path
-            for key in list(self._image_sizes.keys()):
-                if key[1] == name:
-                    self._image_sizes.pop(key, None)
-            self._resolution_mismatch.discard(name)
-            self._resolution_index_ready = False
+            self._touch_image_versions(next_source_path, next_target_path)
+            self._invalidate_image_state(name)
             self._save_workspace_state()
             self._ensure_resolution_index()
             return {
@@ -1674,6 +1712,60 @@ class DatasetWorkspace:
                     {"role": target_role, "path": str(next_target_path)},
                 ],
                 "item": self._serialize_item(name),
+                "workspace": self.get_workspace_summary(),
+            }
+
+    def swap_item_images(self, source_name: str, source_role: str, target_name: str, target_role: str) -> dict:
+        with self._lock:
+            source_name = str(source_name or "").strip()
+            target_name = str(target_name or "").strip()
+            source_role = str(source_role or "").strip()
+            target_role = str(target_role or "").strip()
+            self._validate_role_replace_target(source_name, source_role, allow_replace=True)
+            self._validate_role_replace_target(target_name, target_role, allow_replace=True)
+            if source_name == target_name and source_role == target_role:
+                item = self._serialize_item(source_name)
+                return {
+                    "source_name": source_name,
+                    "source_role": source_role,
+                    "target_name": target_name,
+                    "target_role": target_role,
+                    "swapped": [],
+                    "source_item": item,
+                    "target_item": item,
+                    "item": item,
+                    "workspace": self.get_workspace_summary(),
+                }
+
+            source_path = self.files[source_role].get(source_name)
+            target_path = self.files[target_role].get(target_name)
+            if not source_path or not source_path.exists():
+                raise FileNotFoundError(f"Source role image does not exist: {source_role}")
+            if not target_path or not target_path.exists():
+                raise FileNotFoundError(f"Target role image does not exist: {target_role}")
+
+            next_source_path, next_target_path = self._swap_existing_image_paths(source_path, target_path)
+
+            self.files[source_role][source_name] = next_source_path
+            self.files[target_role][target_name] = next_target_path
+            self._touch_image_versions(next_source_path, next_target_path)
+            self._invalidate_image_state(source_name, target_name)
+            self._save_workspace_state()
+            self._ensure_resolution_index()
+            source_item = self._serialize_item(source_name)
+            target_item = source_item if source_name == target_name else self._serialize_item(target_name)
+            return {
+                "source_name": source_name,
+                "source_role": source_role,
+                "target_name": target_name,
+                "target_role": target_role,
+                "swapped": [
+                    {"name": source_name, "role": source_role, "path": str(next_source_path)},
+                    {"name": target_name, "role": target_role, "path": str(next_target_path)},
+                ],
+                "source_item": source_item,
+                "target_item": target_item,
+                "item": target_item,
                 "workspace": self.get_workspace_summary(),
             }
 
@@ -2077,7 +2169,7 @@ class DatasetWorkspace:
                 return target_path
             index += 1
 
-    def _reference_raw_name_for_control_drop(self, target_name: str) -> str:
+    def _reference_raw_name_for_role_drop(self, target_name: str) -> str:
         for role in ("result", "control1", "control2", "control3"):
             root = self.dirs.get(role)
             path = self.files.get(role, {}).get(target_name)
@@ -2085,9 +2177,9 @@ class DatasetWorkspace:
                 return self._relative_stem(root, path)
         return target_name
 
-    def _next_control_drop_path(self, target_name: str, target_role: str, suffix: str) -> Path:
-        target_dir = self._control_dir_for_role(target_role)
-        reference_raw_name = self._reference_raw_name_for_control_drop(target_name)
+    def _next_target_role_drop_path(self, target_name: str, target_role: str, suffix: str) -> Path:
+        target_dir = self._result_dir_for_drop() if target_role == "result" else self._control_dir_for_role(target_role)
+        reference_raw_name = self._reference_raw_name_for_role_drop(target_name)
         index = 1
         while True:
             target_raw_name = reference_raw_name if index <= 1 else self._append_name_suffix(reference_raw_name, "", index)
@@ -2096,18 +2188,19 @@ class DatasetWorkspace:
                 return target_path
             index += 1
 
-    def _validate_control_drop_target(self, target_name: str, target_role: str, allow_replace: bool = True):
-        if target_role not in CONTROL_ROLES:
-            raise ValueError("Target role must be a control image role.")
-        role_index = CONTROL_ROLES.index(target_role) + 1
-        if self.control_count < role_index:
-            raise ValueError(f"{target_role} is not enabled in the current workspace.")
+    def _validate_role_replace_target(self, target_name: str, target_role: str, allow_replace: bool = True):
+        if target_role not in IMAGE_ROLES:
+            raise ValueError("Target role must be an image role.")
+        if target_role in CONTROL_ROLES:
+            role_index = CONTROL_ROLES.index(target_role) + 1
+            if self.control_count < role_index:
+                raise ValueError(f"{target_role} is not enabled in the current workspace.")
         if target_name not in self.file_names:
             raise KeyError(target_name)
         if not allow_replace and target_name in self.files[target_role]:
             raise ValueError(f"{target_role} already exists for {target_name}.")
 
-    def _control_drop_target_path(self, target_name: str, target_role: str, suffix: str) -> tuple[Path, Path | None]:
+    def _role_replace_target_path(self, target_name: str, target_role: str, suffix: str) -> tuple[Path, Path | None]:
         existing_path = self.files[target_role].get(target_name)
         if existing_path and existing_path.exists():
             suffix = suffix.lower()
@@ -2115,9 +2208,9 @@ class DatasetWorkspace:
             if target_path != existing_path and target_path.exists():
                 raise FileExistsError(f"Target file already exists: {target_path}")
             return target_path, existing_path
-        return self._next_control_drop_path(target_name, target_role, suffix), None
+        return self._next_target_role_drop_path(target_name, target_role, suffix), None
 
-    def _apply_control_drop_result(self, target_name: str, target_role: str, target_path: Path):
+    def _apply_role_replace_result(self, target_name: str, target_role: str, target_path: Path):
         self.files[target_role][target_name] = target_path
         self.workspace_key = self._compute_workspace_key()
         self._refresh_item_resolution_flag(target_name)
@@ -2132,23 +2225,28 @@ class DatasetWorkspace:
             source_role = str(source_role or "").strip()
             if source_name not in self.file_names:
                 raise KeyError(source_name)
-            self._validate_control_drop_target(target_name, target_role, allow_replace=True)
+            self._validate_role_replace_target(target_name, target_role, allow_replace=True)
 
             source_path, actual_source_role = self._item_image_path_for_preferred_role(source_name, source_role)
-            target_path, replaced_path = self._control_drop_target_path(target_name, target_role, source_path.suffix)
+            target_path, replaced_path = self._role_replace_target_path(target_name, target_role, source_path.suffix)
             target_path.parent.mkdir(parents=True, exist_ok=True)
             if source_path.resolve() != target_path.resolve():
                 shutil.copy2(source_path, target_path)
                 if replaced_path and replaced_path != target_path and replaced_path.exists():
                     replaced_path.unlink()
+            target_path.touch()
+            for key in list(self._image_sizes.keys()):
+                if key[1] == target_name and key[0] == target_role:
+                    self._image_sizes.pop(key, None)
 
-            summary = self._apply_control_drop_result(target_name, target_role, target_path)
+            summary = self._apply_role_replace_result(target_name, target_role, target_path)
             return {
                 "source_name": source_name,
                 "source_role": actual_source_role,
                 "requested_source_role": source_role,
                 "target_name": target_name,
                 "target_role": target_role,
+                "item": self._serialize_item(target_name),
                 "copied": {"from": str(source_path), "to": str(target_path)},
                 "replaced": str(replaced_path) if replaced_path else "",
                 "workspace": summary,
@@ -2162,7 +2260,7 @@ class DatasetWorkspace:
             suffix = _infer_image_suffix(filename, mime_type)
             if suffix not in IMAGE_EXTS:
                 raise ValueError("Dropped file must be an image.")
-            self._validate_control_drop_target(target_name, target_role, allow_replace=True)
+            self._validate_role_replace_target(target_name, target_role, allow_replace=True)
             raw_data = str(image_data or "")
             if "," in raw_data and raw_data.split(",", 1)[0].lower().startswith("data:"):
                 raw_data = raw_data.split(",", 1)[1]
@@ -2173,16 +2271,21 @@ class DatasetWorkspace:
             if not payload:
                 raise ValueError("Dropped image is empty.")
 
-            target_path, replaced_path = self._control_drop_target_path(target_name, target_role, suffix)
+            target_path, replaced_path = self._role_replace_target_path(target_name, target_role, suffix)
             target_path.parent.mkdir(parents=True, exist_ok=True)
             target_path.write_bytes(payload)
             if replaced_path and replaced_path != target_path and replaced_path.exists():
                 replaced_path.unlink()
+            target_path.touch()
+            for key in list(self._image_sizes.keys()):
+                if key[1] == target_name and key[0] == target_role:
+                    self._image_sizes.pop(key, None)
 
-            summary = self._apply_control_drop_result(target_name, target_role, target_path)
+            summary = self._apply_role_replace_result(target_name, target_role, target_path)
             return {
                 "target_name": target_name,
                 "target_role": target_role,
+                "item": self._serialize_item(target_name),
                 "saved": {"filename": filename, "path": str(target_path)},
                 "replaced": str(replaced_path) if replaced_path else "",
                 "workspace": summary,

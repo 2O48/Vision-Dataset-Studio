@@ -12,6 +12,7 @@ import {
   restoreSelectValue,
   apiGet,
   apiPost,
+  resolveAssetUrl,
   splitSegmentInput,
   parseSegments,
 } from "./frontend/web_shared.js";
@@ -122,6 +123,7 @@ let flushCaptionAutosave = async () => true;
 const wallpaperImageCache = new Map();
 let bottomStatusContrastRaf = 0;
 const slidingToggleGroups = new Set();
+let slidingToggleRaf = 0;
 
 const refs = {
   workbenchShell: document.querySelector("#workbenchShell"),
@@ -601,18 +603,32 @@ function updateSlidingToggleIndicator(group) {
   indicator.style.height = `${Math.round(buttonRect.height)}px`;
 }
 
+function scheduleSlidingToggleIndicators(root = document) {
+  if (slidingToggleRaf) return;
+  slidingToggleRaf = window.requestAnimationFrame(() => {
+    slidingToggleRaf = 0;
+    syncSlidingToggleIndicators(root);
+  });
+}
+
 function registerSlidingToggleGroup(group) {
   if (!group || slidingToggleGroups.has(group)) return;
   group.classList.add("sliding-toggle-host");
   slidingToggleGroups.add(group);
   updateSlidingToggleIndicator(group);
-  const observer = new MutationObserver(() => updateSlidingToggleIndicator(group));
+  const observer = new MutationObserver(() => scheduleSlidingToggleIndicators());
   observer.observe(group, {
     subtree: true,
     attributes: true,
     attributeFilter: ["class", "aria-pressed", "aria-selected", "hidden"],
   });
   group.__slidingToggleObserver = observer;
+  if ("ResizeObserver" in window) {
+    const resizeObserver = new ResizeObserver(() => scheduleSlidingToggleIndicators());
+    resizeObserver.observe(group);
+    slidingToggleButtons(group).forEach((button) => resizeObserver.observe(button));
+    group.__slidingToggleResizeObserver = resizeObserver;
+  }
 }
 
 function syncSlidingToggleIndicators(root = document) {
@@ -669,7 +685,7 @@ function renderWallpaper() {
   if (wallpaper === "none") {
     document.documentElement.style.removeProperty("--app-wallpaper-image");
   } else {
-    document.documentElement.style.setProperty("--app-wallpaper-image", `url("/assets/wallpapers/${wallpaper}")`);
+    document.documentElement.style.setProperty("--app-wallpaper-image", `url("${resolveAssetUrl(`wallpapers/${wallpaper}`)}")`);
   }
   wallpaperOptions().forEach((button) => {
     const isSelected = button.dataset.wallpaper === wallpaper;
@@ -771,7 +787,7 @@ async function sampleBottomStatusBackgroundColor() {
 
   const wallpaper = normalizeWallpaper(state.wallpaper);
   if (!wallpaper || wallpaper === "none") return sampleSolidBackgroundColor();
-  const image = await loadWallpaperImage(`/assets/wallpapers/${wallpaper}`);
+  const image = await loadWallpaperImage(resolveAssetUrl(`wallpapers/${wallpaper}`));
   if (!image?.naturalWidth || !image?.naturalHeight) return sampleSolidBackgroundColor();
 
   const footerRect = footer.getBoundingClientRect();
@@ -851,7 +867,17 @@ document.addEventListener("click", (event) => {
 window.addEventListener("resize", () => {
   if (refs.wallpaperSwitcher?.classList.contains("open")) updateWallpaperMenuPosition();
   scheduleBottomStatusContrastUpdate();
-  syncSlidingToggleIndicators();
+  scheduleSlidingToggleIndicators();
+});
+
+refs.workbenchShell?.addEventListener("transitionend", (event) => {
+  if (["width", "opacity", "transform"].includes(event.propertyName)) {
+    scheduleSlidingToggleIndicators();
+  }
+});
+
+refs.captionSettingsShell?.addEventListener("transitionend", () => {
+  scheduleSlidingToggleIndicators();
 });
 
 window.addEventListener("scroll", () => {
@@ -951,6 +977,8 @@ const {
   activeControlCount,
 });
 
+let autoSaveProjectAfterWorkspaceOpen = null;
+
 const browserModule = createBrowserModule({
   state,
   refs,
@@ -972,6 +1000,7 @@ const browserModule = createBrowserModule({
   renderWorkspaceBrowser,
   closeUtilityPanel,
   setAiStatusLine,
+  autoSaveProjectAfterWorkspaceOpen: () => autoSaveProjectAfterWorkspaceOpen?.(),
 });
 const {
   renderWorkspaceSummary,
@@ -986,6 +1015,7 @@ const {
   refreshItems,
   selectItem,
   applyWorkspaceSummary,
+  clearWorkspaceView,
   loadWorkspace,
   rescanWorkspace,
   mergeWorkspace,
@@ -997,7 +1027,9 @@ const {
   refreshProjects,
   applyProjectUiState,
   saveCurrentProject,
+  saveImportedWorkspaceToProject,
   createProject,
+  openProject,
   saveOpenProjectUiState,
   cleanupTmpNow,
 } = createProjectsModule({
@@ -1006,8 +1038,10 @@ const {
   apiGet,
   apiPost,
   runWithStatus,
+  setAiStatusLine,
   showError,
   applyWorkspaceSummary,
+  clearWorkspaceView,
   refreshItems,
   renderWorkspaceSummary,
   closeUtilityPanel,
@@ -1018,6 +1052,8 @@ const {
   selectItem,
   saveCurrentCaption: (...args) => saveCurrentCaption(...args),
 });
+
+autoSaveProjectAfterWorkspaceOpen = saveImportedWorkspaceToProject;
 
 const editorModule = createEditorModule({
   state,
@@ -1203,6 +1239,7 @@ const { restorePersistedSettings, bindSettingsPersistence, bindEvents, bootstrap
   trashCurrentItem,
   shouldIgnoreListArrowNavigation,
   loadWorkspace,
+  openProject,
   rescanWorkspace,
   saveCurrentProject,
   createProject,

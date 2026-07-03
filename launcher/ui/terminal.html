@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Vision Dataset Studio Terminal</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --terminal-bg: #eeeeee;
+        --terminal-text: #424956;
+        --terminal-muted: #6b7280;
+        --terminal-line: rgba(55, 56, 60, 0.12);
+        --bg: var(--terminal-bg);
+        --line: var(--terminal-line);
+        --text: var(--terminal-text);
+        --muted: var(--terminal-muted);
+        font-family: "HarmonyOS Sans SC", "HarmonyOS Sans", "HarmonyOS_Sans_SC", "Segoe UI", system-ui, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+        background: var(--bg);
+      }
+
+      body {
+        display: grid;
+        grid-template-rows: 40px 1fr;
+        user-select: none;
+        -webkit-user-select: none;
+      }
+
+      .titlebar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        height: 40px;
+        padding: 6px 8px 6px 14px;
+        background: var(--bg);
+        border-bottom: 1px solid var(--line);
+      }
+
+      .title {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0;
+        pointer-events: none;
+      }
+
+      .window-controls {
+        display: grid;
+        grid-template-columns: repeat(3, 32px);
+        height: 32px;
+        color: var(--muted);
+      }
+
+      .window-controls button {
+        width: 32px;
+        height: 32px;
+        display: grid;
+        place-items: center;
+        margin: 0;
+        border: 0;
+        border-radius: 999px;
+        padding: 0;
+        background: transparent;
+        color: inherit;
+        font: inherit;
+      }
+
+      .window-controls button:hover {
+        background: rgba(55, 56, 60, 0.08);
+        color: var(--text);
+      }
+
+      .window-controls button[data-action="close"]:hover {
+        background: #d93025;
+        color: #ffffff;
+      }
+
+      .window-controls svg {
+        width: 18px;
+        height: 18px;
+        display: block;
+        fill: currentColor;
+        pointer-events: none;
+      }
+
+      .terminal-shell {
+        min-height: 0;
+        padding: 0;
+        background: var(--bg);
+      }
+
+      .terminal {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        overflow: auto;
+        border: 0;
+        border-radius: 0;
+        padding: 14px 16px 16px;
+        background: var(--bg);
+        box-shadow: none;
+        color: var(--terminal-text);
+        font-family: "Cascadia Mono", "JetBrains Mono", Consolas, monospace;
+        font-size: 12px;
+        line-height: 1.55;
+        white-space: pre-wrap;
+        user-select: text;
+        -webkit-user-select: text;
+      }
+    </style>
+  </head>
+  <body>
+    <header class="titlebar" id="drag-titlebar">
+      <div class="title">VISION DATASET STUDIO TERMINAL</div>
+      <div class="window-controls" id="window-controls">
+        <button type="button" data-action="minimize" aria-label="最小化" title="最小化">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" aria-hidden="true"><rect width="256" height="256" fill="none"/><path d="M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm40,112H88a8,8,0,0,1,0-16h80a8,8,0,0,1,0,16Z"/></svg>
+        </button>
+        <button type="button" data-action="maximize" aria-label="最大化/还原" title="最大化/还原">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" aria-hidden="true"><rect width="256" height="256" fill="none"/><path d="M128,24A104,104,0,1,0,232,128,104.13,104.13,0,0,0,128,24Zm40,112H136v32a8,8,0,0,1-16,0V136H88a8,8,0,0,1,0-16h32V88a8,8,0,0,1,16,0v32h32a8,8,0,0,1,0,16Z"/></svg>
+        </button>
+        <button type="button" data-action="close" aria-label="关闭" title="关闭">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" aria-hidden="true"><rect width="256" height="256" fill="none"/><path d="M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm37.66,130.34a8,8,0,0,1-11.32,11.32L128,139.31l-26.34,26.35a8,8,0,0,1-11.32-11.32L116.69,128,90.34,101.66a8,8,0,0,1,11.32-11.32L128,116.69l26.34-26.35a8,8,0,0,1,11.32,11.32L139.31,128Z"/></svg>
+        </button>
+      </div>
+    </header>
+    <main class="terminal-shell">
+      <pre class="terminal" id="terminal">loading...</pre>
+    </main>
+    <script>
+      (function () {
+        const terminal = document.getElementById("terminal");
+        const themeStyle = document.createElement("style");
+        themeStyle.id = "terminal-theme-bridge";
+        document.head.appendChild(themeStyle);
+
+        function internalsInvoke(command, args) {
+          const internals = window.__TAURI_INTERNALS__;
+          if (!internals || typeof internals.invoke !== "function") {
+            return Promise.reject(new Error("Tauri internals unavailable"));
+          }
+          return internals.invoke(command, args);
+        }
+
+        function currentWindowLabel() {
+          return window.__TAURI_INTERNALS__ &&
+            window.__TAURI_INTERNALS__.metadata &&
+            window.__TAURI_INTERNALS__.metadata.currentWindow &&
+            window.__TAURI_INTERNALS__.metadata.currentWindow.label;
+        }
+
+        function tauriInvoke(command, args) {
+          const api = window.__TAURI__ && window.__TAURI__.core;
+          if (!api || typeof api.invoke !== "function") return Promise.reject(new Error("Tauri invoke unavailable"));
+          return api.invoke(command, args);
+        }
+
+        async function control(action) {
+          const label = currentWindowLabel();
+          try {
+            if (action === "minimize") await internalsInvoke("plugin:window|minimize", { label });
+            if (action === "close") await internalsInvoke("plugin:window|close", { label });
+            if (action === "drag") await internalsInvoke("plugin:window|start_dragging");
+            if (action === "maximize") await internalsInvoke("plugin:window|internal_toggle_maximize");
+            return;
+          } catch (_) {
+            try {
+              await tauriInvoke("launcher_" + action);
+            } catch (_) {}
+          }
+        }
+
+        document.getElementById("window-controls").addEventListener("click", function (event) {
+          const button = event.target.closest("button[data-action]");
+          if (!button) return;
+          control(button.getAttribute("data-action"));
+        });
+
+        document.getElementById("drag-titlebar").addEventListener("mousedown", function (event) {
+          if (event.button !== 0 || event.target.closest("button")) return;
+          event.preventDefault();
+          if (event.detail === 2) control("maximize");
+          else control("drag");
+        });
+
+        async function refresh() {
+          try {
+            const logs = await tauriInvoke("launcher_terminal_logs");
+            const shouldStick = terminal.scrollTop + terminal.clientHeight >= terminal.scrollHeight - 24;
+            terminal.textContent = logs || "[launcher] no logs yet";
+            if (shouldStick) terminal.scrollTop = terminal.scrollHeight;
+          } catch (error) {
+            terminal.textContent = "[launcher] failed to load logs\n" + String(error);
+          }
+        }
+
+        async function refreshTheme() {
+          try {
+            const css = await tauriInvoke("launcher_terminal_theme");
+            themeStyle.textContent = css || "";
+          } catch (_) {}
+        }
+
+        refreshTheme();
+        refresh();
+        setInterval(refreshTheme, 1000);
+        setInterval(refresh, 500);
+      })();
+    </script>
+  </body>
+</html>

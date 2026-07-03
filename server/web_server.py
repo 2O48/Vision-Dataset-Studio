@@ -56,6 +56,8 @@ APP_JS_FILE = FRONTEND_DIR / "app.js"
 STYLES_FILE = FRONTEND_DIR / "styles.css"
 ASSETS_DIR = FRONTEND_DIR / "assets"
 FAVICON_FILE = FRONTEND_DIR / "assets" / "favicon.png"
+LAUNCHER_TITLEBAR_FILE = BASE_DIR / "launcher" / "ui" / "titlebar.js"
+LAUNCHER_TERMINAL_FILE = BASE_DIR / "launcher" / "ui" / "terminal.html"
 PROMPT_TEMPLATES_FILE = BASE_DIR / "prompt_templates.json"
 THUMB_CACHE_MAX_ITEMS = 256
 THUMB_CACHE_MIME = "image/png"
@@ -109,7 +111,11 @@ def _infer_project_id_from_workspace(workspace: dict) -> str:
             continue
     if not paths:
         return ""
-    for project in PROJECT_STORE.list_projects():
+    try:
+        projects = PROJECT_STORE.list_projects()
+    except OSError:
+        return ""
+    for project in projects:
         project_path = Path(str(project.get("path", "") or "")).resolve()
         if project_path and any(is_relative_to(path, project_path) for path in paths):
             return str(project.get("id", "") or "")
@@ -269,6 +275,16 @@ class AppHandler(BaseHTTPRequestHandler):
     def _send_text_file(self, path: Path, content_type: str):
         self._send_bytes(path.read_bytes(), content_type)
 
+    def _send_launcher_index(self):
+        html = INDEX_FILE.read_text(encoding="utf-8")
+        marker = "</head>"
+        script = '  <script defer src="/launcher/titlebar.js"></script>\n'
+        if marker in html:
+            html = html.replace(marker, script + marker, 1)
+        else:
+            html += "\n" + script
+        self._send_bytes(html.encode("utf-8"), "text/html; charset=utf-8")
+
     def _send_asset_file(self, request_path: str):
         target = (ASSETS_DIR / request_path.removeprefix("/assets/")).resolve()
         if not is_relative_to(target, ASSETS_DIR) or not target.is_file():
@@ -296,7 +312,13 @@ class AppHandler(BaseHTTPRequestHandler):
 
         try:
             if path == "/":
+                if query.get("vds_launcher", ["0"])[0] in {"1", "true", "yes"}:
+                    return self._send_launcher_index()
                 return self._send_text_file(INDEX_FILE, "text/html; charset=utf-8")
+            if path == "/launcher/titlebar.js":
+                return self._send_text_file(LAUNCHER_TITLEBAR_FILE, "text/javascript; charset=utf-8")
+            if path == "/launcher/terminal.html":
+                return self._send_text_file(LAUNCHER_TERMINAL_FILE, "text/html; charset=utf-8")
             if path == "/app.js":
                 return self._send_text_file(APP_JS_FILE, "text/javascript; charset=utf-8")
             if path.startswith("/frontend/") and path.endswith(".js"):
@@ -312,6 +334,8 @@ class AppHandler(BaseHTTPRequestHandler):
                 return self._send_text_file(FAVICON_FILE, "image/png")
             if path == "/api/workspace":
                 return self._send_json({"ok": True, "workspace": WORKSPACE.get_workspace_summary()})
+            if path == "/api/launcher/health":
+                return self._send_json({"ok": True, "launcher_api": 2})
             if path == "/api/workspace/browse":
                 browse_path = query.get("path", [""])[0]
                 return self._send_json({"ok": True, "browser": _list_child_directories(browse_path)})
@@ -401,6 +425,15 @@ class AppHandler(BaseHTTPRequestHandler):
             return self._error(f"Invalid JSON body: {exc}")
 
         try:
+            if path == "/api/status/log":
+                message = str(body.get("message", "") or "").strip()
+                if message:
+                    if len(message) > 1000:
+                        message = f"{message[:1000]}..."
+                    ts = time.strftime("%H:%M:%S")
+                    print(f"[{ts}] [status] {message}", flush=True)
+                return self._send_json({"ok": True})
+
             if path == "/api/workspace/open":
                 def workspace_dir_value(key: str):
                     return body.get(key) if key in body else None
@@ -569,6 +602,17 @@ class AppHandler(BaseHTTPRequestHandler):
                 result = WORKSPACE.swap_item_roles(
                     str(body.get("name", "") or ""),
                     str(body.get("source_role", "") or ""),
+                    str(body.get("target_role", "") or ""),
+                )
+                if result.get("swapped"):
+                    _touch_active_project_content()
+                return self._send_json({"ok": True, **result})
+
+            if path == "/api/item/swap-images":
+                result = WORKSPACE.swap_item_images(
+                    str(body.get("source_name", "") or ""),
+                    str(body.get("source_role", "") or ""),
+                    str(body.get("target_name", "") or ""),
                     str(body.get("target_role", "") or ""),
                 )
                 if result.get("swapped"):
@@ -1051,7 +1095,8 @@ class AppHandler(BaseHTTPRequestHandler):
             }.get(suffix, "application/octet-stream")
             return self._send_bytes(path.read_bytes(), content_type)
 
-        cache_key = _thumbnail_cache_key(path, max(width, 32), max(height, 32))
+        cache_buster = query.get("refresh", [""])[0] or query.get("workspace", [""])[0]
+        cache_key = _thumbnail_cache_key(path, max(width, 32), max(height, 32), cache_buster)
         cached = _get_cached_thumbnail(cache_key)
         if cached is not None:
             return self._send_bytes(cached, THUMB_CACHE_MIME)

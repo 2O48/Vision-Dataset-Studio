@@ -5,7 +5,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Vision Dataset Studio</title>
-  <link rel="icon" type="image/png" href="/favicon.png">
+  <link rel="icon" type="image/png" href="assets/favicon.png">
   <script>
     (() => {
       const mode = window.localStorage.getItem("vds-ui.theme-mode") || window.localStorage.getItem("lora-ui.theme-mode") || "auto";
@@ -30,11 +30,11 @@
       const resolvedWallpaper = wallpapers.includes(wallpaper) ? wallpaper : "none";
       document.documentElement.dataset.wallpaper = resolvedWallpaper === "none" ? "none" : "image";
       if (resolvedWallpaper !== "none") {
-        document.documentElement.style.setProperty("--app-wallpaper-image", `url("/assets/wallpapers/${resolvedWallpaper}")`);
+        document.documentElement.style.setProperty("--app-wallpaper-image", `url("${new URL(`assets/wallpapers/${resolvedWallpaper}`, window.location.href).toString()}")`);
       }
     })();
   </script>
-  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="styles.css">
 </head>
 
 <body>
@@ -113,35 +113,35 @@
                 <span class="wallpaper-check" aria-hidden="true"></span>
               </button>
               <button class="wallpaper-option" data-wallpaper="alex-r254y37vFEY-unsplash.jpg" type="button" role="option" aria-label="壁纸 1" title="壁纸 1">
-                <img src="/assets/wallpapers/thumbs/alex-r254y37vFEY-unsplash-thumb.jpg" alt="" width="120" height="120" decoding="async">
+                <img src="assets/wallpapers/thumbs/alex-r254y37vFEY-unsplash-thumb.jpg" alt="" width="120" height="120" decoding="async">
                 <span class="wallpaper-check" aria-hidden="true"></span>
               </button>
               <button class="wallpaper-option" data-wallpaper="cemrecan-yurtman-dPGb63w0640-unsplash.jpg" type="button" role="option" aria-label="壁纸 2" title="壁纸 2">
-                <img src="/assets/wallpapers/thumbs/cemrecan-yurtman-dPGb63w0640-unsplash-thumb.jpg" alt="" width="120" height="120" decoding="async">
+                <img src="assets/wallpapers/thumbs/cemrecan-yurtman-dPGb63w0640-unsplash-thumb.jpg" alt="" width="120" height="120" decoding="async">
                 <span class="wallpaper-check" aria-hidden="true"></span>
               </button>
               <button class="wallpaper-option" data-wallpaper="daniel-leone-v7daTKlZzaw-unsplash.jpg" type="button" role="option" aria-label="壁纸 3" title="壁纸 3">
-                <img src="/assets/wallpapers/thumbs/daniel-leone-v7daTKlZzaw-unsplash-thumb.jpg" alt="" width="120" height="120" decoding="async">
+                <img src="assets/wallpapers/thumbs/daniel-leone-v7daTKlZzaw-unsplash-thumb.jpg" alt="" width="120" height="120" decoding="async">
                 <span class="wallpaper-check" aria-hidden="true"></span>
               </button>
               <button class="wallpaper-option" data-wallpaper="dominik-schroder-FIKD9t5_5zQ-unsplash.jpg" type="button" role="option" aria-label="壁纸 4" title="壁纸 4">
-                <img src="/assets/wallpapers/thumbs/dominik-schroder-FIKD9t5_5zQ-unsplash-thumb.jpg" alt="" width="120" height="120" decoding="async">
+                <img src="assets/wallpapers/thumbs/dominik-schroder-FIKD9t5_5zQ-unsplash-thumb.jpg" alt="" width="120" height="120" decoding="async">
                 <span class="wallpaper-check" aria-hidden="true"></span>
               </button>
               <button class="wallpaper-option" data-wallpaper="marek-piwnicki-5hri_jol2wE-unsplash.jpg" type="button" role="option" aria-label="壁纸 5" title="壁纸 5">
-                <img src="/assets/wallpapers/thumbs/marek-piwnicki-5hri_jol2wE-unsplash-thumb.jpg" alt="" width="120" height="120" decoding="async">
+                <img src="assets/wallpapers/thumbs/marek-piwnicki-5hri_jol2wE-unsplash-thumb.jpg" alt="" width="120" height="120" decoding="async">
                 <span class="wallpaper-check" aria-hidden="true"></span>
               </button>
               <button class="wallpaper-option" data-wallpaper="paul-pastourmatzis-KT3WlrL_bsg-unsplash.jpg" type="button" role="option" aria-label="壁纸 6" title="壁纸 6">
-                <img src="/assets/wallpapers/thumbs/paul-pastourmatzis-KT3WlrL_bsg-unsplash-thumb.jpg" alt="" width="120" height="120" decoding="async">
+                <img src="assets/wallpapers/thumbs/paul-pastourmatzis-KT3WlrL_bsg-unsplash-thumb.jpg" alt="" width="120" height="120" decoding="async">
                 <span class="wallpaper-check" aria-hidden="true"></span>
               </button>
               <button class="wallpaper-option" data-wallpaper="stephanie-moody-nhZqYi5hH58-unsplash.jpg" type="button" role="option" aria-label="壁纸 7" title="壁纸 7">
-                <img src="/assets/wallpapers/thumbs/stephanie-moody-nhZqYi5hH58-unsplash-thumb.jpg" alt="" width="120" height="120" decoding="async">
+                <img src="assets/wallpapers/thumbs/stephanie-moody-nhZqYi5hH58-unsplash-thumb.jpg" alt="" width="120" height="120" decoding="async">
                 <span class="wallpaper-check" aria-hidden="true"></span>
               </button>
               <button class="wallpaper-option" data-wallpaper="tycho-atsma-D1w4o5V_Y2g-unsplash.jpg" type="button" role="option" aria-label="壁纸 8" title="壁纸 8">
-                <img src="/assets/wallpapers/thumbs/tycho-atsma-D1w4o5V_Y2g-unsplash-thumb.jpg" alt="" width="120" height="120" decoding="async">
+                <img src="assets/wallpapers/thumbs/tycho-atsma-D1w4o5V_Y2g-unsplash-thumb.jpg" alt="" width="120" height="120" decoding="async">
                 <span class="wallpaper-check" aria-hidden="true"></span>
               </button>
             </div>
@@ -293,6 +293,7 @@
               </div>
               <div class="export-status" id="mergeStatus">等待追加数据集</div>
             </section>
+
           </article>
         </section>
 
@@ -949,6 +950,7 @@
               </div>
             </section>
           </section>
+
         </article>
       </section>
     </main>
@@ -981,6 +983,7 @@
 
   <div class="dialog-backdrop about-dialog" id="aboutDialog" aria-hidden="true">
     <section class="dialog-panel" role="dialog" aria-modal="true" aria-labelledby="aboutDialogTitle">
+      <img class="about-dialog-logo" src="assets/favicon.png" alt="" aria-hidden="true">
       <h2 id="aboutDialogTitle">视觉数据工作台</h2>
       <p class="dialog-message about-dialog-message">由<a href="https://github.com/Eric7758" target="_blank"
           rel="noopener noreferrer">@Eric7758</a>以及<a href="https://github.com/2O48" target="_blank"
@@ -1071,7 +1074,7 @@
     </button>
   </template>
 
-  <script src="/app.js" type="module"></script>
+<script src="app.js" type="module"></script>
 </body>
 
 </html>

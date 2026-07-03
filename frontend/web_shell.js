@@ -9,6 +9,38 @@ export function createShellModule({
   getApiCaptionPayload,
   getOllamaCaptionPayload,
 }) {
+  let lastTerminalStatusLine = "";
+
+  function launcherInvoke(command, args) {
+    const api = window.__TAURI__?.core;
+    if (api && typeof api.invoke === "function") {
+      return api.invoke(command, args);
+    }
+    const internals = window.__TAURI_INTERNALS__;
+    if (internals && typeof internals.invoke === "function") {
+      return internals.invoke(command, args);
+    }
+    return Promise.reject(new Error("Tauri invoke unavailable"));
+  }
+
+  function logStatusToBackendTerminal(message) {
+    return fetch("/api/status/log", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message }),
+      keepalive: true,
+    });
+  }
+
+  function logStatusToTerminal(message) {
+    const line = String(message || "待命").trim() || "待命";
+    if (line === lastTerminalStatusLine) return;
+    lastTerminalStatusLine = line;
+    logStatusToBackendTerminal(line).catch(() => {
+      launcherInvoke("launcher_log_status", { message: line }).catch(() => {});
+    });
+  }
+
   function utilityPanelExists(panel) {
     return refs.utilityPageShell?.querySelector(`.utility-panel[data-panel="${panel}"]`);
   }
@@ -61,10 +93,12 @@ export function createShellModule({
   }
 
   function setAiStatusLine(message) {
-    if (refs.aiStatusLine) refs.aiStatusLine.textContent = message || "待命";
+    const line = message || "待命";
+    if (refs.aiStatusLine) refs.aiStatusLine.textContent = line;
     if (refs.topAiProgressText) {
-      refs.topAiProgressText.textContent = message || "待命";
+      refs.topAiProgressText.textContent = line;
     }
+    logStatusToTerminal(line);
   }
 
   async function runWithStatus(message, task) {

@@ -1,3 +1,5 @@
+import { resolveApiUrl } from "./web_shared.js";
+
 export function createBrowserModule({
   state,
   refs,
@@ -19,10 +21,12 @@ export function createBrowserModule({
   renderWorkspaceBrowser,
   closeUtilityPanel,
   setAiStatusLine,
+  autoSaveProjectAfterWorkspaceOpen,
 }) {
   const ITEM_DRAG_TYPE = "application/x-vds-item-name";
   const ITEM_ROLE_DRAG_TYPE = "application/x-vds-item-role";
   const VIEWER_ROLE_DRAG_TYPE = "application/x-vds-viewer-role";
+  const IMAGE_ROLES = ["control1", "control2", "control3", "result"];
   const ITEM_CARD_SIZE_ANIMATION = {
     duration: 320,
     easing: "cubic-bezier(0.16, 1, 0.3, 1)",
@@ -35,7 +39,6 @@ export function createBrowserModule({
   let itemContextTarget = null;
   let itemContextCloseTimer = 0;
   let splitListRenderTimer = 0;
-  const itemThumbObservers = new Map();
   let itemDragSource = null;
   let imagePreview = null;
   let documentFileDropGuardBound = false;
@@ -354,95 +357,165 @@ export function createBrowserModule({
     return "未加载项目";
   }
 
-  function imageUrl(role, name, thumb = false, width = 320, height = 220) {
-    const url = new URL("/api/image", window.location.origin);
-    url.searchParams.set("role", role);
-    url.searchParams.set("name", name);
-    url.searchParams.set("workspace", state.workspace?.workspace_key || String(state.workspaceImageVersion || 0));
-    if (thumb) {
-      url.searchParams.set("thumb", "1");
-      url.searchParams.set("width", String(width));
-      url.searchParams.set("height", String(height));
-    } else {
-      url.searchParams.set("refresh", String(state.imageRefreshToken || 0));
-    }
-    return url.toString();
+  function imageVersionForItem(item, role) {
+    return item?.image_versions?.[role] || "";
   }
 
-  function disconnectItemThumbObservers() {
-    for (const observer of itemThumbObservers.values()) {
-      observer.disconnect();
-    }
-    itemThumbObservers.clear();
-  }
-
-  function ensureItemThumbObserver(root) {
-    if (!root || typeof IntersectionObserver === "undefined") return null;
-    const existing = itemThumbObservers.get(root);
-    if (existing) return existing;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          if (entry.isIntersecting) {
-            loadItemThumb(entry.target);
-          } else {
-            unloadItemThumb(entry.target);
+  function imageUrl(role, name, thumb = false, width = 320, height = 220, version = "") {
+    const refresh = String(version || state.imageRefreshToken || 0);
+    return resolveApiUrl("api/image", {
+      role,
+      name,
+      workspace: state.workspace?.workspace_key || String(state.workspaceImageVersion || 0),
+      ...(thumb
+        ? {
+            thumb: "1",
+            width: String(width),
+            height: String(height),
+            refresh,
           }
-        }
-      },
-      { root, rootMargin: "160px", threshold: 0.01 },
-    );
-    itemThumbObservers.set(root, observer);
-    return observer;
+        : {
+            refresh,
+          }),
+    }).toString();
   }
 
-  function loadItemThumb(slot) {
-    if (!slot || slot.dataset.loaded === "1") return;
-    const src = slot.dataset.src;
-    if (!src) return;
+  function cssEscape(value) {
+    return window.CSS?.escape ? window.CSS.escape(value) : String(value).replace(/["\\]/g, "\\$&");
+  }
+
+  function updateCachedPanelItem(name, updater) {
+    for (const panelId of ["primary", "secondary"]) {
+      const items = panelItems(panelId);
+      const index = items.findIndex((item) => item.name === name);
+      if (index < 0) continue;
+      items[index] = updater({ ...items[index] });
+    }
+  }
+
+  function markCachedItemRoleExists(name, role, item = null) {
+    if (!name || !role) return;
+    updateCachedPanelItem(name, (cached) => ({
+      ...cached,
+      ...(item || {}),
+      exists: { ...(cached.exists || {}), ...(item?.exists || {}), [role]: true },
+      resolution: { ...(cached.resolution || {}), ...(item?.resolution || {}) },
+      flags: { ...(cached.flags || {}), ...(item?.flags || {}) },
+      image_versions: { ...(cached.image_versions || {}), ...(item?.image_versions || {}) },
+    }));
+  }
+
+  function cachedItemByName(name) {
+    return panelItems("primary").find((entry) => entry.name === name)
+      || panelItems("secondary").find((entry) => entry.name === name)
+      || (state.currentItem?.name === name ? state.currentItem : null);
+  }
+
+  function itemRoleExists(name, role, node = null) {
+    return Boolean(
+      cachedItemByName(name)?.exists?.[role]
+      || node?.dataset?.loaded === "1"
+      || node?.classList?.contains("loaded")
+    );
+  }
+
+  function mergeCachedItem(name, item = null) {
+    if (!name || !item) return;
+    updateCachedPanelItem(name, (cached) => ({
+      ...cached,
+      ...item,
+      exists: { ...(cached.exists || {}), ...(item.exists || {}) },
+      resolution: { ...(cached.resolution || {}), ...(item.resolution || {}) },
+      flags: { ...(cached.flags || {}), ...(item.flags || {}) },
+      image_versions: { ...(cached.image_versions || {}), ...(item.image_versions || {}) },
+    }));
+  }
+
+  function createItemThumbs(item, panelId = "primary") {
+    const thumbRoles = thumbRolesForMode(panelThumbMode(panelId));
+    const thumbs = document.createElement("div");
+    thumbs.className = thumbRoles.length > 1 ? "item-thumb-grid" : "item-thumb-single";
+    thumbs.style.setProperty("--thumb-count", String(thumbRoles.length));
+    for (const role of thumbRoles) {
+      if (item.exists?.[role]) {
+        thumbs.appendChild(createItemThumbSlot(item, role));
+      } else {
+        thumbs.appendChild(
+          canReplaceItemImageRole(role)
+            ? createItemControlDropSlot(item, role)
+            : (() => {
+                const placeholder = document.createElement("div");
+                placeholder.className = "item-thumb-empty";
+                placeholder.textContent = `无${(ROLE_LABELS[role] || role).replace(/\s+/g, "")}`;
+                return placeholder;
+              })(),
+        );
+      }
+    }
+    return thumbs;
+  }
+
+  function repaintRenderedItemCards(name, item = null) {
+    if (!name) return;
+    const current = item || cachedItemByName(name);
+    if (!current) return;
+    const selector = `.item-card[data-name="${cssEscape(name)}"]`;
+    for (const card of document.querySelectorAll(selector)) {
+      const panelId = card.dataset.panelId || "primary";
+      const oldThumbs = card.querySelector(".item-thumb-grid, .item-thumb-single");
+      if (!oldThumbs) continue;
+      oldThumbs.replaceWith(createItemThumbs(current, panelId));
+    }
+  }
+
+  function refreshRenderedItemThumbs(name, item = null) {
+    repaintRenderedItemCards(name, item);
+  }
+
+  function itemDragPayload(event) {
+    const sourceName = event.dataTransfer?.getData(ITEM_DRAG_TYPE) || itemDragSource?.name || "";
+    const viewerRole = event.dataTransfer?.getData(VIEWER_ROLE_DRAG_TYPE) || "";
+    const sourceRole = event.dataTransfer?.getData(ITEM_ROLE_DRAG_TYPE) || itemDragSource?.role || viewerRole || "";
+    if (!sourceName && viewerRole && state.currentItem?.name) {
+      return { sourceName: state.currentItem.name, sourceRole };
+    }
+    return { sourceName, sourceRole };
+  }
+
+  function createItemThumbSlot(item, role) {
+    const slot = document.createElement("div");
+    slot.className = "item-thumb-lazy item-thumb-drop loaded";
+    slot.dataset.src = imageUrl(role, item.name, true, 192, 156, imageVersionForItem(item, role));
+    slot.dataset.name = item.name;
+    slot.dataset.role = role;
+    slot.dataset.dropName = item.name;
+    slot.dataset.dropRole = role;
     slot.dataset.loaded = "1";
+    slot.draggable = true;
+    slot.title = ROLE_LABELS[role] || role;
     const img = document.createElement("img");
     img.className = "item-thumb";
-    img.src = src;
+    img.src = slot.dataset.src;
     img.alt = "";
     img.title = slot.title || "";
     img.loading = "lazy";
     img.decoding = "async";
     img.draggable = false;
-    slot.replaceChildren(img);
-    slot.classList.add("loaded");
-  }
-
-  function unloadItemThumb(slot) {
-    if (!slot || slot.dataset.loaded !== "1") return;
-    slot.dataset.loaded = "0";
-    slot.replaceChildren();
-    slot.classList.remove("loaded");
-  }
-
-  function closestElement(target, selector) {
-    return target instanceof Element ? target.closest(selector) : null;
-  }
-
-  function itemDragPayload(event) {
-    const sourceName = event.dataTransfer?.getData(ITEM_DRAG_TYPE) || itemDragSource?.name || "";
-    const sourceRole = event.dataTransfer?.getData(ITEM_ROLE_DRAG_TYPE) || itemDragSource?.role || "";
-    return { sourceName, sourceRole };
-  }
-
-  function createItemThumbSlot(item, role, root = null) {
-    const slot = document.createElement("div");
-    slot.className = "item-thumb-lazy";
-    slot.dataset.src = imageUrl(role, item.name, true, 192, 156);
-    slot.dataset.name = item.name;
-    slot.dataset.role = role;
-    slot.draggable = true;
-    slot.title = ROLE_LABELS[role] || role;
+    img.addEventListener("error", () => {
+      slot.replaceChildren();
+      slot.classList.remove("loaded");
+      const placeholder = document.createElement("div");
+      placeholder.className = "item-thumb-empty";
+      placeholder.textContent = "缩略图加载失败";
+      slot.appendChild(placeholder);
+    }, { once: true });
+    slot.appendChild(img);
     slot.addEventListener("dragstart", (event) => {
       event.stopPropagation();
       setNativeDragFeedbackActive(true);
       event.dataTransfer?.setData(ITEM_DRAG_TYPE, item.name);
       event.dataTransfer?.setData(ITEM_ROLE_DRAG_TYPE, role);
+      event.dataTransfer?.setData("application/x-vds-item-names", item.name);
       event.dataTransfer?.setData("text/plain", item.name);
       if (event.dataTransfer) event.dataTransfer.effectAllowed = "copyMove";
       itemDragSource = { name: item.name, role };
@@ -450,23 +523,24 @@ export function createBrowserModule({
     });
     slot.addEventListener("dragend", () => {
       setNativeDragFeedbackActive(false);
+      itemDragSource = null;
+      slot.closest(".item-card")?.classList.remove("dragging");
+      document.querySelectorAll(".item-card.drag-over, .folder-chip.drag-over, .item-thumb-drop.drag-over").forEach((node) => {
+        node.classList.remove("drag-over");
+      });
+      clearViewerRoleDragClasses();
     });
-    if (canDropItemOnControlRole(role)) {
-      slot.classList.add("item-thumb-drop");
-      bindItemControlDropTarget(slot, item, role);
-    }
-    const observer = ensureItemThumbObserver(root);
-    if (observer) {
-      observer.observe(slot);
-    } else {
-      loadItemThumb(slot);
-    }
+    bindItemControlDropTarget(slot, item, role);
     return slot;
   }
 
   function canDropItemOnControlRole(role) {
     const roleIndex = ["control1", "control2", "control3"].indexOf(role);
     return roleIndex >= 0 && activeControlCount() >= roleIndex + 1;
+  }
+
+  function canReplaceItemImageRole(role) {
+    return role === "result" || canDropItemOnControlRole(role);
   }
 
   function droppedImageFile(dataTransfer) {
@@ -497,7 +571,10 @@ export function createBrowserModule({
 
   function dragEventHasControlImagePayload(event) {
     const types = Array.from(event.dataTransfer?.types || []);
-    return Boolean(itemDragSource?.name) || types.includes(ITEM_DRAG_TYPE) || droppedImageFiles(event.dataTransfer).length === 1;
+    return Boolean(itemDragSource?.name)
+      || types.includes(ITEM_DRAG_TYPE)
+      || types.includes(VIEWER_ROLE_DRAG_TYPE)
+      || droppedImageFiles(event.dataTransfer).length === 1;
   }
 
   function dragEventHasFilePayload(event) {
@@ -530,15 +607,20 @@ export function createBrowserModule({
   }
 
   function bindItemControlDropTarget(target, item, role) {
-    if (!target || !item || !canDropItemOnControlRole(role)) return;
+    if (!target || !item || !canReplaceItemImageRole(role)) return;
     target.dataset.dropRole = role;
     target.dataset.dropName = item.name;
-    target.title = `拖入图片替换${ROLE_LABELS[role] || role}`;
+    target.title = `拖入图片交换或设置${ROLE_LABELS[role] || role}`;
     target.addEventListener("dragover", (event) => {
       if (!dragEventHasControlImagePayload(event)) return;
       event.preventDefault();
       target.classList.add("drag-over");
-      if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+      if (event.dataTransfer) {
+        const hasInternalImage = Boolean(itemDragSource?.name)
+          || Array.from(event.dataTransfer.types || []).includes(ITEM_DRAG_TYPE)
+          || Array.from(event.dataTransfer.types || []).includes(VIEWER_ROLE_DRAG_TYPE);
+        event.dataTransfer.dropEffect = hasInternalImage && itemRoleExists(item.name, role, target) ? "move" : "copy";
+      }
     });
     target.addEventListener("dragleave", (event) => {
       if (target.contains(event.relatedTarget)) return;
@@ -553,8 +635,16 @@ export function createBrowserModule({
       event.preventDefault();
       event.stopPropagation();
       target.classList.remove("drag-over");
-      if (sourceName) assignItemControlImage(sourceName, item.name, role, sourceRole).catch(showError || console.error);
-      else uploadControlImageFile(file, item.name, role).catch(showError || console.error);
+      if (sourceName) {
+        const targetExists = itemRoleExists(item.name, role, target);
+        const normalizedSourceRole = sourceRole || "result";
+        const action = targetExists
+          ? swapItemImages(sourceName, normalizedSourceRole, item.name, role)
+          : assignItemControlImage(sourceName, item.name, role, normalizedSourceRole);
+        action.catch(showError || console.error);
+      } else {
+        uploadControlImageFile(file, item.name, role).catch(showError || console.error);
+      }
     });
   }
 
@@ -1565,7 +1655,7 @@ export function createBrowserModule({
     preview.role = role;
     preview.panX = 0;
     preview.panY = 0;
-    const src = imageUrl(role, item.name);
+    const src = imageUrl(role, item.name, false, 320, 220, imageVersionForItem(item, role));
     preview.main.alt = `${previewRoleLabel(role)} ${item.name}`;
     preview.thumb.alt = `${previewRoleLabel(role)}缩略图`;
     preview.main.style.opacity = "0";
@@ -1767,8 +1857,56 @@ export function createBrowserModule({
     scheduleImagePreviewMinimapHide();
   }
 
+  async function swapItemImages(sourceName, sourceRole, targetName, targetRole) {
+    if (
+      !sourceName
+      || !targetName
+      || !IMAGE_ROLES.includes(sourceRole)
+      || !canReplaceItemImageRole(targetRole)
+      || (sourceName === targetName && sourceRole === targetRole)
+    ) {
+      return;
+    }
+    const data = await apiPost("/api/item/swap-images", {
+      source_name: sourceName,
+      source_role: sourceRole,
+      target_name: targetName,
+      target_role: targetRole,
+    });
+    if (data.workspace) applyWorkspaceSummary(data.workspace);
+    state.imageRefreshToken = `${Date.now()}-swap-images-${sourceRole}-${targetRole}-${sourceName}-${targetName}`;
+
+    const updated = [
+      [sourceName, data.source_item],
+      [targetName, data.target_item],
+    ];
+    const repainted = new Set();
+    for (const [name, item] of updated) {
+      if (!name || !item || repainted.has(name)) continue;
+      repainted.add(name);
+      mergeCachedItem(name, item);
+      refreshRenderedItemThumbs(name, item);
+      if (state.currentItem?.name === name) {
+        state.currentItem = item;
+      }
+    }
+
+    await refreshItems({ skipDirtyCheck: true, suppressSelectionSync: true, includeGlobalSegments: false });
+    for (const [name, item] of updated) {
+      if (name && item) refreshRenderedItemThumbs(name, item);
+    }
+    if ([sourceName, targetName].includes(state.selectedName)) {
+      await selectItem(state.selectedName, false, { skipDirtyCheck: true, panelId: activeListPanelId() });
+    }
+    setAiStatusLine?.(
+      `已交换 ${sourceName} 的 ${ROLE_LABELS[sourceRole] || sourceRole} 与 ${targetName} 的 ${ROLE_LABELS[targetRole] || targetRole}`
+    );
+  }
+
   async function assignItemControlImage(sourceName, targetName, targetRole, sourceRole = "result") {
-    if (!sourceName || !targetName || !canDropItemOnControlRole(targetRole)) return;
+    sourceRole = sourceRole || "result";
+    if (!sourceName || !targetName || !sourceRole || !canReplaceItemImageRole(targetRole)) return;
+    if (sourceName === targetName && sourceRole === targetRole) return;
     const data = await apiPost("/api/item/assign-control-image", {
       source_name: sourceName,
       source_role: sourceRole,
@@ -1777,7 +1915,13 @@ export function createBrowserModule({
     });
     if (data.workspace) applyWorkspaceSummary(data.workspace);
     state.imageRefreshToken = `${Date.now()}-assign-${targetRole}-${targetName}`;
+    markCachedItemRoleExists(targetName, targetRole, data.item);
+    refreshRenderedItemThumbs(targetName, data.item);
     await refreshItems({ skipDirtyCheck: true, suppressSelectionSync: true, includeGlobalSegments: false });
+    refreshRenderedItemThumbs(targetName, data.item);
+    if (targetName === state.selectedName) {
+      await selectItem(targetName, false, { skipDirtyCheck: true, panelId: activeListPanelId() });
+    }
     setAiStatusLine?.(`已把 ${sourceName} 设置为 ${targetName} 的 ${ROLE_LABELS[targetRole] || targetRole}`);
   }
 
@@ -1792,7 +1936,7 @@ export function createBrowserModule({
   }
 
   async function uploadControlImageFile(file, targetName, targetRole) {
-    if (!file || !targetName || !canDropItemOnControlRole(targetRole)) return;
+    if (!file || !targetName || !canReplaceItemImageRole(targetRole)) return;
     const data = await apiPost("/api/item/upload-control-image", {
       target_name: targetName,
       target_role: targetRole,
@@ -1802,7 +1946,13 @@ export function createBrowserModule({
     });
     if (data.workspace) applyWorkspaceSummary(data.workspace);
     state.imageRefreshToken = `${Date.now()}-upload-${targetRole}-${targetName}`;
+    markCachedItemRoleExists(targetName, targetRole, data.item);
+    refreshRenderedItemThumbs(targetName, data.item);
     await refreshItems({ skipDirtyCheck: true, suppressSelectionSync: true, includeGlobalSegments: false });
+    refreshRenderedItemThumbs(targetName, data.item);
+    if (targetName === state.selectedName) {
+      await selectItem(targetName, false, { skipDirtyCheck: true, panelId: activeListPanelId() });
+    }
     setAiStatusLine?.(`已把 ${file.name || "拖入图片"} 设置为 ${targetName} 的 ${ROLE_LABELS[targetRole] || targetRole}`);
   }
 
@@ -1881,7 +2031,6 @@ export function createBrowserModule({
     setPanelVisibleItems("secondary", filteredItems("secondary"));
     syncBatchSelectionPanelAvailability();
     pruneBatchSelection();
-    disconnectItemThumbObservers();
     renderWorkspaceSummary();
     if (refs.metricFiltered) refs.metricFiltered.textContent = `${panelVisibleItems("primary").length || 0}`;
 
@@ -1901,6 +2050,7 @@ export function createBrowserModule({
           card.style.setProperty("--item-card-min-width", `${(thumbRoles.length * 99) + ((thumbRoles.length - 1) * 3) + 10 + 50 + 16}px`);
         }
         card.dataset.name = item.name;
+        card.dataset.panelId = panelId;
         card.draggable = true;
         card.title = "双击重命名图片";
         card.addEventListener("dragstart", (event) => {
@@ -1913,10 +2063,10 @@ export function createBrowserModule({
             event.preventDefault();
             return;
           }
-          const dragNames = itemDragNamesForPanel(item, panelId);
+          const names = itemDragNamesForPanel(item, panelId);
           setNativeDragFeedbackActive(true);
           event.dataTransfer?.setData(ITEM_DRAG_TYPE, item.name);
-          event.dataTransfer?.setData("application/x-vds-item-names", dragNames.join("\n"));
+          event.dataTransfer?.setData("application/x-vds-item-names", names.join("\n"));
           event.dataTransfer?.setData(ITEM_ROLE_DRAG_TYPE, dragRole);
           event.dataTransfer?.setData("text/plain", item.name);
           if (event.dataTransfer) event.dataTransfer.effectAllowed = "copyMove";
@@ -1927,32 +2077,12 @@ export function createBrowserModule({
           setNativeDragFeedbackActive(false);
           itemDragSource = null;
           card.classList.remove("dragging");
-          for (const currentPanel of listPanels()) {
-            currentPanel.folderFilters?.querySelectorAll(".drag-over").forEach((node) => node.classList.remove("drag-over"));
-            currentPanel.itemList?.querySelectorAll(".item-thumb-drop.drag-over").forEach((node) => node.classList.remove("drag-over"));
-          }
+          document.querySelectorAll(".item-card.drag-over, .folder-chip.drag-over, .item-thumb-drop.drag-over").forEach((node) => {
+            node.classList.remove("drag-over");
+          });
           clearViewerRoleDragClasses();
         });
-        const thumbs = document.createElement("div");
-        thumbs.className = thumbRoles.length > 1 ? "item-thumb-grid" : "item-thumb-single";
-        thumbs.style.setProperty("--thumb-count", String(thumbRoles.length));
-        for (const role of thumbRoles) {
-          if (item.exists[role]) {
-            thumbs.appendChild(createItemThumbSlot(item, role, panel.itemList));
-          } else {
-            thumbs.appendChild(
-              thumbRoles.length > 1 && canDropItemOnControlRole(role)
-                ? createItemControlDropSlot(item, role)
-                : (() => {
-                    const placeholder = document.createElement("div");
-                    placeholder.className = "item-thumb-empty";
-                    placeholder.textContent = `无${(ROLE_LABELS[role] || role).replace(/\s+/g, "")}`;
-                    return placeholder;
-                  })(),
-            );
-          }
-        }
-        card.appendChild(thumbs);
+        card.appendChild(createItemThumbs(item, panelId));
 
         const right = document.createElement("div");
         right.className = "item-card-main";
@@ -2116,7 +2246,7 @@ export function createBrowserModule({
   function canAssignListItemToViewerControl(targetRole) {
     return Boolean(
       state.currentItem
-      && canDropItemOnControlRole(targetRole)
+      && canReplaceItemImageRole(targetRole)
     );
   }
 
@@ -2133,9 +2263,15 @@ export function createBrowserModule({
       target_role: targetRole,
     });
     if (data.workspace) applyWorkspaceSummary(data.workspace);
-    if (data.item) state.currentItem = data.item;
+    if (data.item) {
+      state.currentItem = data.item;
+      mergeCachedItem(name, data.item);
+      refreshRenderedItemThumbs(name, data.item);
+    }
+    state.imageRefreshToken = `${Date.now()}-swap-${sourceRole}-${targetRole}-${name}`;
     setAiStatusLine(`已对调：${ROLE_LABELS[sourceRole] || sourceRole} <-> ${ROLE_LABELS[targetRole] || targetRole}`);
     await refreshItems({ skipDirtyCheck: true });
+    if (data.item) refreshRenderedItemThumbs(name, data.item);
   }
 
   function ensureViewerRoleDragEvents() {
@@ -2168,7 +2304,7 @@ export function createBrowserModule({
       const files = droppedImageFiles(event.dataTransfer);
       if ((itemDragSource?.name || types.includes(ITEM_DRAG_TYPE)) && canAssignListItemToViewerControl(targetRole)) {
         event.preventDefault();
-        if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+        if (event.dataTransfer) event.dataTransfer.dropEffect = state.currentItem?.exists?.[targetRole] ? "move" : "copy";
         refs.viewerGrid.querySelectorAll(".role-drop-target").forEach((node) => {
           if (node !== card) node.classList.remove("role-drop-target");
         });
@@ -2210,7 +2346,12 @@ export function createBrowserModule({
       clearViewerRoleDragClasses();
       if (sourceName && canAssignListItemToViewerControl(targetRole)) {
         event.preventDefault();
-        assignItemControlImage(sourceName, state.currentItem.name, targetRole, sourceItemRole).catch(showError || console.error);
+        const targetExists = Boolean(state.currentItem?.exists?.[targetRole]);
+        const normalizedSourceRole = sourceItemRole || "result";
+        const action = targetExists
+          ? swapItemImages(sourceName, normalizedSourceRole, state.currentItem.name, targetRole)
+          : assignItemControlImage(sourceName, state.currentItem.name, targetRole, normalizedSourceRole);
+        action.catch(showError || console.error);
         return;
       }
       if (files.length === 1 && canAssignListItemToViewerControl(targetRole)) {
@@ -2267,7 +2408,7 @@ export function createBrowserModule({
       }
       stage.textContent = "";
       const img = document.createElement("img");
-      img.src = imageUrl(role, item.name);
+      img.src = imageUrl(role, item.name, false, 320, 220, imageVersionForItem(item, role));
       img.alt = item.name;
       img.draggable = false;
       img.title = "点击打开大图预览";
@@ -2441,6 +2582,29 @@ export function createBrowserModule({
     renderWorkspaceSummary();
   }
 
+  function clearWorkspaceView() {
+    state.workspace = null;
+    state.items = [];
+    state.visibleItems = [];
+    state.secondaryItems = [];
+    state.secondaryVisibleItems = [];
+    state.itemStats = null;
+    state.selectedName = "";
+    state.primarySelectedName = "";
+    state.secondarySelectedName = "";
+    state.currentItem = null;
+    state.globalSegments = [];
+    state.imageRefreshToken = `${Date.now()}-workspace-cleared`;
+    clearListViewState();
+    setCaptionEditorText("", { markSaved: true });
+    renderFilters();
+    renderItemList();
+    renderViewer();
+    renderTags();
+    renderGlobalTags();
+    renderWorkspaceSummary();
+  }
+
   function ensureExportIncludeControlsForActiveControls() {
     const controlCount = activeControlCount();
     if (!refs.exportIncludeControls || controlCount < 1) return;
@@ -2472,6 +2636,10 @@ export function createBrowserModule({
     applyWorkspaceSummary(data.workspace);
     saveLastWorkspaceOpenPayload(payload);
     await refreshItems();
+    if (typeof autoSaveProjectAfterWorkspaceOpen === "function") {
+      setAiStatusLine(state.currentProjectId ? "正在保存导入图片到当前项目..." : "正在创建缓存项目...");
+      await autoSaveProjectAfterWorkspaceOpen();
+    }
     closeUtilityPanel();
   }
 
@@ -2492,6 +2660,10 @@ export function createBrowserModule({
     });
     applyWorkspaceSummary(data.workspace);
     await refreshItems({ skipDirtyCheck: true });
+    if (typeof autoSaveProjectAfterWorkspaceOpen === "function") {
+      setAiStatusLine(state.currentProjectId ? "正在保存追加图片到当前项目..." : "正在创建缓存项目...");
+      await autoSaveProjectAfterWorkspaceOpen();
+    }
     refs.mergeStatus.textContent = `已追加 ${data.merged || 0} 项到当前工作区`;
     setAiStatusLine(`已追加数据集：${data.merged || 0} 项`);
   }
@@ -2571,6 +2743,7 @@ export function createBrowserModule({
     refreshItems,
     selectItem,
     applyWorkspaceSummary,
+    clearWorkspaceView,
     loadWorkspace,
     rescanWorkspace,
     mergeWorkspace,
