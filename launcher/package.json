@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "tauri dev",
     "build": "tauri build --no-bundle",
-    "bundle": "tauri build"
+    "bundle": "tauri build --bundles app --config src-tauri/tauri.macos.conf.json",
+    "bundle:all": "tauri build"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.0.0"

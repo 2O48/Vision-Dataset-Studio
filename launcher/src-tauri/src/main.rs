@@ -187,6 +187,7 @@ fn main() {
                 if let Ok(icon) = Image::from_bytes(include_bytes!("../icons/icon-512.png")) {
                     let _ = window.set_icon(icon);
                 }
+                apply_platform_window_style(&window);
             }
 
             start_backend_for_app(app.handle().clone(), app.state::<Arc<LauncherState>>().inner().clone());
@@ -319,6 +320,7 @@ fn launcher_terminal_theme(state: tauri::State<'_, Arc<LauncherState>>) -> Strin
 #[tauri::command]
 fn launcher_open_terminal(app: AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("terminal") {
+        apply_platform_window_style(&window);
         let _ = window.show();
         let _ = window.set_focus();
         return Ok(());
@@ -335,14 +337,102 @@ fn launcher_open_terminal(app: AppHandle) -> Result<(), String> {
     .min_inner_size(680.0, 420.0)
     .center()
     .resizable(true)
-    .decorations(false)
-    .transparent(false);
+    .decorations(false);
     if let Some(icon) = icon {
         builder = builder.icon(icon).map_err(|error| error.to_string())?;
     }
     let window = builder.build().map_err(|error| error.to_string())?;
+    apply_platform_window_style(&window);
     let _ = window.set_focus();
     Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn apply_platform_window_style(_window: &tauri::WebviewWindow) {}
+
+#[cfg(target_os = "macos")]
+fn apply_platform_window_style(window: &tauri::WebviewWindow) {
+    use objc2::rc::Retained;
+    use objc2::{msg_send, runtime::AnyObject};
+    use objc2_app_kit::{NSColor, NSWindow};
+    use objc2_foundation::{NSPoint, NSRect};
+
+    const CORNER_RADIUS: f64 = 16.0;
+    const NS_WINDOW_STYLE_MASK_TITLED: usize = 1 << 0;
+    const NS_WINDOW_STYLE_MASK_CLOSABLE: usize = 1 << 1;
+    const NS_WINDOW_STYLE_MASK_MINIATURIZABLE: usize = 1 << 2;
+    const NS_WINDOW_STYLE_MASK_RESIZABLE: usize = 1 << 3;
+    const NS_WINDOW_STYLE_MASK_FULL_SIZE_CONTENT_VIEW: usize = 1 << 15;
+    const NS_WINDOW_TITLE_HIDDEN: isize = 1;
+
+    unsafe fn round_view(view: *mut AnyObject, radius: f64) {
+        if view.is_null() {
+            return;
+        }
+
+        let _: () = unsafe { msg_send![view, setWantsLayer: true] };
+        let layer: *mut AnyObject = unsafe { msg_send![view, layer] };
+        if !layer.is_null() {
+            let _: () = unsafe { msg_send![layer, setCornerRadius: radius] };
+            let _: () = unsafe { msg_send![layer, setMasksToBounds: true] };
+        }
+    }
+
+    unsafe fn place_standard_button(ns_window: &NSWindow, button_kind: usize, x: f64) {
+        let button: *mut AnyObject = unsafe { msg_send![ns_window, standardWindowButton: button_kind] };
+        if button.is_null() {
+            return;
+        }
+
+        let superview: *mut AnyObject = unsafe { msg_send![button, superview] };
+        let y = if superview.is_null() {
+            0.0
+        } else {
+            let bounds: NSRect = unsafe { msg_send![superview, bounds] };
+            (bounds.size.height - 27.0).max(5.0)
+        };
+        let _: () = unsafe { msg_send![button, setHidden: false] };
+        let _: () = unsafe { msg_send![button, setFrameOrigin: NSPoint::new(x, y)] };
+    }
+
+    unsafe fn enable_native_traffic_lights(ns_window: &NSWindow) {
+        let style_mask: usize = unsafe { msg_send![ns_window, styleMask] };
+        let style_mask = style_mask
+            | NS_WINDOW_STYLE_MASK_TITLED
+            | NS_WINDOW_STYLE_MASK_CLOSABLE
+            | NS_WINDOW_STYLE_MASK_MINIATURIZABLE
+            | NS_WINDOW_STYLE_MASK_RESIZABLE
+            | NS_WINDOW_STYLE_MASK_FULL_SIZE_CONTENT_VIEW;
+        let _: () = unsafe { msg_send![ns_window, setStyleMask: style_mask] };
+        let _: () = unsafe { msg_send![ns_window, setTitleVisibility: NS_WINDOW_TITLE_HIDDEN] };
+        let _: () = unsafe { msg_send![ns_window, setTitlebarAppearsTransparent: true] };
+
+        place_standard_button(ns_window, 0, 18.0);
+        place_standard_button(ns_window, 1, 38.0);
+        place_standard_button(ns_window, 2, 58.0);
+    }
+
+    unsafe {
+        if let Ok(ns_window_ptr) = window.ns_window() {
+            if !ns_window_ptr.is_null() {
+                let ns_window: &NSWindow = &*ns_window_ptr.cast();
+                enable_native_traffic_lights(ns_window);
+                ns_window.setOpaque(false);
+                ns_window.setBackgroundColor(Some(&NSColor::clearColor()));
+                ns_window.setHasShadow(true);
+
+                if let Some(content_view) = ns_window.contentView() {
+                    round_view(Retained::as_ptr(&content_view).cast_mut().cast(), CORNER_RADIUS);
+                }
+            }
+        }
+
+        if let Ok(ns_view_ptr) = window.ns_view() {
+            if !ns_view_ptr.is_null() {
+                round_view(ns_view_ptr.cast(), CORNER_RADIUS);
+            }
+        }
+    }
 }
 
 fn start_backend_for_app(app_handle: AppHandle, state: Arc<LauncherState>) {
@@ -441,6 +531,9 @@ fn update_repo_in_background(root: PathBuf) {
 }
 
 fn with_hidden_window(command: &mut Command) {
+    #[cfg(not(windows))]
+    let _ = command;
+
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;

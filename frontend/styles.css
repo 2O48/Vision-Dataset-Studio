@@ -789,7 +789,6 @@ button {
   height: 72px;
   display: block;
   justify-self: center;
-  border-radius: 16px;
   object-fit: contain;
   filter: drop-shadow(0 12px 20px rgba(15, 23, 42, 0.16));
 }
@@ -4096,9 +4095,26 @@ textarea::-webkit-resizer {
   box-shadow: var(--panel-shadow);
   -webkit-backdrop-filter: saturate(135%) blur(var(--side-panel-blur));
   backdrop-filter: saturate(135%) blur(var(--side-panel-blur));
+  contain: layout paint style;
   transition:
     background-color var(--side-panel-duration) var(--side-panel-ease),
     border-color var(--side-panel-duration) var(--side-panel-ease);
+}
+
+.workbench-shell.side-panel-animating .utility-page-shell .utility-panel>.card,
+.workbench-shell.side-panel-animating .caption-settings-shell>.card {
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+.workbench-shell:not(.utility-open) .utility-page-shell .utility-panel>.card,
+.workbench-shell:not(.caption-settings-open) .caption-settings-shell>.card {
+  content-visibility: hidden;
+  contain-intrinsic-size: 360px 720px;
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
 }
 
 .utility-page-shell .utility-panel>.card {
@@ -4800,6 +4816,22 @@ textarea::-webkit-resizer {
   box-shadow: var(--panel-shadow);
   -webkit-backdrop-filter: var(--glass-filter);
   backdrop-filter: var(--glass-filter);
+}
+
+.workbench-shell.side-panel-animating .utility-page-shell .utility-panel>.card,
+.workbench-shell.side-panel-animating .caption-settings-shell>.card {
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+.workbench-shell:not(.utility-open) .utility-page-shell .utility-panel>.card,
+.workbench-shell:not(.caption-settings-open) .caption-settings-shell>.card {
+  content-visibility: hidden;
+  contain-intrinsic-size: 360px 720px;
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
 }
 
 .workbench-shell.utility-open .utility-page-shell .utility-panel>.card {

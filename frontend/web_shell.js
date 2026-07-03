@@ -10,6 +10,7 @@ export function createShellModule({
   getOllamaCaptionPayload,
 }) {
   let lastTerminalStatusLine = "";
+  let sidePanelAnimationTimer = 0;
 
   function launcherInvoke(command, args) {
     const api = window.__TAURI__?.core;
@@ -45,6 +46,16 @@ export function createShellModule({
     return refs.utilityPageShell?.querySelector(`.utility-panel[data-panel="${panel}"]`);
   }
 
+  function markSidePanelAnimating() {
+    const shell = refs.workbenchShell;
+    if (!shell) return;
+    shell.classList.add("side-panel-animating");
+    window.clearTimeout(sidePanelAnimationTimer);
+    sidePanelAnimationTimer = window.setTimeout(() => {
+      shell.classList.remove("side-panel-animating");
+    }, 620);
+  }
+
   function syncCaptionSettingsPanel() {
     const shell = refs.workbenchShell;
     if (!shell) return;
@@ -54,6 +65,7 @@ export function createShellModule({
   }
 
   function renderUtilityPanelState() {
+    markSidePanelAnimating();
     const panel = utilityPanelExists(state.utilityPanel) ? state.utilityPanel : "workspace";
     state.utilityPanel = panel;
     refs.utilityPageShell?.setAttribute("aria-hidden", state.utilityOpen ? "false" : "true");

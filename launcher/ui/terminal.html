@@ -24,34 +24,51 @@
         box-sizing: border-box;
       }
 
-      html,
-      body {
-        width: 100%;
-        height: 100%;
-        margin: 0;
-        overflow: hidden;
-        background: var(--bg);
-      }
+	      html,
+	      body {
+	        width: 100%;
+	        height: 100%;
+	        margin: 0;
+	        overflow: hidden;
+	        background: var(--bg);
+	      }
 
-      body {
-        display: grid;
-        grid-template-rows: 40px 1fr;
-        user-select: none;
-        -webkit-user-select: none;
-      }
+	      html.mac-window-chrome,
+	      html.mac-window-chrome body {
+	        background: transparent;
+	      }
 
-      .titlebar {
-        display: flex;
-        align-items: center;
+	      body {
+	        display: grid;
+	        grid-template-rows: 40px 1fr;
+	        user-select: none;
+	        -webkit-user-select: none;
+	      }
+
+	      html.mac-window-chrome body {
+	        border-radius: 16px;
+	        background: var(--bg);
+	        clip-path: inset(0 round 16px);
+	      }
+
+	      .titlebar {
+	        display: flex;
+	        align-items: center;
         justify-content: space-between;
         height: 40px;
         padding: 6px 8px 6px 14px;
-        background: var(--bg);
-        border-bottom: 1px solid var(--line);
-      }
+	        background: var(--bg);
+	        border-bottom: 1px solid var(--line);
+	      }
 
-      .title {
-        min-width: 0;
+	      html.mac-window-chrome .titlebar {
+	        justify-content: flex-start;
+	        gap: 12px;
+	        padding: 6px 14px;
+	      }
+
+	      .title {
+	        min-width: 0;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
@@ -59,11 +76,16 @@
         font-size: 12px;
         font-weight: 700;
         letter-spacing: 0;
-        pointer-events: none;
-      }
+	        pointer-events: none;
+	      }
 
-      .window-controls {
-        display: grid;
+	      html.mac-window-chrome .title {
+	        order: 2;
+	        padding-left: 4px;
+	      }
+
+	      .window-controls {
+	        display: grid;
         grid-template-columns: repeat(3, 32px);
         height: 32px;
         color: var(--muted);
@@ -93,13 +115,88 @@
         color: #ffffff;
       }
 
-      .window-controls svg {
-        width: 18px;
-        height: 18px;
-        display: block;
-        fill: currentColor;
-        pointer-events: none;
-      }
+	      .window-controls svg {
+	        width: 18px;
+	        height: 18px;
+	        display: block;
+	        fill: currentColor;
+	        pointer-events: none;
+	      }
+
+	      html.mac-window-chrome .window-controls {
+	        order: 1;
+	        display: flex;
+	        align-items: center;
+	        gap: 8px;
+	        width: auto;
+	        height: 14px;
+	        color: transparent;
+	        pointer-events: none;
+	        visibility: hidden;
+	      }
+
+	      html.mac-window-chrome .window-controls button {
+	        width: 12px;
+	        height: 12px;
+	        min-width: 12px;
+	        border: 1px solid rgba(0, 0, 0, 0.16);
+	        border-radius: 999px;
+	        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
+	        color: transparent;
+	        position: relative;
+	      }
+
+	      html.mac-window-chrome .window-controls button[data-action="close"] {
+	        order: 1;
+	        background: #ff5f57;
+	      }
+
+	      html.mac-window-chrome .window-controls button[data-action="minimize"] {
+	        order: 2;
+	        background: #febc2e;
+	      }
+
+	      html.mac-window-chrome .window-controls button[data-action="maximize"] {
+	        order: 3;
+	        background: #28c840;
+	      }
+
+	      html.mac-window-chrome .window-controls button:hover {
+	        filter: brightness(0.96);
+	      }
+
+	      html.mac-window-chrome .window-controls:hover button::after {
+	        position: absolute;
+	        inset: 0;
+	        display: grid;
+	        place-items: center;
+	        color: rgba(0, 0, 0, 0.58);
+	        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+	        font-size: 9px;
+	        font-weight: 800;
+	        line-height: 1;
+	      }
+
+	      html.mac-window-chrome .window-controls:hover button[data-action="close"]::after {
+	        content: "x";
+	      }
+
+	      html.mac-window-chrome .window-controls:hover button[data-action="minimize"]::after {
+	        content: "-";
+	        transform: translateY(-0.5px);
+	      }
+
+	      html.mac-window-chrome .window-controls:hover button[data-action="maximize"]::after {
+	        content: "+";
+	      }
+
+	      html.mac-window-chrome .window-controls button[data-action="close"]:hover {
+	        background: #ff5f57;
+	      }
+
+	      html.mac-window-chrome .window-controls svg {
+	        display: none;
+	      }
 
       .terminal-shell {
         min-height: 0;
@@ -145,12 +242,17 @@
     <main class="terminal-shell">
       <pre class="terminal" id="terminal">loading...</pre>
     </main>
-    <script>
-      (function () {
-        const terminal = document.getElementById("terminal");
-        const themeStyle = document.createElement("style");
-        themeStyle.id = "terminal-theme-bridge";
-        document.head.appendChild(themeStyle);
+	    <script>
+	      (function () {
+        const macWindowChrome = /Mac/i.test(navigator.platform || "");
+        if (macWindowChrome) {
+          document.documentElement.classList.add("mac-window-chrome");
+        }
+
+	        const terminal = document.getElementById("terminal");
+	        const themeStyle = document.createElement("style");
+	        themeStyle.id = "terminal-theme-bridge";
+	        document.head.appendChild(themeStyle);
 
         function internalsInvoke(command, args) {
           const internals = window.__TAURI_INTERNALS__;

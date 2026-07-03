@@ -1,0 +1,38 @@
+{
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Vision Dataset Studio",
+        "width": 1440,
+        "height": 920,
+        "minWidth": 1024,
+        "minHeight": 720,
+        "resizable": true,
+        "decorations": false,
+        "transparent": true,
+        "dragDropEnabled": false,
+        "fullscreen": false
+      },
+      {
+        "label": "terminal",
+        "url": "terminal.html",
+        "title": "Vision Dataset Studio Terminal",
+        "width": 920,
+        "height": 560,
+        "minWidth": 680,
+        "minHeight": 420,
+        "center": true,
+        "resizable": true,
+        "decorations": false,
+        "transparent": true,
+        "dragDropEnabled": false,
+        "visible": false,
+        "fullscreen": false
+      }
+    ]
+  },
+  "bundle": {
+    "targets": ["app"]
+  }
+}
