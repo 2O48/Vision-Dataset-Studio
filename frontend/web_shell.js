@@ -17,19 +17,8 @@ export function createShellModule({
     const shell = refs.workbenchShell;
     if (!shell) return;
     refs.captionSettingsShell?.setAttribute("aria-hidden", state.captionSettingsOpen ? "false" : "true");
-
-    if (state.captionSettingsOpen) {
-      shell.classList.remove("caption-settings-resizer-hidden");
-      shell.classList.add("caption-settings-rendered");
-      void shell.offsetWidth;
-      shell.classList.add("caption-settings-open");
-      return;
-    }
-
-    if (shell.classList.contains("caption-settings-open")) {
-      shell.classList.add("caption-settings-resizer-hidden");
-    }
-    shell.classList.remove("caption-settings-open");
+    shell.classList.toggle("caption-settings-open", state.captionSettingsOpen);
+    shell.classList.toggle("caption-settings-resizer-hidden", !state.captionSettingsOpen);
   }
 
   function renderUtilityPanelState() {
@@ -38,9 +27,6 @@ export function createShellModule({
     refs.utilityPageShell?.setAttribute("aria-hidden", state.utilityOpen ? "false" : "true");
     refs.workbenchShell?.classList.toggle("utility-open", state.utilityOpen);
     syncCaptionSettingsPanel();
-    if (refs.utilityPageTitle) {
-      refs.utilityPageTitle.textContent = UTILITY_PANEL_LABELS[panel] || "配置";
-    }
     refs.utilityActions?.querySelectorAll("button[data-panel]").forEach((button) => {
       const isCurrent = button.dataset.panel === panel;
       button.classList.toggle("active", state.utilityOpen && isCurrent);
@@ -48,9 +34,6 @@ export function createShellModule({
     });
     refs.utilityPageShell?.querySelectorAll(".utility-panel").forEach((node) => {
       node.classList.toggle("active", node.dataset.panel === panel);
-    });
-    refs.captionSettingsShell?.querySelectorAll(".utility-panel").forEach((node) => {
-      node.classList.toggle("active", state.captionSettingsOpen);
     });
     refs.openCaptionSettingsBtn?.classList.toggle("active", state.captionSettingsOpen);
     refs.openCaptionSettingsBtn?.setAttribute("aria-pressed", String(state.captionSettingsOpen));

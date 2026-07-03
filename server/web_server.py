@@ -54,6 +54,7 @@ FRONTEND_DIR = BASE_DIR / "frontend"
 INDEX_FILE = FRONTEND_DIR / "index.html"
 APP_JS_FILE = FRONTEND_DIR / "app.js"
 STYLES_FILE = FRONTEND_DIR / "styles.css"
+ASSETS_DIR = FRONTEND_DIR / "assets"
 FAVICON_FILE = FRONTEND_DIR / "assets" / "favicon.png"
 PROMPT_TEMPLATES_FILE = BASE_DIR / "prompt_templates.json"
 THUMB_CACHE_MAX_ITEMS = 256
@@ -268,6 +269,23 @@ class AppHandler(BaseHTTPRequestHandler):
     def _send_text_file(self, path: Path, content_type: str):
         self._send_bytes(path.read_bytes(), content_type)
 
+    def _send_asset_file(self, request_path: str):
+        target = (ASSETS_DIR / request_path.removeprefix("/assets/")).resolve()
+        if not is_relative_to(target, ASSETS_DIR) or not target.is_file():
+            return self._error(f"Unknown route: {request_path}", status=404)
+        suffix = target.suffix.lower()
+        content_types = {
+            ".png": "image/png",
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".webp": "image/webp",
+            ".svg": "image/svg+xml; charset=utf-8",
+            ".ico": "image/x-icon",
+            ".cur": "image/x-icon",
+            ".ani": "application/x-navi-animation",
+        }
+        return self._send_text_file(target, content_types.get(suffix, "application/octet-stream"))
+
     def _error(self, message: str, status: int = 400):
         self._send_json({"ok": False, "error": message}, status)
 
@@ -288,6 +306,8 @@ class AppHandler(BaseHTTPRequestHandler):
                 return self._send_text_file(target, "text/javascript; charset=utf-8")
             if path == "/styles.css":
                 return self._send_text_file(STYLES_FILE, "text/css; charset=utf-8")
+            if path.startswith("/assets/"):
+                return self._send_asset_file(path)
             if path == "/favicon.png":
                 return self._send_text_file(FAVICON_FILE, "image/png")
             if path == "/api/workspace":

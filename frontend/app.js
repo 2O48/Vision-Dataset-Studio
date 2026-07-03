@@ -74,7 +74,7 @@ const state = {
   captionAutoSavePromise: null,
   currentSegments: [],
   quickTags: [],
-  quickTagsCollapsed: true,
+  quickTagsCollapsed: false,
   quickTagClickTimer: null,
   quickTagDragIndex: null,
   quickTagSortTimer: 0,
@@ -113,11 +113,15 @@ const state = {
   projectQuery: "",
   projectSortMode: readStored(STORAGE_KEYS.projectSortMode, "updated"),
   themeMode: readStored(STORAGE_KEYS.themeMode, "auto"),
+  wallpaper: readStored(STORAGE_KEYS.wallpaper, "none"),
 };
 
 let renderTags = () => {};
 let renderGlobalTags = () => {};
 let flushCaptionAutosave = async () => true;
+const wallpaperImageCache = new Map();
+let bottomStatusContrastRaf = 0;
+const slidingToggleGroups = new Set();
 
 const refs = {
   workbenchShell: document.querySelector("#workbenchShell"),
@@ -126,14 +130,14 @@ const refs = {
   utilityPageShell: document.querySelector("#utilityPageShell"),
   leftPanelResizer: document.querySelector("#leftPanelResizer"),
   listViewerResizer: document.querySelector("#listViewerResizer"),
-  utilityPageTitle: document.querySelector("#utilityPageTitle"),
-  closeUtilityBtn: document.querySelector("#closeUtilityBtn"),
+  wallpaperSwitcher: document.querySelector("#wallpaperSwitcher"),
+  wallpaperMenu: document.querySelector("#wallpaperMenu"),
   themeModeGroup: document.querySelector("#themeModeGroup"),
+  bottomStatusBar: document.querySelector(".bottom-status-bar"),
   captionSettingsShell: document.querySelector("#captionSettingsShell"),
   rightPanelResizer: document.querySelector("#rightPanelResizer"),
   viewerEditorResizer: document.querySelector("#viewerEditorResizer"),
   captionGlobalResizer: document.querySelector("#captionGlobalResizer"),
-  closeCaptionSettingsBtn: document.querySelector("#closeCaptionSettingsBtn"),
   control1Dir: document.querySelector("#control1Dir"),
   control2Dir: document.querySelector("#control2Dir"),
   control3Dir: document.querySelector("#control3Dir"),
@@ -559,6 +563,63 @@ function syncBottomStatusTooltips() {
   });
 }
 
+function slidingToggleButtons(group) {
+  return Array.from(group?.querySelectorAll(":scope > button") || []);
+}
+
+function slidingToggleActiveButton(group) {
+  const buttons = slidingToggleButtons(group);
+  return buttons.find((button) =>
+    button.classList.contains("active") ||
+    button.getAttribute("aria-pressed") === "true" ||
+    button.getAttribute("aria-selected") === "true"
+  ) || buttons[0] || null;
+}
+
+function updateSlidingToggleIndicator(group) {
+  if (!group?.isConnected) return;
+  let indicator = group.querySelector(":scope > .sliding-toggle-indicator");
+  if (!indicator) {
+    indicator = document.createElement("span");
+    indicator.className = "sliding-toggle-indicator";
+    indicator.setAttribute("aria-hidden", "true");
+    group.append(indicator);
+  }
+  const activeButton = slidingToggleActiveButton(group);
+  if (!activeButton) {
+    indicator.style.opacity = "0";
+    return;
+  }
+  const groupRect = group.getBoundingClientRect();
+  const buttonRect = activeButton.getBoundingClientRect();
+  const left = buttonRect.left - groupRect.left - group.clientLeft;
+  const top = buttonRect.top - groupRect.top - group.clientTop;
+  indicator.style.opacity = "1";
+  indicator.style.left = `${Math.round(left)}px`;
+  indicator.style.top = `${Math.round(top)}px`;
+  indicator.style.width = `${Math.round(buttonRect.width)}px`;
+  indicator.style.height = `${Math.round(buttonRect.height)}px`;
+}
+
+function registerSlidingToggleGroup(group) {
+  if (!group || slidingToggleGroups.has(group)) return;
+  group.classList.add("sliding-toggle-host");
+  slidingToggleGroups.add(group);
+  updateSlidingToggleIndicator(group);
+  const observer = new MutationObserver(() => updateSlidingToggleIndicator(group));
+  observer.observe(group, {
+    subtree: true,
+    attributes: true,
+    attributeFilter: ["class", "aria-pressed", "aria-selected", "hidden"],
+  });
+  group.__slidingToggleObserver = observer;
+}
+
+function syncSlidingToggleIndicators(root = document) {
+  root.querySelectorAll(".caption-backend-tabs, .list-search-mode-toggle").forEach(registerSlidingToggleGroup);
+  slidingToggleGroups.forEach((group) => updateSlidingToggleIndicator(group));
+}
+
 const themeMediaQuery = window.matchMedia?.("(prefers-color-scheme: dark)");
 
 function normalizeThemeMode(mode) {
@@ -582,6 +643,7 @@ function renderThemeMode() {
     button.classList.toggle("active", isActive);
     button.setAttribute("aria-pressed", String(isActive));
   });
+  scheduleBottomStatusContrastUpdate();
 }
 
 function setThemeMode(mode, { persist = true } = {}) {
@@ -590,17 +652,222 @@ function setThemeMode(mode, { persist = true } = {}) {
   renderThemeMode();
 }
 
+function wallpaperOptions() {
+  return Array.from(refs.wallpaperMenu?.querySelectorAll("button[data-wallpaper]") || []);
+}
+
+function normalizeWallpaper(wallpaper) {
+  const value = `${wallpaper || "none"}`;
+  const options = wallpaperOptions();
+  return options.some((button) => button.dataset.wallpaper === value) ? value : "none";
+}
+
+function renderWallpaper() {
+  const wallpaper = normalizeWallpaper(state.wallpaper);
+  state.wallpaper = wallpaper;
+  document.documentElement.dataset.wallpaper = wallpaper === "none" ? "none" : "image";
+  if (wallpaper === "none") {
+    document.documentElement.style.removeProperty("--app-wallpaper-image");
+  } else {
+    document.documentElement.style.setProperty("--app-wallpaper-image", `url("/assets/wallpapers/${wallpaper}")`);
+  }
+  wallpaperOptions().forEach((button) => {
+    const isSelected = button.dataset.wallpaper === wallpaper;
+    button.dataset.selected = isSelected ? "true" : "false";
+    button.setAttribute("aria-selected", String(isSelected));
+  });
+  scheduleBottomStatusContrastUpdate();
+}
+
+function setWallpaper(wallpaper, { persist = true } = {}) {
+  state.wallpaper = normalizeWallpaper(wallpaper);
+  if (persist) saveStored(STORAGE_KEYS.wallpaper, state.wallpaper);
+  renderWallpaper();
+}
+
+function updateWallpaperMenuPosition() {
+  const trigger = refs.wallpaperSwitcher?.querySelector(".wallpaper-trigger");
+  const menu = refs.wallpaperMenu;
+  if (!trigger || !menu) return;
+  const triggerRect = trigger.getBoundingClientRect();
+  const menuWidth = menu.offsetWidth || 174;
+  const menuHeight = menu.offsetHeight || 174;
+  const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0;
+  const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+  const gutter = 12;
+  const edge = 8;
+  const left = Math.max(edge, Math.min(triggerRect.right + gutter, viewportWidth - menuWidth - edge));
+  const top = Math.max(edge, Math.min(triggerRect.bottom - menuHeight, viewportHeight - menuHeight - edge));
+  menu.style.setProperty("--wallpaper-menu-left", `${Math.round(left)}px`);
+  menu.style.setProperty("--wallpaper-menu-top", `${Math.round(top)}px`);
+}
+
+function clampByte(value) {
+  return Math.max(0, Math.min(255, Number.isFinite(value) ? value : 0));
+}
+
+function parseRgbColor(colorText) {
+  const match = `${colorText || ""}`.match(/rgba?\(([^)]+)\)/i);
+  if (!match) return null;
+  const [r, g, b] = match[1].split(",").slice(0, 3).map((part) => clampByte(Number.parseFloat(part)));
+  return [r, g, b];
+}
+
+function srgbToLinear(channel) {
+  const normalized = clampByte(channel) / 255;
+  return normalized <= 0.04045 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4;
+}
+
+function relativeLuminance([r, g, b]) {
+  return 0.2126 * srgbToLinear(r) + 0.7152 * srgbToLinear(g) + 0.0722 * srgbToLinear(b);
+}
+
+function contrastRatio(foreground, background) {
+  const lighter = Math.max(relativeLuminance(foreground), relativeLuminance(background));
+  const darker = Math.min(relativeLuminance(foreground), relativeLuminance(background));
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
+function averagePixels(data) {
+  let r = 0;
+  let g = 0;
+  let b = 0;
+  let count = 0;
+  for (let index = 0; index < data.length; index += 4) {
+    const alpha = data[index + 3] / 255;
+    if (alpha <= 0) continue;
+    r += data[index] * alpha;
+    g += data[index + 1] * alpha;
+    b += data[index + 2] * alpha;
+    count += alpha;
+  }
+  if (!count) return [238, 238, 238];
+  return [Math.round(r / count), Math.round(g / count), Math.round(b / count)];
+}
+
+function loadWallpaperImage(src) {
+  if (!src) return Promise.resolve(null);
+  if (wallpaperImageCache.has(src)) return wallpaperImageCache.get(src);
+  const imagePromise = new Promise((resolve) => {
+    const image = new Image();
+    image.decoding = "async";
+    image.onload = () => resolve(image);
+    image.onerror = () => resolve(null);
+    image.src = src;
+  });
+  wallpaperImageCache.set(src, imagePromise);
+  return imagePromise;
+}
+
+function sampleSolidBackgroundColor() {
+  const bodyColor = parseRgbColor(window.getComputedStyle(document.body).backgroundColor);
+  return bodyColor || [238, 238, 238];
+}
+
+async function sampleBottomStatusBackgroundColor() {
+  const footer = refs.bottomStatusBar;
+  if (!footer) return sampleSolidBackgroundColor();
+  if (document.documentElement.dataset.wallpaper !== "image") return sampleSolidBackgroundColor();
+
+  const wallpaper = normalizeWallpaper(state.wallpaper);
+  if (!wallpaper || wallpaper === "none") return sampleSolidBackgroundColor();
+  const image = await loadWallpaperImage(`/assets/wallpapers/${wallpaper}`);
+  if (!image?.naturalWidth || !image?.naturalHeight) return sampleSolidBackgroundColor();
+
+  const footerRect = footer.getBoundingClientRect();
+  const bodyRect = document.body.getBoundingClientRect();
+  const bodyWidth = Math.max(document.body.clientWidth, document.documentElement.clientWidth, 1);
+  const bodyHeight = Math.max(document.body.scrollHeight, document.body.clientHeight, window.innerHeight, 1);
+  const coverScale = Math.max(bodyWidth / image.naturalWidth, bodyHeight / image.naturalHeight);
+  const renderedWidth = image.naturalWidth * coverScale;
+  const renderedHeight = image.naturalHeight * coverScale;
+  const offsetX = (bodyWidth - renderedWidth) / 2;
+  const offsetY = (bodyHeight - renderedHeight) / 2;
+
+  const sampleLeft = Math.max(0, footerRect.left - bodyRect.left);
+  const sampleTop = Math.max(0, footerRect.top - bodyRect.top);
+  const sampleWidth = Math.max(1, Math.min(footerRect.width, bodyWidth - sampleLeft));
+  const sampleHeight = Math.max(1, Math.min(footerRect.height, bodyHeight - sampleTop));
+
+  const sourceX = Math.max(0, (sampleLeft - offsetX) / coverScale);
+  const sourceY = Math.max(0, (sampleTop - offsetY) / coverScale);
+  const sourceWidth = Math.max(1, Math.min(image.naturalWidth - sourceX, sampleWidth / coverScale));
+  const sourceHeight = Math.max(1, Math.min(image.naturalHeight - sourceY, sampleHeight / coverScale));
+
+  const canvas = document.createElement("canvas");
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!context) return sampleSolidBackgroundColor();
+  canvas.width = 24;
+  canvas.height = 8;
+  context.drawImage(image, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height);
+  return averagePixels(context.getImageData(0, 0, canvas.width, canvas.height).data);
+}
+
+async function updateBottomStatusContrast() {
+  bottomStatusContrastRaf = 0;
+  const footer = refs.bottomStatusBar;
+  if (!footer) return;
+  const background = await sampleBottomStatusBackgroundColor();
+  if (!footer.isConnected) return;
+  const darkText = parseRgbColor(window.getComputedStyle(document.documentElement).getPropertyValue("--list-heading")) || [66, 73, 86];
+  const shouldUseLight = contrastRatio(darkText, background) < 4.5;
+  footer.classList.toggle("status-contrast-light", shouldUseLight);
+}
+
+function scheduleBottomStatusContrastUpdate() {
+  if (bottomStatusContrastRaf) window.cancelAnimationFrame(bottomStatusContrastRaf);
+  bottomStatusContrastRaf = window.requestAnimationFrame(() => {
+    updateBottomStatusContrast().catch(() => {});
+  });
+}
+
 refs.themeModeGroup?.addEventListener("click", (event) => {
   const button = event.target.closest("button[data-theme-mode]");
   if (!button) return;
   setThemeMode(button.dataset.themeMode);
 });
 
+refs.wallpaperMenu?.addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-wallpaper]");
+  if (!button) return;
+  setWallpaper(button.dataset.wallpaper);
+});
+
+refs.wallpaperSwitcher?.querySelector(".wallpaper-trigger")?.addEventListener("click", (event) => {
+  event.stopPropagation();
+  const nextOpen = !refs.wallpaperSwitcher?.classList.contains("open");
+  if (nextOpen) updateWallpaperMenuPosition();
+  refs.wallpaperSwitcher?.classList.toggle("open", nextOpen);
+  event.currentTarget?.setAttribute("aria-expanded", String(nextOpen));
+});
+
+document.addEventListener("click", (event) => {
+  if (!refs.wallpaperSwitcher?.contains(event.target)) {
+    refs.wallpaperSwitcher?.classList.remove("open");
+    refs.wallpaperSwitcher?.querySelector(".wallpaper-trigger")?.setAttribute("aria-expanded", "false");
+  }
+});
+
+window.addEventListener("resize", () => {
+  if (refs.wallpaperSwitcher?.classList.contains("open")) updateWallpaperMenuPosition();
+  scheduleBottomStatusContrastUpdate();
+  syncSlidingToggleIndicators();
+});
+
+window.addEventListener("scroll", () => {
+  if (refs.wallpaperSwitcher?.classList.contains("open")) updateWallpaperMenuPosition();
+  scheduleBottomStatusContrastUpdate();
+}, { passive: true });
+
 themeMediaQuery?.addEventListener?.("change", () => {
   if (state.themeMode === "auto") renderThemeMode();
+  scheduleBottomStatusContrastUpdate();
 });
 
 renderThemeMode();
+renderWallpaper();
+scheduleBottomStatusContrastUpdate();
+syncSlidingToggleIndicators();
 
 const bottomStatusTooltipObserver = new MutationObserver(syncBottomStatusTooltips);
 document.querySelectorAll(".bottom-status-item").forEach((item) => {

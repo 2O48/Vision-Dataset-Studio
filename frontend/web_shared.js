@@ -50,6 +50,7 @@ export const STORAGE_KEYS = {
   quickTagsCollapsed: storageKey("quick-tags-collapsed"),
   projectSortMode: storageKey("project-sort-mode"),
   themeMode: storageKey("theme-mode"),
+  wallpaper: storageKey("wallpaper"),
   captionBackend: storageKey("caption-backend"),
   localModel: storageKey("local-model"),
   localOverwriteMode: storageKey("local-overwrite-mode"),

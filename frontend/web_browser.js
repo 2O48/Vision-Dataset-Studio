@@ -40,6 +40,46 @@ export function createBrowserModule({
   let imagePreview = null;
   let documentFileDropGuardBound = false;
 
+  function setNativeDragFeedbackActive(active) {
+    document.documentElement.classList.toggle("html5-dragging", Boolean(active));
+    document.body?.classList.toggle("html5-dragging", Boolean(active));
+  }
+
+  function animateListHeaderControls() {
+    const controls = [
+      refs.toggleSplitListBtn,
+      refs.locateSelectedBtn,
+      refs.refreshListBtn,
+    ].filter(Boolean);
+    if (!controls.length) return;
+    const beforeRects = new Map(
+      controls.map((control) => [control, control.getBoundingClientRect()])
+    );
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        controls.forEach((control) => {
+          const beforeRect = beforeRects.get(control);
+          if (!beforeRect || !control.isConnected) return;
+          const afterRect = control.getBoundingClientRect();
+          const deltaX = beforeRect.left - afterRect.left;
+          const deltaY = beforeRect.top - afterRect.top;
+          if (Math.abs(deltaX) < 0.5 && Math.abs(deltaY) < 0.5) return;
+          control.animate(
+            [
+              { transform: `translate(${deltaX}px, ${deltaY}px)` },
+              { transform: "translate(0, 0)" },
+            ],
+            {
+              duration: 420,
+              easing: "cubic-bezier(0.22, 1, 0.36, 1)",
+              fill: "both",
+            }
+          );
+        });
+      });
+    });
+  }
+
   function listPanels() {
     return [
       {
@@ -236,6 +276,7 @@ export function createBrowserModule({
   function syncSplitListUi() {
     const listCard = refs.listPanelShell?.closest(".list-card");
     const isOpen = Boolean(state.splitListOpen);
+    animateListHeaderControls();
     if (listCard) {
       if (splitListRenderTimer) {
         window.clearTimeout(splitListRenderTimer);
@@ -272,7 +313,10 @@ export function createBrowserModule({
       } else if (listCard.classList.contains("split-rendered") || listCard.classList.contains("split-open")) {
         listCard.classList.remove("split-open");
         splitListRenderTimer = window.setTimeout(() => {
-          if (!state.splitListOpen) listCard.classList.remove("split-rendered");
+          if (!state.splitListOpen) {
+            animateListHeaderControls();
+            listCard.classList.remove("split-rendered");
+          }
           splitListRenderTimer = 0;
         }, SPLIT_LIST_ANIMATION_MS);
       }
@@ -396,12 +440,16 @@ export function createBrowserModule({
     slot.title = ROLE_LABELS[role] || role;
     slot.addEventListener("dragstart", (event) => {
       event.stopPropagation();
+      setNativeDragFeedbackActive(true);
       event.dataTransfer?.setData(ITEM_DRAG_TYPE, item.name);
       event.dataTransfer?.setData(ITEM_ROLE_DRAG_TYPE, role);
       event.dataTransfer?.setData("text/plain", item.name);
       if (event.dataTransfer) event.dataTransfer.effectAllowed = "copyMove";
       itemDragSource = { name: item.name, role };
       slot.closest(".item-card")?.classList.add("dragging");
+    });
+    slot.addEventListener("dragend", () => {
+      setNativeDragFeedbackActive(false);
     });
     if (canDropItemOnControlRole(role)) {
       slot.classList.add("item-thumb-drop");
@@ -824,6 +872,26 @@ export function createBrowserModule({
         selectItem(next.name, false, { panelId }).catch(showError || console.error);
       }
     });
+    allButton.addEventListener("dragover", (event) => {
+      if (!Array.from(event.dataTransfer?.types || []).includes(ITEM_DRAG_TYPE)) return;
+      event.preventDefault();
+      allButton.classList.add("drag-over");
+      event.dataTransfer.dropEffect = "move";
+    });
+    allButton.addEventListener("dragleave", () => {
+      allButton.classList.remove("drag-over");
+    });
+    allButton.addEventListener("drop", (event) => {
+      const name = event.dataTransfer?.getData(ITEM_DRAG_TYPE) || "";
+      const names = event.dataTransfer?.getData("application/x-vds-item-names") || "";
+      const payloadNames = names ? names.split("\n").map((value) => value.trim()).filter(Boolean) : [];
+      const targetNames = payloadNames.length ? payloadNames : (name ? [name] : []);
+      if (!targetNames.length) return;
+      event.preventDefault();
+      event.stopPropagation();
+      allButton.classList.remove("drag-over");
+      moveItemsToFolder(targetNames, "").catch(showError || console.error);
+    });
     panel.folderFilters.appendChild(allButton);
 
     if (!folders.length) return;
@@ -883,20 +951,20 @@ export function createBrowserModule({
   }
 
   async function moveItemToFolder(name, folder) {
-    if (!name || !folder) return;
+    if (!name || folder == null) return;
     if (itemFolder(name) === folder) return;
     if (!(await confirmDiscardCaptionChanges())) return;
     const data = await apiPost("/api/item/move-folder", { name, folder });
     if (data.workspace) applyWorkspaceSummary(data.workspace);
     setPanelFolderFilter(activeListPanelId(), folder);
-    setAiStatusLine(`已移动到子文件夹：${folder}`);
+    setAiStatusLine(folder ? `已移动到子文件夹：${folder}` : "已移动到项目根目录");
     await refreshItems({ skipDirtyCheck: true, suppressSelectionSync: true });
     await selectItem(data.new_name || name, true, { skipDirtyCheck: true, panelId: activeListPanelId() });
   }
 
   async function moveItemsToFolder(names, folder) {
     const targets = [...new Set(Array.isArray(names) ? names : [names])].filter(Boolean);
-    if (!targets.length || !folder) return;
+    if (!targets.length || folder == null) return;
     if (targets.length === 1) {
       await moveItemToFolder(targets[0], folder);
       return;
@@ -906,7 +974,7 @@ export function createBrowserModule({
     if (data.workspace) applyWorkspaceSummary(data.workspace);
     clearBatchSelection();
     setPanelFilter(activeListPanelId(), panelFilter(activeListPanelId()));
-    setAiStatusLine(`已移动到子文件夹：${folder}（${targets.length} 项）`);
+    setAiStatusLine(folder ? `已移动到子文件夹：${folder}（${targets.length} 项）` : `已移动到项目根目录（${targets.length} 项）`);
     await refreshItems({ skipDirtyCheck: true, suppressSelectionSync: true });
     const nextName = data.moved?.[data.moved.length - 1]?.new_name || targets[0];
     if (nextName) await selectItem(nextName, true, { skipDirtyCheck: true, panelId: activeListPanelId() });
@@ -1830,7 +1898,7 @@ export function createBrowserModule({
         const card = document.createElement("article");
         card.className = `item-card${panelId === activeListPanelId() && item.name === state.selectedName ? " active" : ""}${panelId === batchSelectionPanelId() && batchSelection().has(item.name) ? " multi-selected" : ""}${thumbRoles.length > 1 ? " multi-thumb" : ""}`;
         if (thumbRoles.length > 1) {
-          card.style.setProperty("--item-card-min-width", `${(thumbRoles.length * 88) + ((thumbRoles.length - 1) * 3) + 10 + 50 + 16}px`);
+          card.style.setProperty("--item-card-min-width", `${(thumbRoles.length * 99) + ((thumbRoles.length - 1) * 3) + 10 + 50 + 16}px`);
         }
         card.dataset.name = item.name;
         card.draggable = true;
@@ -1846,6 +1914,7 @@ export function createBrowserModule({
             return;
           }
           const dragNames = itemDragNamesForPanel(item, panelId);
+          setNativeDragFeedbackActive(true);
           event.dataTransfer?.setData(ITEM_DRAG_TYPE, item.name);
           event.dataTransfer?.setData("application/x-vds-item-names", dragNames.join("\n"));
           event.dataTransfer?.setData(ITEM_ROLE_DRAG_TYPE, dragRole);
@@ -1855,6 +1924,7 @@ export function createBrowserModule({
           card.classList.add("dragging");
         });
         card.addEventListener("dragend", () => {
+          setNativeDragFeedbackActive(false);
           itemDragSource = null;
           card.classList.remove("dragging");
           for (const currentPanel of listPanels()) {
@@ -1992,6 +2062,16 @@ export function createBrowserModule({
       .join(" · ");
   }
 
+  function viewerHasResolutionMismatch(item) {
+    if (!item) return false;
+    const resultRes = item.resolution?.result;
+    if (!Array.isArray(resultRes)) return false;
+    return activeControlRoles()
+      .map((role) => item.resolution?.[role])
+      .filter((size) => Array.isArray(size))
+      .some((size) => size[0] !== resultRes[0] || size[1] !== resultRes[1]);
+  }
+
   function renderCurrentMeta(item) {
     refs.currentMeta.textContent = "";
     if (!item) {
@@ -2010,6 +2090,7 @@ export function createBrowserModule({
     const resolutionLine = document.createElement("span");
     resolutionLine.className = "current-meta-line";
     resolutionLine.textContent = viewerResolutionSummary(item);
+    resolutionLine.classList.toggle("is-mismatch", viewerHasResolutionMismatch(item));
 
     refs.currentMeta.append(statusLine, resolutionLine);
   }
@@ -2067,6 +2148,7 @@ export function createBrowserModule({
         event.preventDefault();
         return;
       }
+      setNativeDragFeedbackActive(true);
       event.dataTransfer?.setData(VIEWER_ROLE_DRAG_TYPE, role);
       event.dataTransfer?.setData("text/plain", role);
       if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
@@ -2074,6 +2156,7 @@ export function createBrowserModule({
       card.classList.add("role-dragging");
     });
     refs.viewerGrid.addEventListener("dragend", () => {
+      setNativeDragFeedbackActive(false);
       state.viewerRoleDragging = "";
       clearViewerRoleDragClasses();
     });
@@ -2197,6 +2280,13 @@ export function createBrowserModule({
       stage.appendChild(img);
       const size = item.resolution[role];
       resLabel.textContent = Array.isArray(size) ? `${size[0]}×${size[1]}` : "";
+      const resultSize = item.resolution?.result;
+      const hasResolutionMismatch =
+        role !== "result" &&
+        Array.isArray(size) &&
+        Array.isArray(resultSize) &&
+        (size[0] !== resultSize[0] || size[1] !== resultSize[1]);
+      resLabel.classList.toggle("is-mismatch", hasResolutionMismatch);
     });
 
     const canProcess = Boolean(item);

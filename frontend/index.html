@@ -16,6 +16,22 @@
       const resolved = mode === "dark" || (mode === "auto" && prefersDark) ? "dark" : "light";
       document.documentElement.dataset.themeMode = ["auto", "light", "dark"].includes(mode) ? mode : "auto";
       document.documentElement.dataset.theme = resolved;
+      const wallpaper = window.localStorage.getItem("vds-ui.wallpaper") || "none";
+      const wallpapers = [
+        "alex-r254y37vFEY-unsplash.jpg",
+        "cemrecan-yurtman-dPGb63w0640-unsplash.jpg",
+        "daniel-leone-v7daTKlZzaw-unsplash.jpg",
+        "dominik-schroder-FIKD9t5_5zQ-unsplash.jpg",
+        "marek-piwnicki-5hri_jol2wE-unsplash.jpg",
+        "paul-pastourmatzis-KT3WlrL_bsg-unsplash.jpg",
+        "stephanie-moody-nhZqYi5hH58-unsplash.jpg",
+        "tycho-atsma-D1w4o5V_Y2g-unsplash.jpg",
+      ];
+      const resolvedWallpaper = wallpapers.includes(wallpaper) ? wallpaper : "none";
+      document.documentElement.dataset.wallpaper = resolvedWallpaper === "none" ? "none" : "image";
+      if (resolvedWallpaper !== "none") {
+        document.documentElement.style.setProperty("--app-wallpaper-image", `url("/assets/wallpapers/${resolvedWallpaper}")`);
+      }
     })();
   </script>
   <link rel="stylesheet" href="/styles.css">
@@ -62,8 +78,8 @@
           <label class="caption-engine-field">
             <select id="captionBackend" aria-label="标注引擎">
               <option value="local">本地 Qwen</option>
-              <option value="ollama">Ollama</option>
               <option value="api">OpenAI 兼容 API</option>
+              <option value="ollama">Ollama</option>
             </select>
           </label>
           <button class="top-icon-button" id="openCaptionSettingsBtn" type="button" aria-label="标注配置" title="标注配置">
@@ -79,20 +95,57 @@
 
     <main class="workbench-shell" id="workbenchShell">
       <section class="utility-page-shell" id="utilityPageShell" aria-hidden="true">
-        <div class="side-panel-head">
-          <div>
-            <p class="card-kicker">Options</p>
-            <h2 id="utilityPageTitle">工作区设置</h2>
-          </div>
-          <button class="icon-button" id="closeUtilityBtn" type="button" aria-label="隐藏左侧面板">×</button>
-        </div>
-
         <nav class="utility-actions" id="utilityActions" aria-label="配置面板">
           <button class="utility-tab" data-panel="projects" type="button">项目</button>
           <button class="utility-tab" data-panel="workspace" type="button">数据</button>
           <button class="utility-tab" data-panel="batch" type="button">批量</button>
           <button class="utility-tab" data-panel="process" type="button">图像处理</button>
           <button class="utility-tab" data-panel="export" type="button">导出</button>
+          <div class="wallpaper-switcher" id="wallpaperSwitcher">
+            <button class="theme-mode-button wallpaper-trigger" type="button" aria-label="切换壁纸" title="切换壁纸" aria-haspopup="listbox" aria-expanded="false">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" aria-hidden="true">
+                <rect width="256" height="256" fill="none"></rect>
+                <path d="M216,40H40A16,16,0,0,0,24,56V200a16,16,0,0,0,16,16H216a16,16,0,0,0,16-16V56A16,16,0,0,0,216,40ZM156,88a12,12,0,1,1-12,12A12,12,0,0,1,156,88Zm60,112H40V160.69l46.34-46.35a8,8,0,0,1,11.32,0h0L165,181.66a8,8,0,0,0,11.32-11.32l-17.66-17.65L173,138.34a8,8,0,0,1,11.31,0L216,170.07V200Z"></path>
+              </svg>
+            </button>
+            <div class="wallpaper-menu" id="wallpaperMenu" role="listbox" aria-label="切换壁纸">
+              <button class="wallpaper-option wallpaper-option-none" data-wallpaper="none" type="button" role="option" aria-label="无壁纸" title="无壁纸">
+                <span class="wallpaper-check" aria-hidden="true"></span>
+              </button>
+              <button class="wallpaper-option" data-wallpaper="alex-r254y37vFEY-unsplash.jpg" type="button" role="option" aria-label="壁纸 1" title="壁纸 1">
+                <img src="/assets/wallpapers/thumbs/alex-r254y37vFEY-unsplash-thumb.jpg" alt="" width="120" height="120" decoding="async">
+                <span class="wallpaper-check" aria-hidden="true"></span>
+              </button>
+              <button class="wallpaper-option" data-wallpaper="cemrecan-yurtman-dPGb63w0640-unsplash.jpg" type="button" role="option" aria-label="壁纸 2" title="壁纸 2">
+                <img src="/assets/wallpapers/thumbs/cemrecan-yurtman-dPGb63w0640-unsplash-thumb.jpg" alt="" width="120" height="120" decoding="async">
+                <span class="wallpaper-check" aria-hidden="true"></span>
+              </button>
+              <button class="wallpaper-option" data-wallpaper="daniel-leone-v7daTKlZzaw-unsplash.jpg" type="button" role="option" aria-label="壁纸 3" title="壁纸 3">
+                <img src="/assets/wallpapers/thumbs/daniel-leone-v7daTKlZzaw-unsplash-thumb.jpg" alt="" width="120" height="120" decoding="async">
+                <span class="wallpaper-check" aria-hidden="true"></span>
+              </button>
+              <button class="wallpaper-option" data-wallpaper="dominik-schroder-FIKD9t5_5zQ-unsplash.jpg" type="button" role="option" aria-label="壁纸 4" title="壁纸 4">
+                <img src="/assets/wallpapers/thumbs/dominik-schroder-FIKD9t5_5zQ-unsplash-thumb.jpg" alt="" width="120" height="120" decoding="async">
+                <span class="wallpaper-check" aria-hidden="true"></span>
+              </button>
+              <button class="wallpaper-option" data-wallpaper="marek-piwnicki-5hri_jol2wE-unsplash.jpg" type="button" role="option" aria-label="壁纸 5" title="壁纸 5">
+                <img src="/assets/wallpapers/thumbs/marek-piwnicki-5hri_jol2wE-unsplash-thumb.jpg" alt="" width="120" height="120" decoding="async">
+                <span class="wallpaper-check" aria-hidden="true"></span>
+              </button>
+              <button class="wallpaper-option" data-wallpaper="paul-pastourmatzis-KT3WlrL_bsg-unsplash.jpg" type="button" role="option" aria-label="壁纸 6" title="壁纸 6">
+                <img src="/assets/wallpapers/thumbs/paul-pastourmatzis-KT3WlrL_bsg-unsplash-thumb.jpg" alt="" width="120" height="120" decoding="async">
+                <span class="wallpaper-check" aria-hidden="true"></span>
+              </button>
+              <button class="wallpaper-option" data-wallpaper="stephanie-moody-nhZqYi5hH58-unsplash.jpg" type="button" role="option" aria-label="壁纸 7" title="壁纸 7">
+                <img src="/assets/wallpapers/thumbs/stephanie-moody-nhZqYi5hH58-unsplash-thumb.jpg" alt="" width="120" height="120" decoding="async">
+                <span class="wallpaper-check" aria-hidden="true"></span>
+              </button>
+              <button class="wallpaper-option" data-wallpaper="tycho-atsma-D1w4o5V_Y2g-unsplash.jpg" type="button" role="option" aria-label="壁纸 8" title="壁纸 8">
+                <img src="/assets/wallpapers/thumbs/tycho-atsma-D1w4o5V_Y2g-unsplash-thumb.jpg" alt="" width="120" height="120" decoding="async">
+                <span class="wallpaper-check" aria-hidden="true"></span>
+              </button>
+            </div>
+          </div>
           <div class="theme-mode-group" id="themeModeGroup" role="group" aria-label="网页配色模式">
             <button class="theme-mode-button" data-theme-mode="auto" type="button" aria-label="自动配色" title="自动">
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" aria-hidden="true">
@@ -122,111 +175,124 @@
         </nav>
 
         <section class="utility-panel active" data-panel="workspace">
-          <article class="card directory-browser-card">
-            <div class="card-head">
-              <div>
-                <p class="card-kicker">Folder Picker</p>
-                <h2>目录浏览器</h2>
-              </div>
-              <p class="card-note">输入父目录后逐级选择子目录，再填入当前目标槽位。</p>
-            </div>
-
-            <div class="folder-browser">
-              <label class="stacked-label">
-                <span>浏览根目录</span>
-                <input id="workspaceBrowserRoot" placeholder="/mnt/d/dataset 或 D:\dataset">
-              </label>
-              <div class="folder-browser-actions">
-                <button class="button-primary" id="workspaceBrowseBtn" type="button">浏览子目录</button>
-                <button class="button-ghost" id="workspaceBrowseUpBtn" type="button">上级</button>
-                <button class="button-ghost" id="workspaceBrowseUseBtn" type="button">使用当前目录</button>
-              </div>
-              <div class="segmented browser-targets" id="workspaceBrowserTargetGroup">
-                <button class="active" data-browser-target="control1" type="button">控制图 1</button>
-                <button data-browser-target="control2" type="button">控制图 2</button>
-                <button data-browser-target="control3" type="button">控制图 3</button>
-                <button data-browser-target="result" type="button">结果图</button>
-              </div>
-              <div class="folder-browser-path" id="workspaceBrowserPath">未选择目录</div>
-              <div class="folder-browser-list" id="workspaceBrowserList"></div>
-            </div>
-          </article>
-
-          <article class="card workspace-card">
+          <article class="card utility-surface-card utility-stack-card">
             <div class="card-head">
               <div>
                 <p class="card-kicker">Workspace</p>
-                <h2>载入数据目录</h2>
+                <h2>工作区设置</h2>
               </div>
-              <p class="card-note">控制图、结果图与 TXT 会按文件名自动匹配。</p>
+              <p class="card-note">把目录浏览、载入与追加放在同一张面板里，切换 tab 时只换内容区，不再换小卡。</p>
             </div>
-            <div class="command-workspace">
-              <label class="toolbar-field compact-field">
-                <span>控制图数量</span>
-                <select id="controlCount">
-                  <option value="0">0 路</option>
-                  <option value="1">1 路</option>
-                  <option value="2">2 路</option>
-                  <option value="3">3 路</option>
-                </select>
-              </label>
-              <label class="toolbar-field wide-field">
-                <span>匹配忽略项</span>
-                <input id="ignoreTokensInput" placeholder="例如：_result, _output, -edited, 空格分隔也可">
-              </label>
-              <label class="checkbox-row wide-field">
-                <input id="autoOpenLastWorkspace" type="checkbox">
-                <span>启动时打开上次加载的数据目录</span>
-              </label>
-              <label class="toolbar-field" data-control-field="1">
-                <span>控制图 1</span>
-                <input id="control1Dir" placeholder="/mnt/c/.../control1 或 D:\dataset\control1">
-              </label>
-              <label class="toolbar-field" data-control-field="2">
-                <span>控制图 2</span>
-                <input id="control2Dir" placeholder="/mnt/c/.../control2 或 D:\dataset\control2">
-              </label>
-              <label class="toolbar-field" data-control-field="3">
-                <span>控制图 3</span>
-                <input id="control3Dir" placeholder="/mnt/c/.../control3 或 D:\dataset\control3">
-              </label>
-              <label class="toolbar-field">
-                <span>结果图</span>
-                <input id="resultDir" placeholder="/mnt/c/.../result 或 D:\dataset\result">
-              </label>
-              <button class="button-primary command-load" id="loadWorkspaceBtn" type="button">加载工作区</button>
-              <button class="button-ghost command-load" id="rescanWorkspaceBtn" type="button">重扫工作区</button>
-            </div>
-          </article>
 
-          <article class="card workspace-card">
-            <div class="card-head">
-              <div>
-                <p class="card-kicker">Merge Dataset</p>
-                <h2>追加图像对数据集</h2>
+            <section class="utility-inner-section directory-browser-card">
+              <div class="card-head compact-head">
+                <div>
+                  <p class="card-kicker">Folder Picker</p>
+                  <h2>目录浏览器</h2>
+                </div>
+                <p class="card-note">输入父目录后逐级选择子目录，再填入当前目标槽位。</p>
               </div>
-              <p class="card-note">把额外 control/result 目录追加到当前工作区，不清空已载入内容。</p>
-            </div>
-            <div class="command-workspace">
-              <label class="toolbar-field" data-merge-control-field="1">
-                <span>追加控制图 1</span>
-                <input id="mergeControl1Dir" placeholder="/mnt/c/.../control1 或 D:\dataset\control1">
-              </label>
-              <label class="toolbar-field" data-merge-control-field="2">
-                <span>追加控制图 2</span>
-                <input id="mergeControl2Dir" placeholder="/mnt/c/.../control2 或 D:\dataset\control2">
-              </label>
-              <label class="toolbar-field" data-merge-control-field="3">
-                <span>追加控制图 3</span>
-                <input id="mergeControl3Dir" placeholder="/mnt/c/.../control3 或 D:\dataset\control3">
-              </label>
-              <label class="toolbar-field">
-                <span>追加结果图</span>
-                <input id="mergeResultDir" placeholder="/mnt/c/.../result 或 D:\dataset\result">
-              </label>
-              <button class="button-primary command-load" id="mergeWorkspaceBtn" type="button">追加到当前工作区</button>
-            </div>
-            <div class="export-status" id="mergeStatus">等待追加数据集</div>
+              <div class="folder-browser">
+                <label class="stacked-label">
+                  <span>浏览根目录</span>
+                  <input id="workspaceBrowserRoot" placeholder="/mnt/d/dataset 或 D:\dataset">
+                </label>
+                <div class="folder-browser-actions">
+                  <button class="button-primary" id="workspaceBrowseBtn" type="button">浏览子目录</button>
+                  <button class="button-ghost" id="workspaceBrowseUpBtn" type="button">上级</button>
+                  <button class="button-ghost" id="workspaceBrowseUseBtn" type="button">使用当前目录</button>
+                </div>
+                <div class="segmented browser-targets" id="workspaceBrowserTargetGroup">
+                  <button class="active" data-browser-target="control1" type="button">控制图 1</button>
+                  <button data-browser-target="control2" type="button">控制图 2</button>
+                  <button data-browser-target="control3" type="button">控制图 3</button>
+                  <button data-browser-target="result" type="button">结果图</button>
+                </div>
+                <div class="folder-browser-path" id="workspaceBrowserPath">未选择目录</div>
+                <div class="folder-browser-list" id="workspaceBrowserList"></div>
+              </div>
+            </section>
+
+            <div class="utility-section-divider"></div>
+
+            <section class="utility-inner-section workspace-card">
+              <div class="card-head compact-head">
+                <div>
+                  <p class="card-kicker">Workspace</p>
+                  <h2>载入数据目录</h2>
+                </div>
+                <p class="card-note">控制图、结果图与 TXT 会按文件名自动匹配。</p>
+              </div>
+              <div class="command-workspace">
+                <label class="toolbar-field compact-field">
+                  <span>控制图数量</span>
+                  <select id="controlCount">
+                    <option value="0">0 路</option>
+                    <option value="1">1 路</option>
+                    <option value="2">2 路</option>
+                    <option value="3">3 路</option>
+                  </select>
+                </label>
+                <label class="toolbar-field wide-field">
+                  <span>匹配忽略项</span>
+                  <input id="ignoreTokensInput" placeholder="例如：_result, _output, -edited, 空格分隔也可">
+                </label>
+                <label class="checkbox-row wide-field">
+                  <input id="autoOpenLastWorkspace" type="checkbox">
+                  <span>启动时打开上次加载的数据目录</span>
+                </label>
+                <label class="toolbar-field" data-control-field="1">
+                  <span>控制图 1</span>
+                  <input id="control1Dir" placeholder="/mnt/c/.../control1 或 D:\dataset\control1">
+                </label>
+                <label class="toolbar-field" data-control-field="2">
+                  <span>控制图 2</span>
+                  <input id="control2Dir" placeholder="/mnt/c/.../control2 或 D:\dataset\control2">
+                </label>
+                <label class="toolbar-field" data-control-field="3">
+                  <span>控制图 3</span>
+                  <input id="control3Dir" placeholder="/mnt/c/.../control3 或 D:\dataset\control3">
+                </label>
+                <label class="toolbar-field">
+                  <span>结果图</span>
+                  <input id="resultDir" placeholder="/mnt/c/.../result 或 D:\dataset\result">
+                </label>
+                <button class="button-primary command-load" id="loadWorkspaceBtn" type="button">加载工作区</button>
+                <button class="button-ghost command-load" id="rescanWorkspaceBtn" type="button">重扫工作区</button>
+              </div>
+            </section>
+
+            <div class="utility-section-divider"></div>
+
+            <section class="utility-inner-section workspace-card">
+              <div class="card-head compact-head">
+                <div>
+                  <p class="card-kicker">Merge Dataset</p>
+                  <h2>追加图像对数据集</h2>
+                </div>
+                <p class="card-note">把额外 control/result 目录追加到当前工作区，不清空已载入内容。</p>
+              </div>
+              <div class="command-workspace">
+                <label class="toolbar-field" data-merge-control-field="1">
+                  <span>追加控制图 1</span>
+                  <input id="mergeControl1Dir" placeholder="/mnt/c/.../control1 或 D:\dataset\control1">
+                </label>
+                <label class="toolbar-field" data-merge-control-field="2">
+                  <span>追加控制图 2</span>
+                  <input id="mergeControl2Dir" placeholder="/mnt/c/.../control2 或 D:\dataset\control2">
+                </label>
+                <label class="toolbar-field" data-merge-control-field="3">
+                  <span>追加控制图 3</span>
+                  <input id="mergeControl3Dir" placeholder="/mnt/c/.../control3 或 D:\dataset\control3">
+                </label>
+                <label class="toolbar-field">
+                  <span>追加结果图</span>
+                  <input id="mergeResultDir" placeholder="/mnt/c/.../result 或 D:\dataset\result">
+                </label>
+                <button class="button-primary command-load" id="mergeWorkspaceBtn" type="button">追加到当前工作区</button>
+              </div>
+              <div class="export-status" id="mergeStatus">等待追加数据集</div>
+            </section>
           </article>
         </section>
 
@@ -268,68 +334,84 @@
         </section>
 
         <section class="utility-panel" data-panel="batch">
-          <article class="card batch-card">
+          <article class="card utility-surface-card utility-stack-card">
             <div class="card-head">
               <div>
                 <p class="card-kicker">Batch Tools</p>
-                <h2>批量整理</h2>
+                <h2>批量工具</h2>
               </div>
-              <p class="card-note">作用于当前筛选结果。</p>
+              <p class="card-note">把整理、重命名和对调放进同一张大面板里，用细线分开功能块。</p>
             </div>
-            <div class="batch-grid">
-              <input class="span-2" id="batchAddInput" placeholder="添加短语，逗号分隔">
-              <button class="button-primary" id="batchAddBeforeBtn" type="button">添加至最前</button>
-              <button class="button-primary" id="batchAddAfterBtn" type="button">添加至最后</button>
-              <input class="span-2" id="batchDeleteInput" placeholder="删除短语 / 片段，逗号分隔">
-              <button class="button-primary danger-text span-2" id="batchDeleteBtn" type="button">批量删除</button>
-              <input id="batchReplaceOld" placeholder="旧短语">
-              <input id="batchReplaceNew" placeholder="新短语（留空表示删除）">
-              <button class="button-primary span-2" id="batchReplaceBtn" type="button">批量替换</button>
-              <button class="button-ghost danger span-2" id="deleteCurrentBtn" type="button">从导出集中排除当前条目</button>
-            </div>
-          </article>
-          <article class="card batch-card">
-            <div class="card-head">
-              <div>
-                <p class="card-kicker">File Names</p>
-                <h2>批量重命名</h2>
+
+            <section class="utility-inner-section batch-card">
+              <div class="card-head compact-head">
+                <div>
+                  <p class="card-kicker">Batch Tools</p>
+                  <h2>批量整理</h2>
+                </div>
+                <p class="card-note">作用于当前筛选结果。</p>
               </div>
-              <p class="card-note">重命名当前筛选结果的图片与同名 TXT。</p>
-            </div>
-            <div class="batch-grid">
-              <input class="span-2" id="batchRenameAddInput" placeholder="添加到文件名的文字">
-              <button class="button-primary" id="batchRenameAddPrefixBtn" type="button">添加至最前</button>
-              <button class="button-primary" id="batchRenameAddSuffixBtn" type="button">添加至最后</button>
-              <input class="span-2" id="batchRenameDeleteInput" placeholder="删除文字 / 片段，逗号分隔">
-              <button class="button-primary danger-text span-2" id="batchRenameDeleteBtn" type="button">批量删除</button>
-              <input id="batchRenameReplaceOld" placeholder="旧文字">
-              <input id="batchRenameReplaceNew" placeholder="新文字（留空表示删除）">
-              <button class="button-primary span-2" id="batchRenameReplaceBtn" type="button">批量替换</button>
-            </div>
-          </article>
-          <article class="card batch-card">
-            <div class="card-head">
-              <div>
-                <p class="card-kicker">Pair Shuffle</p>
-                <h2>批量对调</h2>
+              <div class="batch-grid">
+                <input class="span-2" id="batchAddInput" placeholder="添加短语，逗号分隔">
+                <button class="button-primary" id="batchAddBeforeBtn" type="button">添加至最前</button>
+                <button class="button-primary" id="batchAddAfterBtn" type="button">添加至最后</button>
+                <input class="span-2" id="batchDeleteInput" placeholder="删除短语 / 片段，逗号分隔">
+                <button class="button-primary danger-text span-2" id="batchDeleteBtn" type="button">批量删除</button>
+                <input id="batchReplaceOld" placeholder="旧短语">
+                <input id="batchReplaceNew" placeholder="新短语（留空表示删除）">
+                <button class="button-primary span-2" id="batchReplaceBtn" type="button">批量替换</button>
+                <button class="button-ghost danger span-2" id="deleteCurrentBtn" type="button">从导出集中排除当前条目</button>
               </div>
-              <p class="card-note">按同名图片复制出新图像对，不改动原始文件。</p>
-            </div>
-            <div class="batch-grid">
-              <label class="stacked-label span-2">
-                <span>控制图目录</span>
-                <input id="swapControlDir" placeholder="例如 D:\dataset\control1">
-              </label>
-              <label class="stacked-label span-2">
-                <span>结果图目录</span>
-                <input id="swapResultDir" placeholder="例如 D:\dataset\result">
-              </label>
-              <label class="stacked-label span-2">
-                <span>新增文件后缀</span>
-                <input id="swapSuffix" value="_swap" placeholder="_swap">
-              </label>
-              <button class="button-primary span-2" id="swapPairsBtn" type="button">生成对调副本</button>
-            </div>
+            </section>
+
+            <div class="utility-section-divider"></div>
+
+            <section class="utility-inner-section batch-card">
+              <div class="card-head compact-head">
+                <div>
+                  <p class="card-kicker">File Names</p>
+                  <h2>批量重命名</h2>
+                </div>
+                <p class="card-note">重命名当前筛选结果的图片与同名 TXT。</p>
+              </div>
+              <div class="batch-grid">
+                <input class="span-2" id="batchRenameAddInput" placeholder="添加到文件名的文字">
+                <button class="button-primary" id="batchRenameAddPrefixBtn" type="button">添加至最前</button>
+                <button class="button-primary" id="batchRenameAddSuffixBtn" type="button">添加至最后</button>
+                <input class="span-2" id="batchRenameDeleteInput" placeholder="删除文字 / 片段，逗号分隔">
+                <button class="button-primary danger-text span-2" id="batchRenameDeleteBtn" type="button">批量删除</button>
+                <input id="batchRenameReplaceOld" placeholder="旧文字">
+                <input id="batchRenameReplaceNew" placeholder="新文字（留空表示删除）">
+                <button class="button-primary span-2" id="batchRenameReplaceBtn" type="button">批量替换</button>
+              </div>
+            </section>
+
+            <div class="utility-section-divider"></div>
+
+            <section class="utility-inner-section batch-card">
+              <div class="card-head compact-head">
+                <div>
+                  <p class="card-kicker">Pair Shuffle</p>
+                  <h2>批量对调</h2>
+                </div>
+                <p class="card-note">按同名图片复制出新图像对，不改动原始文件。</p>
+              </div>
+              <div class="batch-grid">
+                <label class="stacked-label span-2">
+                  <span>控制图目录</span>
+                  <input id="swapControlDir" placeholder="例如 D:\dataset\control1">
+                </label>
+                <label class="stacked-label span-2">
+                  <span>结果图目录</span>
+                  <input id="swapResultDir" placeholder="例如 D:\dataset\result">
+                </label>
+                <label class="stacked-label span-2">
+                  <span>新增文件后缀</span>
+                  <input id="swapSuffix" value="_swap" placeholder="_swap">
+                </label>
+                <button class="button-primary span-2" id="swapPairsBtn" type="button">生成对调副本</button>
+              </div>
+            </section>
           </article>
         </section>
 
@@ -440,7 +522,6 @@
         <aside class="card list-card">
           <div class="card-head list-card-head">
             <div>
-              <p class="card-kicker">Browse</p>
               <div class="list-title-row">
                 <h2>筛选与列表</h2>
                 <button class="icon-button list-split-toggle" id="toggleSplitListBtn" type="button"
@@ -498,17 +579,16 @@
                   <option value="result">仅结果图</option>
                 </select>
                 <div class="segmented" id="filterGroup">
-                  <button data-filter="all" class="active" type="button">全部</button>
+                  <button data-filter="all" class="active" type="button">全部图片</button>
                   <button data-filter="no_control1" type="button">缺控制 1</button>
                   <button data-filter="no_control2" type="button">缺控制 2</button>
                   <button data-filter="no_control3" type="button">缺控制 3</button>
                   <button data-filter="no_result" type="button">缺结果</button>
-                  <button data-filter="no_txt" type="button">缺 TXT</button>
-                  <button data-filter="res_mismatch" type="button">分辨率异</button>
+                  <button data-filter="no_txt" type="button">缺TXT</button>
+                  <button data-filter="res_mismatch" type="button">分辨率异常</button>
                 </div>
                 <label class="stacked-label list-search-field">
                   <span class="list-search-head">
-                    <span class="list-search-label">搜索</span>
                     <span class="list-search-stats" id="listStats">0 项</span>
                   </span>
                   <span class="list-search-input-wrap">
@@ -551,17 +631,16 @@
                   <option value="result">仅结果图</option>
                 </select>
                 <div class="segmented" id="secondaryFilterGroup">
-                  <button data-filter="all" class="active" type="button">全部</button>
+                  <button data-filter="all" class="active" type="button">全部图片</button>
                   <button data-filter="no_control1" type="button">缺控制 1</button>
                   <button data-filter="no_control2" type="button">缺控制 2</button>
                   <button data-filter="no_control3" type="button">缺控制 3</button>
                   <button data-filter="no_result" type="button">缺结果</button>
-                  <button data-filter="no_txt" type="button">缺 TXT</button>
-                  <button data-filter="res_mismatch" type="button">分辨率异</button>
+                  <button data-filter="no_txt" type="button">缺TXT</button>
+                  <button data-filter="res_mismatch" type="button">分辨率异常</button>
                 </div>
                 <label class="stacked-label list-search-field">
                   <span class="list-search-head">
-                    <span class="list-search-label">搜索</span>
                     <span class="list-search-stats" id="secondaryListStats">0 项</span>
                   </span>
                   <span class="list-search-input-wrap">
@@ -619,7 +698,7 @@
               <div class="viewer-tools">
                 <label class="viewer-pixels-field">
                   <span>百万像素</span>
-                  <input id="viewerTargetPixels" type="number" value="4" min="0.1" max="64" step="0.1">
+                  <input id="viewerTargetPixels" type="number" value="4" min="1" max="64" step="1">
                 </label>
                 <button class="button-ghost" id="viewerScaleBtn" type="button">缩放当前</button>
                 <button class="button-ghost" id="viewerMatchResultBtn" type="button">匹配结果尺寸</button>
@@ -678,10 +757,7 @@
                   <textarea id="captionEditor" class="caption-editor" placeholder="可直接编辑自然语言 caption"></textarea>
                 </div>
                 <div class="chip-editor" id="tagChips"></div>
-                <div class="inline-form">
-                  <input id="newTagInput" placeholder="输入短语，回车或点按钮追加到 caption">
-                  <button class="button-ghost" id="addTagBtn" type="button">追加</button>
-                </div>
+                <textarea id="translatedText" class="translated-box" placeholder="翻译结果会显示在这里"></textarea>
                 <div class="quick-tag-panel collapsed" id="quickTagPanel">
                   <div class="quick-tag-head">
                     <button class="quick-tag-toggle" id="quickTagToggleBtn" type="button"
@@ -689,7 +765,6 @@
                   </div>
                   <div class="quick-tag-grid" id="quickTagGrid"></div>
                 </div>
-                <textarea id="translatedText" class="translated-box" placeholder="翻译结果会显示在这里"></textarea>
               </div>
             </section>
 
@@ -713,16 +788,8 @@
       <div class="content-resizer vertical-resizer right-panel-resizer" id="rightPanelResizer" role="separator"
         aria-orientation="vertical" aria-label="调整右侧面板宽度"></div>
       <section class="caption-settings-shell" id="captionSettingsShell" aria-hidden="true">
-        <div class="side-panel-head">
-          <div>
-            <p class="card-kicker">Caption</p>
-            <h2>标注配置</h2>
-          </div>
-          <button class="icon-button" id="closeCaptionSettingsBtn" type="button" aria-label="隐藏标注配置">×</button>
-        </div>
-
-        <section class="utility-panel" data-panel="automation">
-          <article class="card ai-card caption-common-card">
+        <article class="card utility-surface-card utility-stack-card">
+          <section class="utility-inner-section">
             <div class="card-head">
               <div>
                 <p class="card-kicker">Shared Caption</p>
@@ -768,17 +835,11 @@
             </div>
 
             <p class="config-footnote" id="localPromptModeHint">启动标注请使用顶部命令栏；这里会应用到当前选择的标注引擎。</p>
-          </article>
+          </section>
 
-          <article class="card ai-card caption-backend-card">
-            <div class="card-head">
-              <div>
-                <p class="card-kicker">Backend</p>
-                <h2>标注引擎</h2>
-              </div>
-              <p class="card-note">选择需要配置的引擎，顶部命令栏会同步使用同一选择。</p>
-            </div>
+          <div class="utility-section-divider"></div>
 
+          <section class="utility-inner-section">
             <div class="caption-backend-tabs" id="captionBackendTabs" role="tablist" aria-label="标注引擎设置">
               <button class="active" data-caption-backend="local" type="button" role="tab"
                 aria-selected="true">本地标注</button>
@@ -786,7 +847,7 @@
               <button data-caption-backend="ollama" type="button" role="tab" aria-selected="false">Ollama 标注</button>
             </div>
 
-            <section class="caption-backend-panel active" data-caption-backend-panel="local" role="tabpanel">
+            <section class="utility-inner-section active" data-caption-backend-section="local" role="tabpanel">
               <div class="card-head compact-head">
                 <div>
                   <p class="card-kicker">Local Qwen</p>
@@ -812,7 +873,7 @@
               <p class="card-note" id="localModelMeta">选择模型后可直接加载或验证，验证会做一次真实推理试跑。</p>
             </section>
 
-            <section class="caption-backend-panel" data-caption-backend-panel="api" role="tabpanel" hidden>
+            <section class="utility-inner-section" data-caption-backend-section="api" role="tabpanel" hidden>
               <div class="card-head compact-head">
                 <div>
                   <p class="card-kicker">API AI</p>
@@ -852,7 +913,7 @@
               </div>
             </section>
 
-            <section class="caption-backend-panel" data-caption-backend-panel="ollama" role="tabpanel" hidden>
+            <section class="utility-inner-section" data-caption-backend-section="ollama" role="tabpanel" hidden>
               <div class="card-head compact-head">
                 <div>
                   <p class="card-kicker">Ollama</p>
@@ -873,8 +934,8 @@
                   <span>模型名</span>
                   <div class="model-picker" id="ollamaModelPicker">
                     <input id="ollamaModelName" placeholder="qwen2.5vl:7b / minicpm-v / your-model" autocomplete="off">
-                    <button class="model-picker-button" id="ollamaModelMenuBtn" type="button"
-                      aria-label="展开 Ollama 模型列表" aria-expanded="false"></button>
+                    <button class="model-picker-button" id="ollamaModelMenuBtn" type="button" aria-label="展开 Ollama 模型列表"
+                      aria-expanded="false"></button>
                     <div class="model-picker-menu" id="ollamaModelMenu" hidden>
                       <input id="ollamaModelSearch" placeholder="搜索模型">
                       <div class="model-picker-list" id="ollamaModelList"></div>
@@ -887,8 +948,8 @@
                 </label>
               </div>
             </section>
-          </article>
-        </section>
+          </section>
+        </article>
       </section>
     </main>
 
@@ -979,9 +1040,9 @@
     <button type="button" data-action="create-folder">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" aria-hidden="true">
         <rect width="256" height="256" fill="none" />
-        <path d="M224,88V200.89a7.11,7.11,0,0,1-7.11,7.11H40a8,8,0,0,1-8-8V64a8,8,0,0,1,8-8H93.33a8,8,0,0,1,4.8,1.6L128,80h88A8,8,0,0,1,224,88Z" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="24"/>
-        <line x1="104" y1="144" x2="152" y2="144" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="24"/>
-        <line x1="128" y1="120" x2="128" y2="168" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="24"/>
+        <path d="M224,88V200.89a7.11,7.11,0,0,1-7.11,7.11H40a8,8,0,0,1-8-8V64a8,8,0,0,1,8-8H93.33a8,8,0,0,1,4.8,1.6L128,80h88A8,8,0,0,1,224,88Z" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/>
+        <line x1="104" y1="144" x2="152" y2="144" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/>
+        <line x1="128" y1="120" x2="128" y2="168" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/>
       </svg>
       <span>新建文件夹</span>
     </button>
@@ -1006,7 +1067,7 @@
   <template id="tagChipTemplate">
     <button class="chip" type="button">
       <span class="chip-text"></span>
-      <span class="chip-x">×</span>
+      <span class="chip-x" aria-hidden="true"></span>
     </button>
   </template>
 
