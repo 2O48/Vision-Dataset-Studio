@@ -46,6 +46,7 @@ export function createBootstrapModule({
   trashCurrentItem,
   shouldIgnoreListArrowNavigation,
   loadWorkspace,
+  openProject,
   rescanWorkspace,
   saveCurrentProject,
   createProject,
@@ -756,11 +757,24 @@ export function createBootstrapModule({
     try {
       const payload = JSON.parse(raw);
       if (!payload || typeof payload !== "object") return null;
+      if (`${payload.project_id || ""}`.trim()) return payload;
       const hasDirectory = ["control1_dir", "control2_dir", "control3_dir", "result_dir"].some((key) => `${payload[key] || ""}`.trim());
       return hasDirectory ? payload : null;
     } catch (_) {
       return null;
     }
+  }
+
+  function readLastProjectOpenPayload() {
+    const projectId = `${readStored(STORAGE_KEYS.lastProjectId, "") || ""}`.trim();
+    if (projectId) {
+      return {
+        project_id: projectId,
+        project_name: `${readStored(STORAGE_KEYS.lastProjectName, "") || ""}`.trim(),
+      };
+    }
+    const payload = readLastWorkspaceOpenPayload();
+    return `${payload?.project_id || ""}`.trim() ? payload : null;
   }
 
   function applyLastWorkspaceOpenPayload(payload) {
@@ -819,8 +833,16 @@ export function createBootstrapModule({
 
   async function openLastWorkspaceOnStartup() {
     if (!refs.autoOpenLastWorkspace?.checked) return false;
-    const payload = readLastWorkspaceOpenPayload();
+    const payload = readLastProjectOpenPayload() || readLastWorkspaceOpenPayload();
     if (!payload) return false;
+    const projectId = `${payload.project_id || ""}`.trim();
+    if (projectId && openProject) {
+      await runWithStatus("正在打开上次项目...", async () => {
+        await openProject(projectId, { skipCurrentStateSave: true });
+        setAiStatusLine("已打开上次项目。");
+      });
+      return true;
+    }
     applyLastWorkspaceOpenPayload(payload);
     await runWithStatus("正在打开上次加载的数据目录...", async () => {
       await loadWorkspace();
@@ -1499,31 +1521,44 @@ export function createBootstrapModule({
       console.warn(error);
     }
 
-    try {
-      const data = await apiGet("/api/workspace");
-      applyWorkspaceSummary(data.workspace);
-      if (!restoreCurrentProjectFromLastWorkspace(data.workspace)) inferSingleProjectForCurrentWorkspace();
-      if (state.currentProjectId && applyProjectUiState) {
-        try {
-          const detail = await apiGet("/api/projects/detail", { id: state.currentProjectId });
-          applyProjectUiState(detail.workspace?.ui_state, detail.project?.name || state.currentProjectName);
-        } catch (error) {
-          console.warn(error);
-        }
-      }
-      if (state.workspace?.counts?.all) {
-        await refreshItems();
-      }
-    } catch (error) {
-      console.warn(error);
-    }
-
-    if (!state.workspace?.counts?.all) {
+    let openedLastProject = false;
+    const lastProjectPayload = readLastProjectOpenPayload();
+    if (lastProjectPayload) {
       try {
-        await openLastWorkspaceOnStartup();
+        openedLastProject = await openLastWorkspaceOnStartup();
       } catch (error) {
         console.warn(error);
-        setAiStatusLine(`打开上次加载的数据目录失败：${error.message || error}`);
+        setAiStatusLine(`打开上次项目失败：${error.message || error}`);
+      }
+    }
+
+    if (!openedLastProject) {
+      try {
+        const data = await apiGet("/api/workspace");
+        applyWorkspaceSummary(data.workspace);
+        if (!restoreCurrentProjectFromLastWorkspace(data.workspace)) inferSingleProjectForCurrentWorkspace();
+        if (state.currentProjectId && applyProjectUiState) {
+          try {
+            const detail = await apiGet("/api/projects/detail", { id: state.currentProjectId });
+            applyProjectUiState(detail.workspace?.ui_state, detail.project?.name || state.currentProjectName);
+          } catch (error) {
+            console.warn(error);
+          }
+        }
+        if (state.workspace?.counts?.all) {
+          await refreshItems();
+        }
+      } catch (error) {
+        console.warn(error);
+      }
+
+      if (!state.workspace?.counts?.all && !lastProjectPayload) {
+        try {
+          await openLastWorkspaceOnStartup();
+        } catch (error) {
+          console.warn(error);
+          setAiStatusLine(`打开上次加载的数据目录失败：${error.message || error}`);
+        }
       }
     }
 

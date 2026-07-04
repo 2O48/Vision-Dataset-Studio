@@ -1,0 +1,22 @@
+[package]
+name = "vision-dataset-studio-launcher"
+version = "0.1.0"
+description = "Lightweight launcher for Vision Dataset Studio"
+authors = ["Vision Dataset Studio"]
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["image-png"] }
+url = "2"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6.4"
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["NSColor", "NSWindow"] }
+objc2-foundation = "0.3.2"
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]

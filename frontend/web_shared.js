@@ -27,6 +27,8 @@ export const STORAGE_KEYS = {
   controlCount: storageKey("control-count"),
   ignoreTokens: storageKey("ignore-tokens"),
   autoOpenLastWorkspace: storageKey("auto-open-last-workspace"),
+  lastProjectId: storageKey("last-project-id"),
+  lastProjectName: storageKey("last-project-name"),
   lastWorkspaceDirs: storageKey("last-workspace-dirs"),
   workspaceBrowserRoot: storageKey("workspace-browser-root"),
   workspaceBrowserTarget: storageKey("workspace-browser-target"),
@@ -112,6 +114,29 @@ export const UTILITY_PANEL_LABELS = {
   export: "数据集导出",
 };
 
+const APP_BASE_URL = new URL("./", window.location.href);
+
+export function resolveAppUrl(path = "") {
+  if (/^[a-z]+:/i.test(`${path || ""}`)) return new URL(path);
+  return new URL(`${path || ""}`.replace(/^\/+/, ""), APP_BASE_URL);
+}
+
+export function resolveAssetUrl(path = "") {
+  return resolveAppUrl(`assets/${`${path || ""}`.replace(/^\/+/, "")}`).toString();
+}
+
+export function resolveApiUrl(path = "", params = null) {
+  const url = resolveAppUrl(`${`${path || ""}`.replace(/^\/+/, "")}`);
+  if (params) {
+    for (const [key, value] of Object.entries(params)) {
+      if (value !== undefined && value !== null && value !== "") {
+        url.searchParams.set(key, value);
+      }
+    }
+  }
+  return url;
+}
+
 export function readStored(key, fallback = "") {
   const value = window.localStorage.getItem(key);
   if (value !== null) return value;
@@ -160,14 +185,7 @@ export function restoreSelectValue(select, key, fallback) {
 }
 
 export async function apiGet(path, params = null) {
-  const url = new URL(path, window.location.origin);
-  if (params) {
-    for (const [key, value] of Object.entries(params)) {
-      if (value !== undefined && value !== null && value !== "") {
-        url.searchParams.set(key, value);
-      }
-    }
-  }
+  const url = resolveApiUrl(path, params);
   const response = await fetch(url);
   const data = await response.json();
   if (!response.ok || !data.ok) {
@@ -177,7 +195,7 @@ export async function apiGet(path, params = null) {
 }
 
 export async function apiPost(path, payload = {}) {
-  const response = await fetch(path, {
+  const response = await fetch(resolveApiUrl(path), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -190,7 +208,7 @@ export async function apiPost(path, payload = {}) {
 }
 
 export async function apiPostDownload(path, payload = {}) {
-  const response = await fetch(path, {
+  const response = await fetch(resolveApiUrl(path), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),

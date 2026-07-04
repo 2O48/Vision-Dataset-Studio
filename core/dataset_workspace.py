@@ -6,6 +6,7 @@ import logging
 import threading
 import urllib.parse
 import urllib.request
+import uuid
 from pathlib import Path
 from typing import Optional
 
@@ -374,6 +375,19 @@ class DatasetWorkspace:
     def _get_image_size(self, role: str, name: str):
         return self._scanner._get_image_size(role, name)
 
+    def _image_version(self, role: str, name: str) -> str:
+        path = self.files.get(role, {}).get(name)
+        if not path or not path.exists():
+            return ""
+        try:
+            stat = path.stat()
+        except OSError:
+            return ""
+        return f"{stat.st_mtime_ns}-{stat.st_size}"
+
+    def _item_image_versions(self, name: str) -> dict[str, str]:
+        return {role: version for role in IMAGE_ROLES if (version := self._image_version(role, name))}
+
     def _refresh_item_resolution_flag(self, name: str):
         return self._scanner._refresh_item_resolution_flag(name)
 
@@ -563,3 +577,114 @@ class DatasetWorkspace:
         with urllib.request.urlopen(req, timeout=15) as resp:
             data = json.loads(resp.read())
         return "".join(item[0] for item in data[0] if item[0])
+
+    # ------------------------------------------------------------------
+    # PR #19 新增方法（swap_item_images + 辅助）
+    # ------------------------------------------------------------------
+
+    def _swap_existing_image_paths(self, source_path: Path, target_path: Path) -> tuple[Path, Path]:
+        if not source_path.exists():
+            raise FileNotFoundError(f"Source image does not exist: {source_path}")
+        if not target_path.exists():
+            raise FileNotFoundError(f"Target image does not exist: {target_path}")
+        if source_path.resolve() == target_path.resolve():
+            raise ValueError("Source and target roles point to the same file.")
+        next_source_path = source_path.with_suffix(target_path.suffix)
+        next_target_path = target_path.with_suffix(source_path.suffix)
+        occupied = {source_path.resolve(), target_path.resolve()}
+        for path in {next_source_path, next_target_path}:
+            if path.exists() and path.resolve() not in occupied:
+                raise FileExistsError(f"Target file already exists: {path}")
+        temp_path = source_path.with_name(f".vds_role_swap_{uuid.uuid4().hex}{source_path.suffix}")
+        moved: list[tuple[Path, Path]] = []
+        try:
+            source_path.rename(temp_path)
+            moved.append((source_path, temp_path))
+            if target_path != next_source_path:
+                next_source_path.parent.mkdir(parents=True, exist_ok=True)
+                target_path.rename(next_source_path)
+                moved.append((target_path, next_source_path))
+            next_target_path.parent.mkdir(parents=True, exist_ok=True)
+            temp_path.rename(next_target_path)
+            moved.append((temp_path, next_target_path))
+        except Exception:
+            for original, current in reversed(moved):
+                try:
+                    if current.exists() and not original.exists():
+                        original.parent.mkdir(parents=True, exist_ok=True)
+                        current.rename(original)
+                except Exception:
+                    pass
+            raise
+        return next_source_path, next_target_path
+
+    def _touch_image_versions(self, *paths: Path):
+        for path in paths:
+            try:
+                if path.exists():
+                    path.touch()
+            except OSError:
+                pass
+
+    def _invalidate_image_state(self, *names: str):
+        dirty_names = {name for name in names if name}
+        for key in list(self._image_sizes.keys()):
+            if key[1] in dirty_names:
+                self._image_sizes.pop(key, None)
+        for name in dirty_names:
+            self._resolution_mismatch.discard(name)
+        self._resolution_index_ready = False
+
+    def _validate_role_replace_target(self, target_name: str, target_role: str, allow_replace: bool = True):
+        if target_role not in IMAGE_ROLES:
+            raise ValueError("Target role must be an image role.")
+        if target_role in CONTROL_ROLES:
+            role_index = CONTROL_ROLES.index(target_role) + 1
+            if self.control_count < role_index:
+                raise ValueError(f"{target_role} is not enabled in the current workspace.")
+        if target_name not in self.file_names:
+            raise KeyError(target_name)
+        if not allow_replace and target_name in self.files[target_role]:
+            raise ValueError(f"{target_role} already exists for {target_name}.")
+
+    def swap_item_images(self, source_name: str, source_role: str, target_name: str, target_role: str) -> dict:
+        with self._lock:
+            source_name = str(source_name or "").strip()
+            target_name = str(target_name or "").strip()
+            source_role = str(source_role or "").strip()
+            target_role = str(target_role or "").strip()
+            self._validate_role_replace_target(source_name, source_role, allow_replace=True)
+            self._validate_role_replace_target(target_name, target_role, allow_replace=True)
+            if source_name == target_name and source_role == target_role:
+                item = self._serialize_item(source_name)
+                return {
+                    "source_name": source_name, "source_role": source_role,
+                    "target_name": target_name, "target_role": target_role,
+                    "swapped": [], "source_item": item, "target_item": item,
+                    "item": item, "workspace": self.get_workspace_summary(),
+                }
+            source_path = self.files[source_role].get(source_name)
+            target_path = self.files[target_role].get(target_name)
+            if not source_path or not source_path.exists():
+                raise FileNotFoundError(f"Source role image does not exist: {source_role}")
+            if not target_path or not target_path.exists():
+                raise FileNotFoundError(f"Target role image does not exist: {target_role}")
+            next_source_path, next_target_path = self._swap_existing_image_paths(source_path, target_path)
+            self.files[source_role][source_name] = next_source_path
+            self.files[target_role][target_name] = next_target_path
+            self._touch_image_versions(next_source_path, next_target_path)
+            self._invalidate_image_state(source_name, target_name)
+            self._save_workspace_state()
+            self._ensure_resolution_index()
+            source_item = self._serialize_item(source_name)
+            target_item = source_item if source_name == target_name else self._serialize_item(target_name)
+            return {
+                "source_name": source_name, "source_role": source_role,
+                "target_name": target_name, "target_role": target_role,
+                "swapped": [
+                    {"name": source_name, "role": source_role, "path": str(next_source_path)},
+                    {"name": target_name, "role": target_role, "path": str(next_target_path)},
+                ],
+                "source_item": source_item, "target_item": target_item,
+                "item": target_item, "workspace": self.get_workspace_summary(),
+            }

@@ -1,11 +1,15 @@
+import { resolveApiUrl } from "./web_shared.js";
+
 export function createProjectsModule({
   state,
   refs,
   apiGet,
   apiPost,
   runWithStatus,
+  setAiStatusLine,
   showError,
   applyWorkspaceSummary,
+  clearWorkspaceView,
   refreshItems,
   renderWorkspaceSummary,
   closeUtilityPanel,
@@ -18,6 +22,11 @@ export function createProjectsModule({
 }) {
   const PROJECT_STATE_VERSION = 1;
   let projectUiStateSaveTimer = 0;
+
+  function setProjectStatus(message) {
+    if (refs.projectStatus) refs.projectStatus.textContent = message;
+    setAiStatusLine?.(message);
+  }
 
   function selectedTemplateIds() {
     const values = {};
@@ -142,9 +151,15 @@ export function createProjectsModule({
   function rememberOpenedWorkspace(workspace) {
     const dirs = workspace?.dirs || {};
     if (!Object.values(dirs).some(Boolean)) return;
+    const projectId = state.currentProjectId || workspace?.project_id || "";
+    const projectName = state.currentProjectName || workspace?.project_name || "";
+    if (projectId) {
+      saveStored(STORAGE_KEYS.lastProjectId, `${projectId}`);
+      saveStored(STORAGE_KEYS.lastProjectName, `${projectName || projectId}`);
+    }
     saveStored(STORAGE_KEYS.lastWorkspaceDirs, JSON.stringify({
-      project_id: state.currentProjectId || workspace?.project_id || "",
-      project_name: state.currentProjectName || workspace?.project_name || "",
+      project_id: projectId,
+      project_name: projectName,
       control1_dir: dirs.control1 || "",
       control2_dir: dirs.control2 || "",
       control3_dir: dirs.control3 || "",
@@ -320,11 +335,11 @@ export function createProjectsModule({
       renderWorkspaceSummary();
     }
     renderProjects();
-    if (refs.projectStatus) {
-      refs.projectStatus.textContent = state.currentProjectName
+    setProjectStatus(
+      state.currentProjectName
         ? `当前项目：${state.currentProjectName} · 已载入 ${state.projects.length} 个项目`
-        : `已载入 ${state.projects.length} 个项目`;
-    }
+        : `已载入 ${state.projects.length} 个项目`
+    );
   }
 
   function projectNameFromInput() {
@@ -350,16 +365,20 @@ export function createProjectsModule({
         delete payload.project_name;
         saveStored(STORAGE_KEYS.lastWorkspaceDirs, JSON.stringify(payload));
       }
+      if (`${window.localStorage.getItem(STORAGE_KEYS.lastProjectId) || ""}` === staleId) {
+        saveStored(STORAGE_KEYS.lastProjectId, "");
+        saveStored(STORAGE_KEYS.lastProjectName, "");
+      }
     } catch (_) {
       saveStored(STORAGE_KEYS.lastWorkspaceDirs, "");
     }
   }
 
-  async function saveProject({ asNew = false } = {}) {
+  async function saveProject({ asNew = false, nameOverride = "" } = {}) {
     if (state.captionDirty && state.selectedName) {
       await saveCurrentCaption();
     }
-    const name = projectNameFromInput();
+    const name = `${nameOverride || projectNameFromInput()}`.trim() || "未命名项目";
     const payload = {
       name,
       control_count: Number(refs.controlCount?.value ?? 1),
@@ -372,18 +391,44 @@ export function createProjectsModule({
     state.currentProjectId = data.project?.id || "";
     state.currentProjectName = data.project?.name || name;
     refs.projectNameInput.value = data.project?.name || name;
+    if (state.currentProjectId) {
+      saveStored(STORAGE_KEYS.lastProjectId, state.currentProjectId);
+      saveStored(STORAGE_KEYS.lastProjectName, state.currentProjectName || state.currentProjectId);
+    }
     renderWorkspaceSummary();
     if (data.workspace) {
       applyWorkspaceSummary(data.workspace);
       rememberOpenedWorkspace(data.workspace);
       await refreshItems({ skipDirtyCheck: true });
     }
-    refs.projectStatus.textContent = `${asNew || !payload.overwrite_id ? "已保存项目" : "已保存当前项目"}：${data.project?.name || name}`;
+    setProjectStatus(`${asNew || !payload.overwrite_id ? "已保存项目" : "已保存当前项目"}：${data.project?.name || name}`);
     await refreshProjects();
   }
 
   async function saveCurrentProject() {
     await saveProject({ asNew: false });
+  }
+
+  function importedWorkspaceProjectName() {
+    const explicitName = `${refs.projectNameInput?.value || ""}`.trim();
+    if (state.currentProjectId && explicitName) return explicitName;
+    const dirs = state.workspace?.dirs || {};
+    const source = dirs.result || dirs.control1 || dirs.control2 || dirs.control3 || "";
+    const normalized = `${source || ""}`.replace(/[\\/]+$/, "");
+    const leaf = normalized.split(/[\\/]/).filter(Boolean).at(-1) || "";
+    return leaf ? `缓存项目-${leaf}` : "缓存项目";
+  }
+
+  async function saveImportedWorkspaceToProject() {
+    if (!state.workspace?.counts?.all) return;
+    if (state.currentProjectId) {
+      await saveProject({ asNew: false });
+      return;
+    }
+    const name = importedWorkspaceProjectName();
+    if (refs.projectNameInput) refs.projectNameInput.value = name;
+    await saveProject({ asNew: true, nameOverride: name });
+    setProjectStatus(`已导入到缓存项目：${state.currentProjectName || name}`);
   }
 
   async function createProject() {
@@ -398,7 +443,7 @@ export function createProjectsModule({
         control_count: Number(refs.controlCount?.value ?? 1),
         ui_state: collectProjectUiState(cleanName),
       });
-      refs.projectStatus.textContent = `已新建项目：${data.project?.name || cleanName}`;
+      setProjectStatus(`已新建项目：${data.project?.name || cleanName}`);
       await refreshProjects();
       await openProject(data.project?.id || "", { skipCurrentStateSave: true });
     }).catch(showError);
@@ -433,7 +478,7 @@ export function createProjectsModule({
     };
     const body = JSON.stringify(payload);
     if (navigator.sendBeacon) {
-      navigator.sendBeacon("/api/projects/ui-state", new Blob([body], { type: "application/json" }));
+      navigator.sendBeacon(resolveApiUrl("api/projects/ui-state"), new Blob([body], { type: "application/json" }));
     }
   }
 
@@ -478,6 +523,8 @@ export function createProjectsModule({
     state.currentProjectId = data.project?.id || projectId;
     state.currentProjectName = data.project?.name || projectId;
     refs.projectNameInput.value = data.project?.name || projectId;
+    saveStored(STORAGE_KEYS.lastProjectId, state.currentProjectId);
+    saveStored(STORAGE_KEYS.lastProjectName, state.currentProjectName || state.currentProjectId);
     renderWorkspaceSummary();
     applyProjectUiState(data.ui_state, data.project?.name || projectId);
     applyWorkspaceSummary(data.workspace);
@@ -491,7 +538,7 @@ export function createProjectsModule({
         await selectItem(target.name, true, { skipDirtyCheck: true, panelId: selectedPanel });
       }
     }
-    refs.projectStatus.textContent = `已打开项目：${data.project?.name || projectId}`;
+    setProjectStatus(`已打开项目：${data.project?.name || projectId}`);
     closeUtilityPanel();
   }
 
@@ -506,7 +553,7 @@ export function createProjectsModule({
         refs.projectNameInput.value = state.currentProjectName;
         renderWorkspaceSummary();
       }
-      refs.projectStatus.textContent = `已重命名项目：${data.project?.name || name.trim()}`;
+      setProjectStatus(`已重命名项目：${data.project?.name || name.trim()}`);
       await refreshProjects();
     }).catch(showError);
   }
@@ -517,7 +564,7 @@ export function createProjectsModule({
     if (!name || !name.trim()) return;
     await runWithStatus("正在克隆项目...", async () => {
       const data = await apiPost("/api/projects/clone", { id: project.id, name: name.trim() });
-      refs.projectStatus.textContent = `已克隆项目：${data.project?.name || name.trim()}`;
+      setProjectStatus(`已克隆项目：${data.project?.name || name.trim()}`);
       await refreshProjects();
     }).catch(showError);
   }
@@ -529,9 +576,14 @@ export function createProjectsModule({
       if (state.currentProjectId === project.id) {
         state.currentProjectId = "";
         state.currentProjectName = "";
+        if (refs.projectNameInput) refs.projectNameInput.value = "";
+        saveStored(STORAGE_KEYS.lastProjectId, "");
+        saveStored(STORAGE_KEYS.lastProjectName, "");
+        saveStored(STORAGE_KEYS.lastWorkspaceDirs, "");
+        clearWorkspaceView?.();
         renderWorkspaceSummary();
       }
-      refs.projectStatus.textContent = `已删除项目：${project.name || project.id}`;
+      setProjectStatus(`已删除项目：${project.name || project.id}`);
       await refreshProjects();
     }).catch(showError);
   }
@@ -541,7 +593,7 @@ export function createProjectsModule({
     const data = await apiPost("/api/trash/cleanup", {});
     const cleanup = data.cleanup || {};
     const errors = cleanup.errors?.length ? `，失败 ${cleanup.errors.length} 项` : "";
-    refs.projectStatus.textContent = `回收项目清理完成：删除 ${cleanup.removed?.length || 0} 项${errors}`;
+    setProjectStatus(`回收项目清理完成：删除 ${cleanup.removed?.length || 0} 项${errors}`);
   }
 
   function renderProjects() {
@@ -564,8 +616,15 @@ export function createProjectsModule({
       if (project.thumbnail) {
         const img = document.createElement("img");
         img.loading = "lazy";
-        img.src = `/api/projects/thumbnail?id=${encodeURIComponent(project.id)}&width=520&height=320`;
+        img.src = resolveApiUrl("api/projects/thumbnail", {
+          id: project.id,
+          width: 520,
+          height: 320,
+        }).toString();
         img.alt = project.name || project.id;
+        img.addEventListener("error", () => {
+          thumb.textContent = "No Preview";
+        }, { once: true });
         thumb.appendChild(img);
       } else {
         thumb.textContent = "No Preview";
@@ -616,6 +675,7 @@ export function createProjectsModule({
     refreshProjects,
     applyProjectUiState,
     saveCurrentProject,
+    saveImportedWorkspaceToProject,
     createProject,
     saveOpenProjectUiState,
     openProject,
