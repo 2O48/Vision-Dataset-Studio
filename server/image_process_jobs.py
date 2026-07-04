@@ -1,63 +1,38 @@
 from __future__ import annotations
 
 import threading
-import time
-from typing import Optional
 
 from core.dataset_image_processor import process_workspace_images, process_workspace_match_results
 from core.dataset_workspace import DatasetWorkspace
+from server.job_manager import BaseJobManager
 
 
-class ImageProcessManager:
+class ImageProcessManager(BaseJobManager):
+    log_tag = "image"
+    log_max_entries = 300
+
     def __init__(self, workspace: DatasetWorkspace):
+        super().__init__()
         self.workspace = workspace
-        self._lock = threading.RLock()
-        self._thread: Optional[threading.Thread] = None
-        self.running = False
-        self.total = 0
-        self.done = 0
         self.processed = 0
         self.skipped = 0
-        self.current = ""
-        self.status = "idle"
         self.mode = "process"
         self.result: dict = {}
         self.workspace_loaded = False
         self.workspace_summary: dict = {}
-        self.logs: list[dict] = []
-
-    def _log(self, message: str, level: str = "info"):
-        ts = time.strftime("%H:%M:%S")
-        self.logs.append(
-            {
-                "ts": ts,
-                "level": level,
-                "message": message,
-            }
-        )
-        self.logs = self.logs[-300:]
-        try:
-            print(f"[{ts}] [image] [{level}] {message}", flush=True)
-        except OSError:
-            pass
 
     def snapshot(self) -> dict:
         with self._lock:
             pct = int((self.done / self.total) * 100) if self.total else (100 if self.status == "done" else 0)
             return {
-                "running": self.running,
-                "total": self.total,
-                "done": self.done,
+                **self.base_snapshot(),
                 "processed": self.processed,
                 "skipped": self.skipped,
-                "current": self.current,
-                "status": self.status,
                 "mode": self.mode,
                 "progress_pct": max(0, min(pct, 100)),
                 "result": dict(self.result),
                 "workspace_loaded": self.workspace_loaded,
                 "workspace": dict(self.workspace_summary),
-                "logs": list(self.logs),
             }
 
     def start(self, *, options: dict):
@@ -67,16 +42,14 @@ class ImageProcessManager:
             items = self.workspace.get_export_items()
             self.running = True
             self.total = len(items)
-            self.done = 0
+            self._reset_common()
+            self.total = len(items)
             self.processed = 0
             self.skipped = 0
-            self.current = ""
-            self.status = "running"
             self.mode = str(options.get("mode", "process") or "process")
             self.result = {}
             self.workspace_loaded = False
             self.workspace_summary = {}
-            self.logs = []
             mode_label = "match-result" if self.mode == "match_result" else "process"
             self._log(f"Image processing started ({mode_label}). total={self.total}", "info")
             self._thread = threading.Thread(target=self._run, args=(items, dict(options)), daemon=True)
@@ -166,4 +139,4 @@ class ImageProcessManager:
                 self._log(str(exc), "error")
         finally:
             with self._lock:
-                self.running = False
+                self._finish()

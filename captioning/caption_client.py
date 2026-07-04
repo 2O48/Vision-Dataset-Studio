@@ -13,7 +13,6 @@ from collections import deque
 from pathlib import Path
 from typing import Optional
 
-
 BASE_DIR = Path(__file__).resolve().parent.parent
 VENV_DIR = BASE_DIR / ".venv"
 

@@ -1,0 +1,44 @@
+[project]
+name = "vision-dataset-studio"
+version = "0.1.0"
+description = "视觉数据集工作台，面向视觉训练数据的专业预处理平台"
+requires-python = ">=3.10,<3.13"
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+extend-exclude = ["legacy", ".venv", "models", "datasets"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+# E501 历史长行较多（53 处，最长 203 字符），阶段 0 暂时排除，
+# 后续重构阶段逐步拆分长行后重新启用
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+# web_server.py / caption_service.py / bootstrap_env.py 在 sys.path 注入后再 import 本地模块，E402 是预期行为
+"server/web_server.py" = ["E402"]
+"captioning/caption_service.py" = ["E402"]
+"bootstrap_env.py" = ["E402"]
+"tools/bootstrap_env.py" = ["E402"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["core", "server", "captioning", "tools"]
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+warn_redundant_casts = true
+warn_unused_ignores = false
+# 渐进式类型检查：先基线化，不强制 strict，后续阶段逐步收紧
+check_untyped_defs = false
+disallow_untyped_defs = false
+exclude = ["legacy/", "models/", "datasets/"]
+
+[[tool.mypy.overrides]]
+module = ["PIL.*", "send2trash.*", "torch.*", "transformers.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]

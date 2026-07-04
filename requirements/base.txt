@@ -1,2 +1,4 @@
 pillow
 send2trash
+fastapi
+uvicorn[standard]

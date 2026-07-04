@@ -23,6 +23,12 @@ if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
 from captioning.caption_image_preprocess import prepare_caption_images
+from captioning.prompt_common import (
+    prompt_for_mode,
+)
+from captioning.prompt_common import (
+    prompt_with_image_name_context as _prompt_with_image_name_context,
+)
 from core.qwen_models import get_qwen_model_config, list_qwen_model_configs
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -49,27 +55,6 @@ QWEN_SYSTEM_PROMPT = (
     "Always reply with only the final caption in plain English. "
     "No markdown, no bullet points, no analysis, no preamble."
 )
-
-QWEN_PROMPTS = {
-    "natural": (
-        "Write one clean English caption for this image for vision model training. "
-        "Focus on subject, material, texture, color, lighting, pose, camera angle, and scene. "
-        "Keep it under 60 words."
-    ),
-    "detail": (
-        "Write a detailed English caption for this image for vision model training. "
-        "Cover subject, clothing or material, texture, color palette, lighting, composition, "
-        "camera angle, background, and mood."
-    ),
-    "tag": (
-        "Describe this image as comma-separated English tags for vision model training. "
-        "Use concise tags only. No numbering. No full sentences."
-    ),
-    "short": (
-        "Write a very short English caption for this image for vision model training. "
-        "One sentence, under 24 words."
-    ),
-}
 
 
 def send(obj: dict):
@@ -473,24 +458,7 @@ def load_qwen(model_key: str):
 
 
 def _build_prompt(mode: str, custom_prompt: str) -> str:
-    value = (custom_prompt or "").strip()
-    if value:
-        return value
-    return QWEN_PROMPTS.get((mode or "natural").strip().lower(), QWEN_PROMPTS["natural"])
-
-
-def _prompt_with_image_name_context(prompt: str, *, image_name: str = "", image_file_names: list[str] | None = None) -> str:
-    lines: list[str] = []
-    clean_name = (image_name or "").strip()
-    if clean_name:
-        lines.append(f"Dataset item name: {clean_name}")
-    clean_files = [str(name).strip() for name in (image_file_names or []) if str(name).strip()]
-    if clean_files:
-        label = "Image file names" if len(clean_files) > 1 else "Image file name"
-        lines.append(f"{label}: {', '.join(clean_files)}")
-    if not lines:
-        return prompt
-    return f"{prompt.rstrip()}\n\nFile name context:\n" + "\n".join(lines)
+    return prompt_for_mode((mode or "natural").strip().lower(), custom_prompt)
 
 
 def run_qwen(
@@ -504,6 +472,7 @@ def run_qwen(
     thinking: bool,
 ):
     import re
+
     import torch
 
     if _qwen_model is None or _qwen_processor is None:

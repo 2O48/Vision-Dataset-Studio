@@ -8,7 +8,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-
 BASE_DIR = Path(__file__).resolve().parent.parent
 REQUIREMENTS_DIR = BASE_DIR / "requirements"
 VENV_DIR = BASE_DIR / ".venv"

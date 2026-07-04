@@ -1,172 +1,69 @@
 from __future__ import annotations
 
-import base64
+import base64  # noqa: F401  # re-export for tests/external callers (dataset_workspace.base64)
 import json
-import hashlib
-import os
-import re
-import shutil
+import logging
 import threading
 import urllib.parse
 import urllib.request
-import uuid
-from collections import Counter
 from pathlib import Path
 from typing import Optional
 
-from PIL import Image
-from core.dataset_paths import DATASETS_DIR, WORKSPACES_DIR
+from core.caption_text_utils import (  # noqa: F401
+    _delete_caption_segments,
+    _join_caption_parts,
+    _merge_text_with_segments,
+    _normalize_caption_spacing,
+    _normalize_segment_inputs,
+    _parse_caption_segments,
+    _parse_tags,
+    _replace_caption_segment,
+    _split_caption_parts,
+    delete_caption_segments,
+    join_caption_parts,
+    merge_text_with_segments,
+    normalize_caption_spacing,
+    normalize_segment_inputs,
+    parse_caption_segments,
+    parse_tags,
+    replace_caption_segment,
+    split_caption_parts,
+)
+from core.dataset_paths import DATASETS_DIR, WORKSPACES_DIR, resolve_user_path
+from core.workspace_paths import (  # noqa: F401
+    CONTROL_ROLES,
+    IMAGE_EXTS,
+    IMAGE_ROLES,
+    INVALID_BASENAME_CHARS,
+    ROLE_STRIP_PATTERNS,
+    WINDOWS_RESERVED_NAMES,
+    _infer_image_suffix,
+    _looks_like_image_file,
+    _natural_key,
+    _parse_ignore_tokens,
+    _parse_rename_tokens,
+    infer_image_suffix,
+    looks_like_image_file,
+    natural_key,
+    parse_ignore_tokens,
+    parse_rename_tokens,
+)
+from core.workspace_state import WorkspaceState, WorkspaceStateStore, clean_relative_folder
 
 try:
     import send2trash
 except Exception:
     send2trash = None
 
+logger = logging.getLogger(__name__)
 
-IMAGE_EXTS = {".jpg", ".jpeg", ".jfif", ".png", ".gif", ".webp", ".bmp", ".tiff", ".tif", ".avif", ".heic", ".heif"}
-IMAGE_ROLES = ("control1", "control2", "control3", "result")
-CONTROL_ROLES = ("control1", "control2", "control3")
-INVALID_BASENAME_CHARS = set('<>:"/\\|?*')
-WINDOWS_RESERVED_NAMES = {
-    "CON", "PRN", "AUX", "NUL",
-    "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
-    "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
-}
+
+# Backward-compatible alias: _resolve_user_path 已迁移至 core.dataset_paths.resolve_user_path。
+# 保留此别名供既有 `from core.dataset_workspace import _resolve_user_path` 形式的导入继续可用。
+_resolve_user_path = resolve_user_path
+
 APP_STATE_DIR = DATASETS_DIR
 WORKSPACE_STATE_DIR = WORKSPACES_DIR
-ROLE_STRIP_PATTERNS = (
-    r"(?:control|ctrl|guide|cond|conditioning|source|input)[\s._-]*1",
-    r"(?:control|ctrl|guide|cond|conditioning|source|input)[\s._-]*2",
-    r"(?:control|ctrl|guide|cond|conditioning|source|input)[\s._-]*3",
-    r"(?:ref|reference)",
-    r"(?:result|output|target|final|edited|edit|after|render|gt)",
-    r"(?:控制图[\s._-]*1|控制1|控制图一)",
-    r"(?:控制图[\s._-]*2|控制2|控制图二)",
-    r"(?:控制图[\s._-]*3|控制3|控制图三)",
-    r"(?:结果图|结果|输出图|输出)",
-)
-
-
-def _natural_key(value: str):
-    return [int(chunk) if chunk.isdigit() else chunk.lower() for chunk in re.split(r"(\d+)", value)]
-
-
-def _resolve_user_path(value: str) -> Path:
-    raw = (value or "").strip()
-    if not raw:
-        return Path(raw)
-
-    # Support Windows-style paths when the app is running under WSL/Linux.
-    drive_match = re.match(r"^([a-zA-Z]):[\\/](.*)$", raw)
-    if drive_match:
-        if os.name == "nt":
-            return Path(raw)
-        drive = drive_match.group(1).lower()
-        rest = drive_match.group(2).replace("\\", "/").strip("/")
-        return Path("/mnt") / drive / rest
-
-    # Support UNC-like slashes copied into the app, normalize backslashes.
-    if "\\" in raw and "/" not in raw:
-        raw = raw.replace("\\", "/")
-
-    return Path(raw).expanduser()
-
-
-def _parse_caption_segments(content: str) -> list[str]:
-    return [segment.strip() for segment in re.split(r"[,，;\n；。]+", content or "") if segment.strip()]
-
-
-def _parse_tags(content: str) -> list[str]:
-    # Backward-compatible alias for previous tag-based data flow.
-    return _parse_caption_segments(content)
-
-
-def _normalize_segment_inputs(values: list[str]) -> list[str]:
-    items: list[str] = []
-    seen: set[str] = set()
-    for raw in values:
-        for segment in _parse_caption_segments(str(raw or "")):
-            key = segment.lower()
-            if key in seen:
-                continue
-            seen.add(key)
-            items.append(segment)
-    return items
-
-
-def _merge_text_with_segments(existing: str, segments: list[str], position: str = "after") -> str:
-    clean_segments = _normalize_segment_inputs(segments)
-    if not clean_segments:
-        return existing
-    current_text = (existing or "").strip()
-    if not current_text:
-        return ", ".join(clean_segments)
-    current_segments = _parse_caption_segments(current_text)
-    current_index = {segment.lower() for segment in current_segments}
-    additions = [segment for segment in clean_segments if segment.lower() not in current_index]
-    if not additions:
-        return current_text
-    if position == "before":
-        return ", ".join(additions) + f", {current_text.lstrip(',，;；。 ')}"
-    return f"{current_text.rstrip(',，;；。 ')}, " + ", ".join(additions)
-
-
-def _split_caption_parts(content: str) -> list[tuple[str, str]]:
-    tokens = re.split(r"([,，;\n；。]+)", content or "")
-    parts: list[tuple[str, str]] = []
-    index = 0
-    while index < len(tokens):
-        segment = tokens[index] if index < len(tokens) else ""
-        separator = tokens[index + 1] if index + 1 < len(tokens) else ""
-        index += 2
-        if not segment or not segment.strip():
-            if separator and parts:
-                prev_segment, prev_separator = parts[-1]
-                parts[-1] = (prev_segment, prev_separator + separator)
-            continue
-        parts.append((segment, separator))
-    return parts
-
-
-def _join_caption_parts(parts: list[tuple[str, str]]) -> str:
-    return "".join(segment + separator for segment, separator in parts)
-
-
-def _normalize_caption_spacing(content: str) -> str:
-    compact = re.sub(r"\n[ \t]+", "\n", content or "")
-    return compact.strip()
-
-
-def _delete_caption_segments(content: str, needles: list[str]) -> str:
-    if not needles:
-        return content
-    parts = _split_caption_parts(content)
-    filtered = [
-        (segment, separator)
-        for segment, separator in parts
-        if not any(needle in segment.strip().lower() for needle in needles)
-    ]
-    return _normalize_caption_spacing(_join_caption_parts(filtered))
-
-
-def _replace_caption_segment(content: str, old_segment: str, new_segment: str) -> str:
-    target = (old_segment or "").strip()
-    if not target:
-        return content
-    replacement = (new_segment or "").strip()
-    changed = False
-    updated_parts: list[tuple[str, str]] = []
-    for segment, separator in _split_caption_parts(content):
-        updated_segment = re.sub(re.escape(target), lambda _: replacement, segment, flags=re.IGNORECASE)
-        if updated_segment == segment:
-            updated_parts.append((segment, separator))
-            continue
-        changed = True
-        if updated_segment.strip():
-            updated_parts.append((updated_segment, separator))
-    if not changed:
-        return content
-    return _normalize_caption_spacing(_join_caption_parts(updated_parts))
 
 
 def _send_to_trash(path: Path):
@@ -176,81 +73,66 @@ def _send_to_trash(path: Path):
         raise RuntimeError("send2trash is not available; refusing to permanently delete files.")
 
 
-def _looks_like_image_file(path: Path) -> bool:
-    suffix = path.suffix.lower()
-    if suffix in IMAGE_EXTS:
-        return True
-    try:
-        with Image.open(path) as img:
-            img.verify()
-        return True
-    except Exception:
-        return False
-
-
-def _infer_image_suffix(filename: str, mime_type: str = "") -> str:
-    suffix = Path(str(filename or "")).suffix.lower()
-    if suffix in IMAGE_EXTS:
-        return suffix
-    mime = str(mime_type or "").lower()
-    mime_suffixes = {
-        "image/jpeg": ".jpg",
-        "image/jpg": ".jpg",
-        "image/png": ".png",
-        "image/gif": ".gif",
-        "image/webp": ".webp",
-        "image/bmp": ".bmp",
-        "image/tiff": ".tiff",
-        "image/avif": ".avif",
-        "image/heic": ".heic",
-        "image/heif": ".heif",
-        "image/x-icon": ".ico",
-        "image/vnd.microsoft.icon": ".ico",
-    }
-    return mime_suffixes.get(mime, ".png")
-
-
-def _parse_ignore_tokens(value) -> list[str]:
-    if value is None:
-        return []
-    if isinstance(value, str):
-        source = value
-    else:
-        source = " ".join(str(item or "") for item in value)
-    return [token.strip().lower() for token in re.split(r"[,;\n，\s]+", source) if token.strip()]
-
-
-def _parse_rename_tokens(value) -> list[str]:
-    if value is None:
-        return []
-    if isinstance(value, str):
-        source = value
-    else:
-        source = " ".join(str(item or "") for item in value)
-    return [token.strip() for token in re.split(r"[,;\n，]+", source) if token.strip()]
-
-
 class DatasetWorkspace:
+    """工作区门面（facade）。
+
+    通过组合三个组件提供完整 API：
+      - WorkspaceScanner: 扫描 / 序列化 / 只读查询
+      - ItemRepository: 单 item 读写操作
+      - BatchOperations: 批量操作
+
+    state 属性（dirs/files/txt_files/...）通过 __getattr__/__setattr__ 代理到 self._state。
+    大多数公共方法委托到组件，并保持 with self._lock 串行化。
+    """
+
+    # 这些属性名由 _state (WorkspaceState) 承载，DatasetWorkspace 通过
+    # __getattr__/__setattr__ 透明代理，使现有 self.xxx 代码零改动。
+    _STATE_ATTRS = frozenset({
+        "dirs", "files", "txt_files", "txt_content", "caption_overrides",
+        "caption_deleted", "excluded_names", "file_names", "_image_sizes",
+        "_resolution_mismatch", "_resolution_index_ready", "_global_segments_cache",
+        "_global_segments_dirty", "_workspace_folders", "control_count",
+        "ignore_tokens", "workspace_key",
+    })
+
     def __init__(self):
         self._lock = threading.RLock()
-        self.dirs: dict[str, Optional[Path]] = {role: None for role in IMAGE_ROLES}
-        self.files: dict[str, dict[str, Path]] = {role: {} for role in IMAGE_ROLES}
-        self.txt_files: dict[str, Path] = {}
-        self.txt_content: dict[str, str] = {}
-        self.caption_overrides: dict[str, str] = {}
-        self.caption_deleted: set[str] = set()
-        self.excluded_names: set[str] = set()
-        self.file_names: list[str] = []
-        self._image_sizes: dict[tuple[str, str], Optional[tuple[int, int]]] = {}
-        self._resolution_mismatch: set[str] = set()
-        self._resolution_index_ready = False
-        self._global_segments_cache: list[dict] = []
-        self._global_segments_dirty = True
-        self._workspace_folders: set[str] = set()
-        self.control_count = 1
-        self.ignore_tokens: list[str] = []
-        self.workspace_key = ""
+        # 先设置 _state 和 _state_store（绕过 __setattr__ 的代理逻辑）
+        state = WorkspaceState()
+        object.__setattr__(self, "_state", state)
+        # state_dir_getter 动态读取模块级 WORKSPACE_STATE_DIR，支持测试 monkey-patch
+        import sys as _sys
 
+        _mod = _sys.modules[__name__]
+        object.__setattr__(
+            self,
+            "_state_store",
+            WorkspaceStateStore(state, lambda: _mod.WORKSPACE_STATE_DIR),
+        )
+        # 延迟 import 以避免循环依赖；创建三个组件并绕过 __setattr__ 代理
+        from core.workspace_batch import BatchOperations
+        from core.workspace_items import ItemRepository
+        from core.workspace_scanner import WorkspaceScanner
+
+        object.__setattr__(self, "_scanner", WorkspaceScanner(state, self))
+        object.__setattr__(self, "_items", ItemRepository(state, self))
+        object.__setattr__(self, "_batch", BatchOperations(state, self))
+
+    def __getattr__(self, name: str):
+        # 仅在常规属性查找失败时调用，代理到 _state
+        if name in self._STATE_ATTRS:
+            return getattr(self._state, name)
+        raise AttributeError(name)
+
+    def __setattr__(self, name: str, value):
+        if name in self._STATE_ATTRS:
+            setattr(self._state, name, value)
+        else:
+            object.__setattr__(self, name, value)
+
+    # ------------------------------------------------------------------
+    # 打开 / 合并目录（保留协调逻辑：扫描 + state_store 加载/应用）
+    # ------------------------------------------------------------------
     def open_dirs(
         self,
         *,
@@ -284,11 +166,11 @@ class DatasetWorkspace:
                     raise FileNotFoundError(f"{key} directory does not exist: {value}")
                 self.dirs[key] = path
 
-            scanned_images = {key: self._scan_images(self.dirs[key]) for key in IMAGE_ROLES}
+            scanned_images = {key: self._scanner._scan_images(self.dirs[key]) for key in IMAGE_ROLES}
             groups: dict[str, dict] = {}
             for role in IMAGE_ROLES:
                 for raw_name, path in scanned_images[role].items():
-                    match_key = self._normalize_match_key(raw_name)
+                    match_key = self._scanner._normalize_match_key(raw_name)
                     group = groups.setdefault(match_key, {"paths": {}, "raw_names": {}, "txt_path": None, "txt_raw_name": ""})
                     current_name = group["raw_names"].get(role)
                     if current_name is None or _natural_key(raw_name) < _natural_key(current_name):
@@ -305,8 +187,8 @@ class DatasetWorkspace:
                 for file in result_path.rglob("*.txt"):
                     if not file.is_file() or file.suffix.lower() != ".txt":
                         continue
-                    raw_name = self._relative_stem(result_path, file)
-                    match_key = self._normalize_match_key(raw_name)
+                    raw_name = self._scanner._relative_stem(result_path, file)
+                    match_key = self._scanner._normalize_match_key(raw_name)
                     group = groups.get(match_key)
                     if group is None:
                         continue
@@ -318,8 +200,8 @@ class DatasetWorkspace:
             self.files = {role: {} for role in IMAGE_ROLES}
             self.file_names = []
             used_names: set[str] = set()
-            for _, group in sorted(groups.items(), key=lambda item: _natural_key(self._pick_display_name(item[1], item[0]))):
-                display_name = self._ensure_unique_name(self._pick_display_name(group, ""), used_names)
+            for _, group in sorted(groups.items(), key=lambda item: _natural_key(self._scanner._pick_display_name(item[1], item[0]))):
+                display_name = self._scanner._ensure_unique_name(self._scanner._pick_display_name(group, ""), used_names)
                 used_names.add(display_name)
                 self.file_names.append(display_name)
                 for role in IMAGE_ROLES:
@@ -329,7 +211,7 @@ class DatasetWorkspace:
                 txt_path = group.get("txt_path")
                 if txt_path is not None:
                     self.txt_files[display_name] = txt_path
-                    self.txt_content[display_name] = self._read_text_file(txt_path)
+                    self.txt_content[display_name] = self._items._read_text_file(txt_path)
 
             self._image_sizes.clear()
             self._resolution_mismatch.clear()
@@ -339,7 +221,7 @@ class DatasetWorkspace:
             self._apply_workspace_state()
             self._mark_global_segments_dirty()
             self.file_names = sorted(self.file_names, key=_natural_key)
-            return self.get_workspace_summary()
+            return self._scanner.get_workspace_summary()
 
     def merge_dirs(
         self,
@@ -372,11 +254,11 @@ class DatasetWorkspace:
             if not any(incoming_dirs.values()):
                 raise ValueError("Merge requires at least one image directory.")
 
-            scanned_images = {key: self._scan_images(incoming_dirs[key]) for key in IMAGE_ROLES}
+            scanned_images = {key: self._scanner._scan_images(incoming_dirs[key]) for key in IMAGE_ROLES}
             groups: dict[str, dict] = {}
             for role in IMAGE_ROLES:
                 for raw_name, path in scanned_images[role].items():
-                    match_key = self._normalize_match_key(raw_name)
+                    match_key = self._scanner._normalize_match_key(raw_name)
                     group = groups.setdefault(match_key, {"paths": {}, "raw_names": {}, "txt_path": None, "txt_raw_name": ""})
                     current_name = group["raw_names"].get(role)
                     if current_name is None or _natural_key(raw_name) < _natural_key(current_name):
@@ -388,8 +270,8 @@ class DatasetWorkspace:
                 for file in result_path.rglob("*.txt"):
                     if not file.is_file() or file.suffix.lower() != ".txt":
                         continue
-                    raw_name = self._relative_stem(result_path, file)
-                    match_key = self._normalize_match_key(raw_name)
+                    raw_name = self._scanner._relative_stem(result_path, file)
+                    match_key = self._scanner._normalize_match_key(raw_name)
                     group = groups.get(match_key)
                     if group is None:
                         continue
@@ -400,8 +282,8 @@ class DatasetWorkspace:
 
             used_names = set(self.file_names) | set(self.excluded_names)
             merged_names: list[str] = []
-            for _, group in sorted(groups.items(), key=lambda item: _natural_key(self._pick_display_name(item[1], item[0]))):
-                display_name = self._ensure_unique_name(self._pick_display_name(group, ""), used_names)
+            for _, group in sorted(groups.items(), key=lambda item: _natural_key(self._scanner._pick_display_name(item[1], item[0]))):
+                display_name = self._scanner._ensure_unique_name(self._scanner._pick_display_name(group, ""), used_names)
                 used_names.add(display_name)
                 self.file_names.append(display_name)
                 merged_names.append(display_name)
@@ -412,1915 +294,262 @@ class DatasetWorkspace:
                 txt_path = group.get("txt_path")
                 if txt_path is not None:
                     self.txt_files[display_name] = txt_path
-                    self.txt_content[display_name] = self._read_text_file(txt_path)
+                    self.txt_content[display_name] = self._items._read_text_file(txt_path)
 
             self._image_sizes.clear()
             self._resolution_mismatch.clear()
             self._resolution_index_ready = False
             self.file_names = sorted(self.file_names, key=_natural_key)
             self._mark_global_segments_dirty()
-            summary = self.get_workspace_summary()
+            summary = self._scanner.get_workspace_summary()
             return {
                 "merged": len(merged_names),
                 "names": merged_names,
                 "workspace": summary,
             }
 
-    def swap_control_result_pairs(
-        self,
-        *,
-        control_dir: Optional[str] = None,
-        result_dir: Optional[str] = None,
-        suffix: str = "_swap",
-    ) -> dict:
-        with self._lock:
-            control_root = _resolve_user_path(str(control_dir or self.dirs["control1"] or ""))
-            result_root = _resolve_user_path(str(result_dir or self.dirs["result"] or ""))
-            if not control_root.is_dir():
-                raise FileNotFoundError(f"control directory does not exist: {control_dir or ''}")
-            if not result_root.is_dir():
-                raise FileNotFoundError(f"result directory does not exist: {result_dir or ''}")
-            if control_root.resolve() == result_root.resolve():
-                raise ValueError("Control and result directories must be different.")
-
-            clean_suffix = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "_", str(suffix or "").strip()) or "_swap"
-            control_images = self._scan_images(control_root)
-            result_images = self._scan_images(result_root)
-            control_groups = self._group_images_by_match_key(control_images)
-            result_groups = self._group_images_by_match_key(result_images)
-            matched_keys = sorted(set(control_groups) & set(result_groups), key=_natural_key)
-            if not matched_keys:
-                summary = self.get_workspace_summary()
-                return {"swapped": 0, "created": [], "skipped": [], "workspace": summary}
-
-            used_raw_names = set(control_images) | set(result_images)
-            created: list[dict] = []
-            skipped: list[dict] = []
-            for match_key in matched_keys:
-                control_item = control_groups[match_key]
-                result_item = result_groups[match_key]
-                control_source = control_item["path"]
-                result_source = result_item["path"]
-                if control_source.resolve() == result_source.resolve():
-                    skipped.append({"name": result_item["raw_name"], "reason": "same source image"})
-                    continue
-
-                base_raw_name = result_item["raw_name"] or control_item["raw_name"]
-                new_raw_name = self._unique_swapped_raw_name(
-                    base_raw_name,
-                    clean_suffix,
-                    used_raw_names,
-                    control_root,
-                    result_root,
-                    result_source.suffix,
-                    control_source.suffix,
-                )
-                control_target = self._image_path_for_raw_name(control_root, new_raw_name, result_source.suffix)
-                result_target = self._image_path_for_raw_name(result_root, new_raw_name, control_source.suffix)
-                control_target.parent.mkdir(parents=True, exist_ok=True)
-                result_target.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(result_source, control_target)
-                shutil.copy2(control_source, result_target)
-                used_raw_names.add(new_raw_name)
-                created.append({
-                    "name": new_raw_name,
-                    "control_source": str(control_source),
-                    "result_source": str(result_source),
-                    "control_target": str(control_target),
-                    "result_target": str(result_target),
-                })
-
-            summary = self.open_dirs(
-                control1_dir=str(control_root),
-                result_dir=str(result_root),
-                control_count=max(1, self.control_count),
-            )
-            return {
-                "swapped": len(created),
-                "created": created,
-                "skipped": skipped,
-                "suffix": clean_suffix,
-                "workspace": summary,
-            }
-
+    # ------------------------------------------------------------------
+    # StateStore 委托（步骤 3 已完成）
+    # ------------------------------------------------------------------
     def _mark_global_segments_dirty(self):
-        self._global_segments_dirty = True
+        self._state.mark_global_segments_dirty()
 
     def _compute_workspace_key(self) -> str:
-        payload = {
-            "dirs": {key: str(value) if value else "" for key, value in self.dirs.items()},
-            "control_count": self.control_count,
-            "ignore_tokens": list(self.ignore_tokens),
-        }
-        raw = json.dumps(payload, ensure_ascii=False, sort_keys=True)
-        return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
+        return self._state_store._compute_workspace_key()
 
     def _workspace_state_path(self) -> Path:
-        key = self.workspace_key or self._compute_workspace_key()
-        return WORKSPACE_STATE_DIR / f"{key}.json"
+        return self._state_store._workspace_state_path()
 
     def _load_workspace_state(self):
-        self.caption_overrides = {}
-        self.caption_deleted = set()
-        self.excluded_names = set()
-        self._workspace_folders = set()
-        state_path = self._workspace_state_path()
-        if not state_path.exists():
-            return
-        try:
-            data = json.loads(state_path.read_text(encoding="utf-8"))
-        except Exception:
-            return
-        captions = data.get("captions", {})
-        if isinstance(captions, dict):
-            self.caption_overrides = {
-                str(name): str(content or "")
-                for name, content in captions.items()
-            }
-        deleted = data.get("caption_deleted", data.get("deleted_captions", []))
-        if isinstance(deleted, list):
-            self.caption_deleted = {str(name) for name in deleted}
-        excluded = data.get("excluded", [])
-        if isinstance(excluded, list):
-            self.excluded_names = {str(name) for name in excluded}
-        folders = data.get("folders", [])
-        if isinstance(folders, list):
-            self._workspace_folders = {self._clean_relative_folder(folder) for folder in folders if str(folder or "").strip()}
+        self._state_store._load_workspace_state()
 
     def _save_workspace_state(self):
-        if not self.workspace_key:
-            self.workspace_key = self._compute_workspace_key()
-        WORKSPACE_STATE_DIR.mkdir(parents=True, exist_ok=True)
-        data = {
-            "workspace_key": self.workspace_key,
-            "dirs": {key: str(value) if value else "" for key, value in self.dirs.items()},
-            "captions": dict(sorted(self.caption_overrides.items())),
-            "caption_deleted": sorted(self.caption_deleted, key=_natural_key),
-            "excluded": sorted(self.excluded_names, key=_natural_key),
-            "folders": sorted(self._workspace_folders, key=_natural_key),
-        }
-        self._workspace_state_path().write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        self._state_store._save_workspace_state()
 
     def _apply_workspace_state(self):
-        valid_names = set(self.file_names)
-        self.caption_overrides = {
-            name: content
-            for name, content in self.caption_overrides.items()
-            if name in valid_names
-        }
-        self.caption_deleted = {name for name in self.caption_deleted if name in valid_names}
-        self.caption_overrides = {
-            name: content
-            for name, content in self.caption_overrides.items()
-            if name not in self.caption_deleted
-        }
-        self.excluded_names = {name for name in self.excluded_names if name in valid_names}
-        for name, content in self.caption_overrides.items():
-            self.txt_content[name] = content
-        for name in self.caption_deleted:
-            self.txt_content.pop(name, None)
-        if self.excluded_names:
-            self.file_names = [name for name in self.file_names if name not in self.excluded_names]
+        self._state_store._apply_workspace_state()
 
+    # ------------------------------------------------------------------
+    # Scanner 委托（保留为门面方法，因为 Items/Batch 通过 self._workspace 调用）
+    # ------------------------------------------------------------------
     def _has_caption(self, name: str) -> bool:
-        if name in self.caption_deleted:
-            return False
-        if name in self.caption_overrides:
-            return bool(str(self.caption_overrides.get(name, "") or "").strip())
-        if name in self.txt_files:
-            return bool(str(self.txt_content.get(name, "") or "").strip())
-        return False
-
-    def apply_name_aliases(self, aliases: dict[str, str]) -> dict:
-        with self._lock:
-            if not isinstance(aliases, dict) or not aliases:
-                return self.get_workspace_summary()
-
-            used_names: set[str] = set()
-            rename_map: dict[str, str] = {}
-            for name in self.file_names:
-                alias = str(aliases.get(name, "") or "").strip().replace("\\", "/")
-                next_name = alias or name
-                next_name = self._ensure_unique_name(next_name, used_names)
-                used_names.add(next_name)
-                rename_map[name] = next_name
-
-            if all(old == new for old, new in rename_map.items()):
-                return self.get_workspace_summary()
-
-            self.file_names = [rename_map[name] for name in self.file_names]
-            for role in IMAGE_ROLES:
-                self.files[role] = {
-                    rename_map.get(name, name): path
-                    for name, path in self.files[role].items()
-                }
-            self.txt_files = {
-                rename_map.get(name, name): path
-                for name, path in self.txt_files.items()
-            }
-            self.txt_content = {
-                rename_map.get(name, name): content
-                for name, content in self.txt_content.items()
-            }
-            self.caption_overrides = {
-                rename_map.get(name, name): content
-                for name, content in self.caption_overrides.items()
-            }
-            self.caption_deleted = {rename_map.get(name, name) for name in self.caption_deleted}
-            self.excluded_names = {rename_map.get(name, name) for name in self.excluded_names}
-            self._image_sizes.clear()
-            self._resolution_mismatch.clear()
-            self._resolution_index_ready = False
-            self._mark_global_segments_dirty()
-            self.file_names = sorted(self.file_names, key=_natural_key)
-            return self.get_workspace_summary()
-
-    def _normalize_match_part(self, value: str, *, strip_role_patterns: bool) -> str:
-        value = (value or "").strip().lower()
-        for token in self.ignore_tokens:
-            if token:
-                value = value.replace(token, " ")
-
-        if strip_role_patterns:
-            previous = None
-            while previous != value:
-                previous = value
-                for pattern in ROLE_STRIP_PATTERNS:
-                    value = re.sub(rf"^(?:{pattern})(?:[\s._-]+|$)", "", value)
-                    value = re.sub(rf"(?:^|[\s._-]+)(?:{pattern})$", "", value)
-
-        value = re.sub(r"[^0-9a-z\u4e00-\u9fff]+", "", value)
-        return value
-
-    def _normalize_match_key(self, stem: str) -> str:
-        raw = (stem or "").strip().replace("\\", "/")
-        parts = [part for part in raw.split("/") if part]
-        if not parts:
-            return raw.lower()
-
-        normalized_parts: list[str] = []
-        last_index = len(parts) - 1
-        for index, part in enumerate(parts):
-            normalized = self._normalize_match_part(part, strip_role_patterns=index == last_index)
-            normalized_parts.append(normalized or part.strip().lower())
-        return "/".join(normalized_parts)
-
-    def _pick_display_name(self, group: dict, fallback: str) -> str:
-        for role in ("result", "control1", "control2", "control3"):
-            raw_name = group["raw_names"].get(role)
-            if raw_name:
-                return raw_name
-        if group.get("txt_raw_name"):
-            return str(group["txt_raw_name"])
-        return fallback or "untitled"
-
-    def _ensure_unique_name(self, name: str, used_names: set[str]) -> str:
-        candidate = name or "untitled"
-        if candidate not in used_names:
-            return candidate
-        index = 2
-        while True:
-            next_name = f"{candidate} [{index}]"
-            if next_name not in used_names:
-                return next_name
-            index += 1
-
-    def _relative_stem(self, root: Path, file: Path) -> str:
-        try:
-            relative = file.relative_to(root)
-        except ValueError:
-            relative = Path(file.name)
-        return relative.with_suffix("").as_posix()
+        return self._scanner._has_caption(name)
 
     def _scan_images(self, path: Optional[Path]) -> dict[str, Path]:
-        if not path or not path.is_dir():
-            return {}
-        return {
-            self._relative_stem(path, file): file
-            for file in path.rglob("*")
-            if file.is_file() and file.suffix.lower() in IMAGE_EXTS
-        }
+        return self._scanner._scan_images(path)
+
+    def _normalize_match_key(self, stem: str) -> str:
+        return self._scanner._normalize_match_key(stem)
+
+    def _pick_display_name(self, group: dict, fallback: str) -> str:
+        return self._scanner._pick_display_name(group, fallback)
+
+    def _ensure_unique_name(self, name: str, used_names: set[str]) -> str:
+        return self._scanner._ensure_unique_name(name, used_names)
+
+    def _relative_stem(self, root: Path, file: Path) -> str:
+        return self._scanner._relative_stem(root, file)
 
     def _workspace_roots(self) -> list[Path]:
-        roots = []
-        for path in self.dirs.values():
-            if path and path.exists():
-                roots.append(path)
-        return roots
-
-    def _folder_item_names(self, folder: str) -> list[str]:
-        clean_folder = self._clean_relative_folder(folder)
-        prefix = f"{clean_folder}/"
-        return [name for name in self.file_names if name == clean_folder or name.startswith(prefix)]
-
-    def _refresh_workspace_folders(self):
-        folders = set(self._workspace_folders)
-        for name in self.file_names:
-            folder = Path(str(name).replace("\\", "/")).parent.as_posix()
-            if folder and folder != ".":
-                folders.add(folder)
-        visible: set[str] = set()
-        roots = self._workspace_roots()
-        for folder in folders:
-            folder_path = Path(folder)
-            if any((root / folder_path).is_dir() for root in roots):
-                visible.add(folder)
-        self._workspace_folders = visible
-        return visible
+        return self._scanner._workspace_roots()
 
     def _folder_exists_on_disk(self, folder: str) -> bool:
-        clean_folder = self._clean_relative_folder(folder)
-        folder_path = Path(clean_folder)
-        return any((root / folder_path).is_dir() for root in self._workspace_roots())
+        return self._scanner._folder_exists_on_disk(folder)
 
     def _rewrite_workspace_folder_prefix(self, source_folder: str, target_folder: str):
-        source = self._clean_relative_folder(source_folder)
-        target = self._clean_relative_folder(target_folder) if str(target_folder or "").strip() else ""
-        source_prefix = f"{source}/"
-        updated: set[str] = set()
-        for folder in self._workspace_folders:
-            if folder == source:
-                if target:
-                    updated.add(target)
-                continue
-            if folder.startswith(source_prefix):
-                suffix = folder[len(source_prefix):]
-                new_folder = f"{target}/{suffix}" if target else suffix
-                if new_folder:
-                    updated.add(new_folder)
-                continue
-            updated.add(folder)
-        self._workspace_folders = updated
+        return self._scanner._rewrite_workspace_folder_prefix(source_folder, target_folder)
 
     def _prune_empty_dir(self, directory: Path, root: Path):
-        current = directory
-        while current != root and current.exists():
-            try:
-                current.rmdir()
-            except OSError:
-                break
-            current = current.parent
+        return self._scanner._prune_empty_dir(directory, root)
 
     def _group_images_by_match_key(self, images: dict[str, Path]) -> dict[str, dict]:
-        groups: dict[str, dict] = {}
-        for raw_name, path in images.items():
-            match_key = self._normalize_match_key(raw_name)
-            current = groups.get(match_key)
-            if current is None or _natural_key(raw_name) < _natural_key(current["raw_name"]):
-                groups[match_key] = {"raw_name": raw_name, "path": path}
-        return groups
+        return self._scanner._group_images_by_match_key(images)
 
     def _image_path_for_raw_name(self, root: Path, raw_name: str, suffix: str) -> Path:
-        parts = [part for part in str(raw_name or "").replace("\\", "/").split("/") if part]
-        if not parts:
-            parts = ["untitled"]
-        parts[-1] = f"{parts[-1]}{suffix}"
-        return root.joinpath(*parts)
-
-    def _clean_rename_basename(self, value: str) -> str:
-        raw = str(value or "").strip()
-        if not raw:
-            raise ValueError("New file name is required.")
-        if raw != Path(raw).name or any(char in INVALID_BASENAME_CHARS for char in raw):
-            raise ValueError("New file name must not include a folder path.")
-        suffix = Path(raw).suffix.lower()
-        if suffix in IMAGE_EXTS or suffix == ".txt":
-            raw = Path(raw).stem.strip()
-        if not raw or raw in {".", ".."}:
-            raise ValueError("New file name is invalid.")
-        if raw.rstrip(" .") != raw:
-            raise ValueError("New file name must not end with a space or dot.")
-        if any(ord(char) < 32 for char in raw):
-            raise ValueError("New file name contains invalid characters.")
-        if raw.upper() in WINDOWS_RESERVED_NAMES:
-            raise ValueError("New file name is reserved by Windows.")
-        return raw
-
-    def _increment_clone_basename(self, basename: str) -> str:
-        raw = self._clean_rename_basename(basename)
-        matches = list(re.finditer(r"\d+", raw))
-        if not matches:
-            return f"{raw}_1"
-        match = matches[-1]
-        number = match.group(0)
-        incremented = str(int(number) + 1).zfill(len(number))
-        return f"{raw[:match.start()]}{incremented}{raw[match.end():]}"
-
-    def _clone_basename(self, basename: str, index: int = 1) -> str:
-        raw = self._clean_rename_basename(basename)
-        return f"{raw}_clone" if index <= 1 else f"{raw}_clone_{index}"
-
-    def _clean_relative_folder(self, value: str) -> str:
-        raw = str(value or "").strip().replace("\\", "/")
-        if not raw:
-            raise ValueError("Target folder is required.")
-        if raw.startswith("/") or re.match(r"^[a-zA-Z]:", raw):
-            raise ValueError("Target folder must be relative.")
-        parts = [part.strip() for part in raw.split("/") if part.strip()]
-        if not parts:
-            raise ValueError("Target folder is required.")
-        clean_parts: list[str] = []
-        for part in parts:
-            if part in {".", ".."} or any(char in INVALID_BASENAME_CHARS for char in part):
-                raise ValueError("Target folder contains invalid characters.")
-            if part.rstrip(" .") != part or any(ord(char) < 32 for char in part):
-                raise ValueError("Target folder contains invalid characters.")
-            if part.upper() in WINDOWS_RESERVED_NAMES:
-                raise ValueError("Target folder contains a reserved name.")
-            clean_parts.append(part)
-        return "/".join(clean_parts)
-
-    def _append_name_suffix(self, raw_name: str, suffix: str, index: int) -> str:
-        raw_path = Path(str(raw_name or "untitled").replace("\\", "/"))
-        extra = suffix if index <= 1 else f"{suffix}_{index}"
-        next_name = f"{raw_path.name}{extra}"
-        parent = raw_path.parent.as_posix()
-        return next_name if parent in {"", "."} else f"{parent}/{next_name}"
-
-    def _unique_swapped_raw_name(
-        self,
-        raw_name: str,
-        suffix: str,
-        used_raw_names: set[str],
-        control_root: Path,
-        result_root: Path,
-        control_ext: str,
-        result_ext: str,
-    ) -> str:
-        index = 1
-        while True:
-            candidate = self._append_name_suffix(raw_name, suffix, index)
-            control_target = self._image_path_for_raw_name(control_root, candidate, control_ext)
-            result_target = self._image_path_for_raw_name(result_root, candidate, result_ext)
-            if candidate not in used_raw_names and not control_target.exists() and not result_target.exists():
-                return candidate
-            index += 1
-
-    def _read_text_file(self, path: Path) -> str:
-        try:
-            return path.read_text(encoding="utf-8")
-        except Exception:
-            return path.read_text(encoding="gbk", errors="replace")
-
-    def _write_text_file(self, path: Path, content: str):
-        path.write_text(content, encoding="utf-8")
-
-    def _get_save_dir(self) -> Optional[Path]:
-        return self.dirs["result"] or self.dirs["control1"]
+        return self._scanner._image_path_for_raw_name(root, raw_name, suffix)
 
     def _ensure_resolution_index(self):
-        if self._resolution_index_ready:
-            return
-        for name in self.file_names:
-            result_size = self._get_image_size("result", name)
-            if not result_size:
-                continue
-            for role in CONTROL_ROLES[: self.control_count]:
-                control_size = self._get_image_size(role, name)
-                if control_size and control_size != result_size:
-                    self._resolution_mismatch.add(name)
-                    break
-        self._resolution_index_ready = True
+        return self._scanner._ensure_resolution_index()
 
-    def _get_image_size(self, role: str, name: str) -> Optional[tuple[int, int]]:
-        cache_key = (role, name)
-        if cache_key in self._image_sizes:
-            return self._image_sizes[cache_key]
-
-        path = self.files.get(role, {}).get(name)
-        if not path or not path.exists():
-            self._image_sizes[cache_key] = None
-            return None
-
-        try:
-            with Image.open(path) as img:
-                size = img.size
-        except Exception:
-            size = None
-        self._image_sizes[cache_key] = size
-        return size
+    def _get_image_size(self, role: str, name: str):
+        return self._scanner._get_image_size(role, name)
 
     def _refresh_item_resolution_flag(self, name: str):
-        if not self._resolution_index_ready:
-            return
-        for role in IMAGE_ROLES:
-            self._image_sizes.pop((role, name), None)
-        result_size = self._get_image_size("result", name)
-        mismatch = bool(
-            result_size
-            and any(
-                self._get_image_size(role, name) and self._get_image_size(role, name) != result_size
-                for role in CONTROL_ROLES[: self.control_count]
-            )
-        )
-        if mismatch:
-            self._resolution_mismatch.add(name)
-        else:
-            self._resolution_mismatch.discard(name)
+        return self._scanner._refresh_item_resolution_flag(name)
+
+    def _refresh_workspace_folders(self):
+        return self._scanner._refresh_workspace_folders()
+
+    def _clean_relative_folder(self, value: str) -> str:
+        return clean_relative_folder(value)
+
+    def _serialize_item(self, name: str) -> dict:
+        return self._scanner._serialize_item(name)
+
+    def _serialize_item_summary(self, name: str, search_query: str = "", search_mode: str = "all", match_mode: str = "contains") -> dict:
+        return self._scanner._serialize_item_summary(name, search_query, search_mode, match_mode)
 
     def get_workspace_summary(self) -> dict:
         with self._lock:
-            self._refresh_workspace_folders()
-            visible_names = set(self.file_names)
-            return {
-                "workspace_key": self.workspace_key or self._compute_workspace_key(),
-                "dirs": {key: str(value) if value else "" for key, value in self.dirs.items()},
-                "settings": {
-                    "control_count": self.control_count,
-                    "ignore_tokens": list(self.ignore_tokens),
-                },
-                "counts": {
-                    "control1": sum(1 for name in visible_names if name in self.files["control1"]),
-                    "control2": sum(1 for name in visible_names if name in self.files["control2"]),
-                    "control3": sum(1 for name in visible_names if name in self.files["control3"]),
-                    "result": sum(1 for name in visible_names if name in self.files["result"]),
-                    "txt": sum(1 for name in self.file_names if self._has_caption(name)),
-                    "all": len(self.file_names),
-                    "resolution_mismatch": len(self._resolution_mismatch) if self._resolution_index_ready else 0,
-                    "edited": sum(1 for name in self.file_names if name in self.caption_overrides),
-                    "excluded": len(self.excluded_names),
-                },
-                "folders": sorted(self._workspace_folders, key=_natural_key),
-            }
+            return self._scanner.get_workspace_summary()
 
-    def list_items(
-        self,
-        *,
-        filter_mode: str = "all",
-        tag_query: str = "",
-        search_mode: str = "all",
-        match_mode: str = "contains",
-        detail: bool = False,
-        include_global_segments: bool = True,
-    ) -> dict:
+    def list_items(self, **kwargs) -> dict:
         with self._lock:
-            names = list(self.file_names)
-            control1_files = self.files["control1"]
-            control2_files = self.files["control2"]
-            control3_files = self.files["control3"]
-            result_files = self.files["result"]
-
-            if filter_mode == "no_control1" and self.control_count >= 1:
-                names = [name for name in names if name not in control1_files]
-            elif filter_mode == "no_control2" and self.control_count >= 2:
-                names = [name for name in names if name not in control2_files]
-            elif filter_mode == "no_control3" and self.control_count >= 3:
-                names = [name for name in names if name not in control3_files]
-            elif filter_mode == "no_result":
-                names = [name for name in names if name not in result_files]
-            elif filter_mode == "no_txt":
-                names = [name for name in names if not self._has_caption(name)]
-            elif filter_mode == "res_mismatch":
-                self._ensure_resolution_index()
-                names = [name for name in names if name in self._resolution_mismatch]
-
-            tag_query = (tag_query or "").strip().lower()
-            search_mode = (search_mode or "all").strip().lower()
-            if search_mode not in {"all", "phrase", "name"}:
-                search_mode = "all"
-            match_mode = (match_mode or "contains").strip().lower()
-            if match_mode not in {"contains", "exact"}:
-                match_mode = "contains"
-
-            def matches_search(value: str) -> bool:
-                normalized = str(value or "").replace("\\", "/").strip().lower()
-                if match_mode == "exact":
-                    parts = [part for part in normalized.split("/") if part]
-                    basename = parts[-1] if parts else normalized
-                    return normalized == tag_query or basename == tag_query
-                return tag_query in normalized
-
-            def matches_phrase(text: str) -> bool:
-                content = str(text or "").strip().lower()
-                segments = [segment.strip().lower() for segment in _parse_caption_segments(text)]
-                if match_mode == "exact":
-                    return content == tag_query or any(segment == tag_query for segment in segments)
-                return tag_query in content or any(tag_query in segment for segment in segments)
-
-            if tag_query:
-                names = [
-                    name
-                    for name in names
-                    if (
-                        search_mode in {"all", "name"}
-                        and matches_search(name)
-                    )
-                    or (
-                        search_mode in {"all", "phrase"}
-                        and matches_phrase(self.txt_content.get(name, ""))
-                    )
-                ]
-
-            items = [
-                self._serialize_item(name) if detail else self._serialize_item_summary(name, search_query=tag_query, search_mode=search_mode, match_mode=match_mode)
-                for name in names
-            ]
-            global_segments = self.get_global_segments() if include_global_segments and not tag_query else []
-            return {
-                "items": items,
-                "stats": self._build_stats(filtered_count=len(items)),
-                "global_segments": global_segments,
-                "global_tags": global_segments,
-            }
-
-    def _item_search_matches(self, name: str, search_query: str, search_mode: str = "all", match_mode: str = "contains") -> dict:
-        query = (search_query or "").strip().lower()
-        if not query:
-            return {}
-        search_mode = (search_mode or "all").strip().lower()
-        if search_mode not in {"all", "phrase", "name"}:
-            search_mode = "all"
-        match_mode = (match_mode or "contains").strip().lower()
-        if match_mode not in {"contains", "exact"}:
-            match_mode = "contains"
-        text = self.txt_content.get(name, "")
-        normalized_name = str(name).replace("\\", "/").strip().lower()
-        name_parts = [part for part in normalized_name.split("/") if part]
-        basename = name_parts[-1] if name_parts else normalized_name
-        segments = [
-            segment
-            for segment in _parse_caption_segments(text)
-            if (segment.strip().lower() == query if match_mode == "exact" else query in segment.lower())
-        ]
-        matches = {}
-        if search_mode in {"all", "name"}:
-            matches["name"] = normalized_name == query or basename == query if match_mode == "exact" else query in normalized_name
-        if search_mode in {"all", "phrase"}:
-            matches["segments"] = segments
-        return matches
-
-    def _serialize_item_summary(self, name: str, search_query: str = "", search_mode: str = "all", match_mode: str = "contains") -> dict:
-        control1_path = self.files["control1"].get(name)
-        control2_path = self.files["control2"].get(name)
-        control3_path = self.files["control3"].get(name)
-        result_path = self.files["result"].get(name)
-        item = {
-            "name": name,
-            "exists": {
-                "control1": bool(control1_path),
-                "control2": bool(control2_path),
-                "control3": bool(control3_path),
-                "result": bool(result_path),
-                "txt": self._has_caption(name),
-            },
-            "flags": {
-                "resolution_mismatch": name in self._resolution_mismatch,
-            },
-        }
-        matches = self._item_search_matches(name, search_query, search_mode=search_mode, match_mode=match_mode)
-        if matches:
-            item["search_matches"] = matches
-        return item
-
-    def _build_stats(self, *, filtered_count: int) -> dict:
-        control1_files = self.files["control1"]
-        control2_files = self.files["control2"]
-        control3_files = self.files["control3"]
-        result_files = self.files["result"]
-        return {
-            "all": len(self.file_names),
-            "filtered": filtered_count,
-            "no_control1": sum(1 for name in self.file_names if name not in control1_files) if self.control_count >= 1 else 0,
-            "no_control2": sum(1 for name in self.file_names if name not in control2_files) if self.control_count >= 2 else 0,
-            "no_control3": sum(1 for name in self.file_names if name not in control3_files) if self.control_count >= 3 else 0,
-            "no_result": sum(1 for name in self.file_names if name not in result_files),
-            "no_txt": sum(1 for name in self.file_names if not self._has_caption(name)),
-            "resolution_mismatch": len(self._resolution_mismatch) if self._resolution_index_ready else 0,
-            "edited": sum(1 for name in self.file_names if name in self.caption_overrides),
-            "excluded": len(self.excluded_names),
-        }
-
-    def _serialize_item(self, name: str) -> dict:
-        text = self.txt_content.get(name, "")
-        segments = _parse_caption_segments(text)
-        control1_path = self.files["control1"].get(name)
-        control2_path = self.files["control2"].get(name)
-        control3_path = self.files["control3"].get(name)
-        result_path = self.files["result"].get(name)
-        resolution = {
-            "control1": self._get_image_size("control1", name),
-            "control2": self._get_image_size("control2", name),
-            "control3": self._get_image_size("control3", name),
-            "result": self._get_image_size("result", name),
-        }
-        result_size = resolution["result"]
-        item_resolution_mismatch = bool(
-            result_size
-            and any(
-                resolution[role] and resolution[role] != result_size
-                for role in CONTROL_ROLES[: self.control_count]
-            )
-        )
-        if item_resolution_mismatch:
-            self._resolution_mismatch.add(name)
-        else:
-            self._resolution_mismatch.discard(name)
-        return {
-            "name": name,
-            "paths": {
-                "control1": str(control1_path) if control1_path else "",
-                "control2": str(control2_path) if control2_path else "",
-                "control3": str(control3_path) if control3_path else "",
-                "result": str(result_path) if result_path else "",
-                "txt": str(self.txt_files.get(name, "")) if self._has_caption(name) and name in self.txt_files else "",
-            },
-            "exists": {
-                "control1": bool(control1_path),
-                "control2": bool(control2_path),
-                "control3": bool(control3_path),
-                "result": bool(result_path),
-                "txt": self._has_caption(name),
-            },
-            "caption_source": "edited" if name in self.caption_overrides else "source" if self._has_caption(name) and name in self.txt_files else "",
-            "tags": segments,
-            "segments": segments,
-            "text": text,
-            "resolution": resolution,
-            "flags": {
-                "resolution_mismatch": item_resolution_mismatch,
-            },
-        }
-
-    def get_item(self, name: str) -> dict:
-        with self._lock:
-            if name not in self.file_names:
-                raise KeyError(name)
-            return self._serialize_item(name)
-
-    def get_global_segments(self) -> list[dict]:
-        with self._lock:
-            if not self._global_segments_dirty:
-                return [dict(row) for row in self._global_segments_cache]
-            counter = Counter()
-            for name in self.file_names:
-                content = self.txt_content.get(name, "")
-                counter.update(_parse_caption_segments(content))
-            self._global_segments_cache = [
-                {"segment": segment, "tag": segment, "count": count}
-                for segment, count in sorted(counter.items(), key=lambda item: (-item[1], item[0].lower()))
-            ]
-            self._global_segments_dirty = False
-            return [dict(row) for row in self._global_segments_cache]
-
-    def get_global_tags(self) -> list[dict]:
-        return self.get_global_segments()
-
-    def save_segments(self, name: str, segments: list[str]) -> dict:
-        with self._lock:
-            if name not in self.file_names:
-                raise KeyError(name)
-
-            content = ", ".join(_normalize_segment_inputs(segments))
-            return self.save_text(name, content)
-
-    def save_tags(self, name: str, tags: list[str]) -> dict:
-        return self.save_segments(name, tags)
-
-    def save_text(self, name: str, content: str) -> dict:
-        with self._lock:
-            if name not in self.file_names:
-                raise KeyError(name)
-
-            content = str(content or "")
-            if content.strip():
-                self.txt_content[name] = content
-                self.caption_overrides[name] = content
-                self.caption_deleted.discard(name)
-            else:
-                self.txt_content.pop(name, None)
-                self.caption_overrides.pop(name, None)
-                self.caption_deleted.add(name)
-            self.excluded_names.discard(name)
-            self._save_workspace_state()
-            self._mark_global_segments_dirty()
-            return self._serialize_item(name)
-
-    def batch_add_segments(self, names: list[str], segments: list[str], position: str = "after") -> dict:
-        additions = _normalize_segment_inputs(segments)
-        if not additions:
-            return {"changed": 0}
-        insert_position = "before" if position == "before" else "after"
-        changed = 0
-        for name in names:
-            original = self.txt_content.get(name, "")
-            updated = _merge_text_with_segments(original, additions, insert_position)
-            if updated != original:
-                self.save_text(name, updated)
-                changed += 1
-        return {"changed": changed}
-
-    def batch_add_tags(self, names: list[str], tags: list[str], position: str = "after") -> dict:
-        return self.batch_add_segments(names, tags, position)
-
-    def batch_delete_segments(self, names: list[str], segments: list[str]) -> dict:
-        needles = [segment.lower() for segment in _normalize_segment_inputs(segments)]
-        if not needles:
-            return {"changed": 0}
-        changed = 0
-        for name in names:
-            original = self.txt_content.get(name, "")
-            updated = _delete_caption_segments(original, needles)
-            if updated != original:
-                self.save_text(name, updated)
-                changed += 1
-        return {"changed": changed}
-
-    def batch_delete_tags(self, names: list[str], tags: list[str]) -> dict:
-        return self.batch_delete_segments(names, tags)
-
-    def batch_replace_segment(self, names: list[str], old_segment: str, new_segment: str) -> dict:
-        changed = 0
-        old_segment = (old_segment or "").strip().lower()
-        new_segment = (new_segment or "").strip()
-        if not old_segment:
-            return {"changed": 0}
-        for name in names:
-            original = self.txt_content.get(name, "")
-            updated = _replace_caption_segment(original, old_segment, new_segment)
-            if updated != original:
-                self.save_text(name, updated)
-                changed += 1
-        return {"changed": changed}
-
-    def batch_replace_tag(self, names: list[str], old_tag: str, new_tag: str) -> dict:
-        return self.batch_replace_segment(names, old_tag, new_tag)
-
-    def _batch_rename_basename(
-        self,
-        basename: str,
-        *,
-        operation: str,
-        value: str = "",
-        old_value: str = "",
-        new_value: str = "",
-    ) -> str:
-        operation = (operation or "").strip().lower()
-        if operation == "add_prefix":
-            addition = str(value or "")
-            if not addition:
-                raise ValueError("Rename text is required.")
-            return self._clean_rename_basename(f"{addition}{basename}")
-        if operation == "add_suffix":
-            addition = str(value or "")
-            if not addition:
-                raise ValueError("Rename text is required.")
-            return self._clean_rename_basename(f"{basename}{addition}")
-        if operation == "delete":
-            tokens = _parse_rename_tokens(value)
-            if not tokens:
-                raise ValueError("Delete text is required.")
-            updated = basename
-            for token in tokens:
-                updated = updated.replace(token, "")
-            return self._clean_rename_basename(updated)
-        if operation == "replace":
-            old_text = str(old_value or "")
-            if not old_text:
-                raise ValueError("Old rename text is required.")
-            return self._clean_rename_basename(basename.replace(old_text, str(new_value or "")))
-        raise ValueError(f"Unsupported batch rename operation: {operation}")
-
-    def batch_rename_items(
-        self,
-        names: list[str],
-        *,
-        operation: str,
-        value: str = "",
-        old_value: str = "",
-        new_value: str = "",
-    ) -> dict:
-        with self._lock:
-            selected_names = [str(name or "") for name in names if str(name or "") in self.file_names]
-            if not selected_names:
-                return {"changed": 0, "renamed": [], "workspace": self.get_workspace_summary()}
-
-            selected_set = set(selected_names)
-            rename_map: dict[str, str] = {}
-            for name in selected_names:
-                old_name_path = Path(str(name).replace("\\", "/"))
-                parent = old_name_path.parent.as_posix()
-                basename = old_name_path.name
-                clean_basename = self._batch_rename_basename(
-                    basename,
-                    operation=operation,
-                    value=value,
-                    old_value=old_value,
-                    new_value=new_value,
-                )
-                new_name = clean_basename if parent in {"", "."} else f"{parent}/{clean_basename}"
-                rename_map[name] = new_name
-
-            changed_map = {old: new for old, new in rename_map.items() if old != new}
-            if not changed_map:
-                return {"changed": 0, "renamed": [], "workspace": self.get_workspace_summary()}
-
-            target_names = list(rename_map.values())
-            duplicate_targets = [name for name, count in Counter(target_names).items() if count > 1]
-            if duplicate_targets:
-                raise FileExistsError(f"Batch rename would create duplicate item names: {', '.join(sorted(duplicate_targets, key=_natural_key))}")
-            existing_conflicts = [name for name in target_names if name in self.file_names and name not in selected_set]
-            if existing_conflicts:
-                raise FileExistsError(f"Item already exists: {existing_conflicts[0]}")
-
-            file_pairs: list[tuple[Path, Path]] = []
-            for old_name, new_name in changed_map.items():
-                clean_basename = Path(new_name.replace("\\", "/")).name
-                for role in IMAGE_ROLES:
-                    source = self.files[role].get(old_name)
-                    if source:
-                        target = source.with_name(f"{clean_basename}{source.suffix}")
-                        if target != source:
-                            file_pairs.append((source, target))
-                txt_source = self.txt_files.get(old_name)
-                if txt_source:
-                    target = txt_source.with_name(f"{clean_basename}{txt_source.suffix}")
-                    if target != txt_source:
-                        file_pairs.append((txt_source, target))
-
-            sources = {source.resolve() for source, _ in file_pairs}
-            targets: set[Path] = set()
-            for source, target in file_pairs:
-                resolved_target = target.resolve()
-                if resolved_target in targets:
-                    raise FileExistsError(f"Batch rename would create duplicate file: {target}")
-                targets.add(resolved_target)
-                if target.exists() and resolved_target not in sources:
-                    raise FileExistsError(f"Target file already exists: {target}")
-
-            staged: list[tuple[Path, Path]] = []
-            finalized: list[tuple[Path, Path]] = []
-            try:
-                for index, (source, _) in enumerate(file_pairs):
-                    if not source.exists():
-                        raise FileNotFoundError(f"Source file does not exist: {source}")
-                    temp = source.with_name(f".vds_batch_rename_{uuid.uuid4().hex}_{index}{source.suffix}")
-                    while temp.exists():
-                        temp = source.with_name(f".vds_batch_rename_{uuid.uuid4().hex}_{index}{source.suffix}")
-                    source.rename(temp)
-                    staged.append((source, temp))
-
-                for (source, target), (_, temp) in zip(file_pairs, staged):
-                    temp.rename(target)
-                    finalized.append((source, target))
-            except Exception:
-                for source, target in reversed(finalized):
-                    try:
-                        if target.exists() and not source.exists():
-                            target.rename(source)
-                    except Exception:
-                        pass
-                for source, temp in reversed(staged):
-                    try:
-                        if temp.exists() and not source.exists():
-                            temp.rename(source)
-                    except Exception:
-                        pass
-                raise
-
-            moved_paths = {source: target for source, target in file_pairs}
-            self.file_names = [rename_map.get(name, name) for name in self.file_names]
-            for role in IMAGE_ROLES:
-                self.files[role] = {
-                    rename_map.get(name, name): moved_paths.get(path, path)
-                    for name, path in self.files[role].items()
-                }
-            self.txt_files = {
-                rename_map.get(name, name): moved_paths.get(path, path)
-                for name, path in self.txt_files.items()
-            }
-            self.txt_content = {
-                rename_map.get(name, name): content
-                for name, content in self.txt_content.items()
-            }
-            self.caption_overrides = {
-                rename_map.get(name, name): content
-                for name, content in self.caption_overrides.items()
-            }
-            self.caption_deleted = {rename_map.get(name, name) for name in self.caption_deleted}
-            self.excluded_names = {rename_map.get(name, name) for name in self.excluded_names}
-            self._image_sizes.clear()
-            self._resolution_mismatch.clear()
-            self._resolution_index_ready = False
-            self._mark_global_segments_dirty()
-            self.file_names = sorted(self.file_names, key=_natural_key)
-            self._save_workspace_state()
-            self._ensure_resolution_index()
-            return {
-                "changed": len(changed_map),
-                "renamed": [{"old_name": old, "new_name": new} for old, new in changed_map.items()],
-                "workspace": self.get_workspace_summary(),
-            }
-
-    def rename_item(self, name: str, new_basename: str) -> dict:
-        with self._lock:
-            if name not in self.file_names:
-                raise KeyError(name)
-
-            clean_basename = self._clean_rename_basename(new_basename)
-            old_name_path = Path(str(name).replace("\\", "/"))
-            parent = old_name_path.parent.as_posix()
-            new_name = clean_basename if parent in {"", "."} else f"{parent}/{clean_basename}"
-            if new_name != name and new_name in self.file_names:
-                raise FileExistsError(f"Item already exists: {new_name}")
-
-            rename_pairs: list[tuple[Path, Path]] = []
-            for role in IMAGE_ROLES:
-                source = self.files[role].get(name)
-                if not source:
-                    continue
-                target = source.with_name(f"{clean_basename}{source.suffix}")
-                if target != source:
-                    if target.exists():
-                        raise FileExistsError(f"Target file already exists: {target}")
-                    rename_pairs.append((source, target))
-
-            txt_source = self.txt_files.get(name)
-            if txt_source:
-                txt_target = txt_source.with_name(f"{clean_basename}{txt_source.suffix}")
-                if txt_target != txt_source:
-                    if txt_target.exists():
-                        raise FileExistsError(f"Target file already exists: {txt_target}")
-                    rename_pairs.append((txt_source, txt_target))
-
-            renamed: list[tuple[Path, Path]] = []
-            try:
-                for source, target in rename_pairs:
-                    if not source.exists():
-                        raise FileNotFoundError(f"Source file does not exist: {source}")
-                    source.rename(target)
-                    renamed.append((source, target))
-            except Exception:
-                for source, target in reversed(renamed):
-                    try:
-                        if target.exists() and not source.exists():
-                            target.rename(source)
-                    except Exception:
-                        pass
-                raise
-
-            moved_paths = {source: target for source, target in rename_pairs}
-            self.file_names = [new_name if item == name else item for item in self.file_names]
-            for role in IMAGE_ROLES:
-                if name in self.files[role]:
-                    source = self.files[role].pop(name)
-                    self.files[role][new_name] = moved_paths.get(source, source)
-            if name in self.txt_files:
-                source = self.txt_files.pop(name)
-                self.txt_files[new_name] = moved_paths.get(source, source)
-            if name in self.txt_content:
-                self.txt_content[new_name] = self.txt_content.pop(name)
-            if name in self.caption_overrides:
-                self.caption_overrides[new_name] = self.caption_overrides.pop(name)
-            if name in self.caption_deleted:
-                self.caption_deleted.discard(name)
-                self.caption_deleted.add(new_name)
-            if name in self.excluded_names:
-                self.excluded_names.discard(name)
-                self.excluded_names.add(new_name)
-
-            self._image_sizes.clear()
-            self._resolution_mismatch.clear()
-            self._resolution_index_ready = False
-            self._mark_global_segments_dirty()
-            self.file_names = sorted(self.file_names, key=_natural_key)
-            self._save_workspace_state()
-            self._ensure_resolution_index()
-            return {
-                "old_name": name,
-                "new_name": new_name,
-                "renamed": [{"from": str(source), "to": str(target)} for source, target in rename_pairs],
-                "item": self._serialize_item(new_name),
-                "workspace": self.get_workspace_summary(),
-            }
-
-    def _clone_name_candidate(self, name: str, basename: str) -> str:
-        old_name_path = Path(str(name).replace("\\", "/"))
-        parent = old_name_path.parent.as_posix()
-        return basename if parent in {"", "."} else f"{parent}/{basename}"
-
-    def _clone_txt_target(self, name: str, basename: str) -> Optional[Path]:
-        txt_source = self.txt_files.get(name)
-        if txt_source:
-            return txt_source.with_name(f"{basename}{txt_source.suffix}")
-
-        content = self.txt_content.get(name, "")
-        result_root = self.dirs.get("result")
-        if not content.strip() or not result_root:
-            return None
-
-        old_name_path = Path(str(name).replace("\\", "/"))
-        parent = old_name_path.parent.as_posix()
-        target_dir = result_root if parent in {"", "."} else result_root.joinpath(*parent.split("/"))
-        return target_dir / f"{basename}.txt"
-
-    def _clone_targets_available(self, name: str, basename: str) -> bool:
-        candidate_name = self._clone_name_candidate(name, basename)
-        if candidate_name in self.file_names:
-            return False
-        for role in IMAGE_ROLES:
-            source = self.files[role].get(name)
-            if source and source.with_name(f"{basename}{source.suffix}").exists():
-                return False
-        txt_target = self._clone_txt_target(name, basename)
-        return not (txt_target and txt_target.exists())
-
-    def clone_item(self, name: str) -> dict:
-        with self._lock:
-            if name not in self.file_names:
-                raise KeyError(name)
-
-            old_name_path = Path(str(name).replace("\\", "/"))
-            clone_index = 1
-            candidate_basename = self._clone_basename(old_name_path.name, clone_index)
-            while not self._clone_targets_available(name, candidate_basename):
-                clone_index += 1
-                candidate_basename = self._clone_basename(old_name_path.name, clone_index)
-            new_name = self._clone_name_candidate(name, candidate_basename)
-
-            copy_pairs: list[tuple[Path, Path]] = []
-            for role in IMAGE_ROLES:
-                source = self.files[role].get(name)
-                if not source:
-                    continue
-                copy_pairs.append((source, source.with_name(f"{candidate_basename}{source.suffix}")))
-
-            txt_target = self._clone_txt_target(name, candidate_basename)
-            txt_content = self.txt_content.get(name, "")
-            txt_source = self.txt_files.get(name)
-            if txt_target and txt_content.strip():
-                copy_pairs.append((txt_source, txt_target) if txt_source else (txt_target, txt_target))
-
-            copied: list[Path] = []
-            try:
-                for source, target in copy_pairs:
-                    target.parent.mkdir(parents=True, exist_ok=True)
-                    if target.exists():
-                        raise FileExistsError(f"Target file already exists: {target}")
-                    if source == target:
-                        self._write_text_file(target, txt_content)
-                    else:
-                        if not source.exists():
-                            raise FileNotFoundError(f"Source file does not exist: {source}")
-                        shutil.copy2(source, target)
-                        if target == txt_target and txt_content != self._read_text_file(target):
-                            self._write_text_file(target, txt_content)
-                    copied.append(target)
-            except Exception:
-                for path in reversed(copied):
-                    try:
-                        path.unlink(missing_ok=True)
-                    except Exception:
-                        pass
-                raise
-
-            self.file_names.append(new_name)
-            for role in IMAGE_ROLES:
-                source = self.files[role].get(name)
-                if source:
-                    self.files[role][new_name] = source.with_name(f"{candidate_basename}{source.suffix}")
-            if txt_target and txt_content.strip():
-                self.txt_files[new_name] = txt_target
-                self.txt_content[new_name] = txt_content
-            elif name in self.caption_deleted:
-                self.caption_deleted.add(new_name)
-            if name in self.caption_overrides and txt_content.strip():
-                self.caption_overrides[new_name] = txt_content
-            self.excluded_names.discard(new_name)
-
-            self._image_sizes.clear()
-            self._resolution_mismatch.clear()
-            self._resolution_index_ready = False
-            self._mark_global_segments_dirty()
-            self.file_names = sorted(self.file_names, key=_natural_key)
-            self._save_workspace_state()
-            self._ensure_resolution_index()
-            return {
-                "old_name": name,
-                "new_name": new_name,
-                "copied": [{"from": str(source), "to": str(target)} for source, target in copy_pairs],
-                "item": self._serialize_item(new_name),
-                "workspace": self.get_workspace_summary(),
-            }
-
-    def swap_item_roles(self, name: str, source_role: str, target_role: str) -> dict:
-        with self._lock:
-            if name not in self.file_names:
-                raise KeyError(name)
-            if source_role not in IMAGE_ROLES or target_role not in IMAGE_ROLES:
-                raise ValueError("Unsupported image role.")
-            if source_role == target_role:
-                return {
-                    "name": name,
-                    "source_role": source_role,
-                    "target_role": target_role,
-                    "swapped": [],
-                    "item": self._serialize_item(name),
-                    "workspace": self.get_workspace_summary(),
-                }
-
-            source_path = self.files[source_role].get(name)
-            target_path = self.files[target_role].get(name)
-            if not source_path or not source_path.exists():
-                raise FileNotFoundError(f"Source role image does not exist: {source_role}")
-            if not target_path or not target_path.exists():
-                raise FileNotFoundError(f"Target role image does not exist: {target_role}")
-            if source_path == target_path:
-                raise ValueError("Source and target roles point to the same file.")
-
-            next_source_path = source_path.with_suffix(target_path.suffix)
-            next_target_path = target_path.with_suffix(source_path.suffix)
-            occupied = {source_path, target_path}
-            for path in {next_source_path, next_target_path}:
-                if path not in occupied and path.exists():
-                    raise FileExistsError(f"Target file already exists: {path}")
-
-            temp_path = source_path.with_name(f".vds_role_swap_{uuid.uuid4().hex}{source_path.suffix}")
-            moved: list[tuple[Path, Path]] = []
-            try:
-                source_path.rename(temp_path)
-                moved.append((source_path, temp_path))
-                if target_path != next_source_path:
-                    next_source_path.parent.mkdir(parents=True, exist_ok=True)
-                    target_path.rename(next_source_path)
-                    moved.append((target_path, next_source_path))
-                next_target_path.parent.mkdir(parents=True, exist_ok=True)
-                temp_path.rename(next_target_path)
-                moved.append((temp_path, next_target_path))
-            except Exception:
-                for original, current in reversed(moved):
-                    try:
-                        if current.exists() and not original.exists():
-                            original.parent.mkdir(parents=True, exist_ok=True)
-                            current.rename(original)
-                    except Exception:
-                        pass
-                raise
-
-            self.files[source_role][name] = next_source_path
-            self.files[target_role][name] = next_target_path
-            for key in list(self._image_sizes.keys()):
-                if key[1] == name:
-                    self._image_sizes.pop(key, None)
-            self._resolution_mismatch.discard(name)
-            self._resolution_index_ready = False
-            self._save_workspace_state()
-            self._ensure_resolution_index()
-            return {
-                "name": name,
-                "source_role": source_role,
-                "target_role": target_role,
-                "swapped": [
-                    {"role": source_role, "path": str(next_source_path)},
-                    {"role": target_role, "path": str(next_target_path)},
-                ],
-                "item": self._serialize_item(name),
-                "workspace": self.get_workspace_summary(),
-            }
-
-    def move_item_to_folder(self, name: str, target_folder: str) -> dict:
-        with self._lock:
-            if name not in self.file_names:
-                raise KeyError(name)
-
-            clean_folder = self._clean_relative_folder(target_folder) if str(target_folder or "").strip() else ""
-            old_name_path = Path(str(name).replace("\\", "/"))
-            basename = old_name_path.name
-            current_folder = old_name_path.parent.as_posix()
-            current_folder = "" if current_folder == "." else current_folder
-            new_name = f"{clean_folder}/{basename}" if clean_folder else basename
-            if clean_folder == current_folder:
-                return {
-                    "old_name": name,
-                    "new_name": name,
-                    "moved": [],
-                    "item": self._serialize_item(name),
-                    "workspace": self.get_workspace_summary(),
-                }
-            if new_name in self.file_names:
-                raise FileExistsError(f"Item already exists: {new_name}")
-
-            move_pairs: list[tuple[Path, Path]] = []
-            folder_parts = clean_folder.split("/") if clean_folder else []
-            for role in IMAGE_ROLES:
-                source = self.files[role].get(name)
-                root = self.dirs.get(role)
-                if not source or not root:
-                    continue
-                target = root.joinpath(*folder_parts, source.name)
-                if target == source:
-                    continue
-                if target.exists():
-                    raise FileExistsError(f"Target file already exists: {target}")
-                move_pairs.append((source, target))
-
-            txt_source = self.txt_files.get(name)
-            txt_root = self.dirs.get("result")
-            if txt_source and txt_root:
-                txt_target = txt_root.joinpath(*folder_parts, txt_source.name)
-                if txt_target != txt_source:
-                    if txt_target.exists():
-                        raise FileExistsError(f"Target file already exists: {txt_target}")
-                    move_pairs.append((txt_source, txt_target))
-
-            moved: list[tuple[Path, Path]] = []
-            try:
-                for source, target in move_pairs:
-                    if not source.exists():
-                        raise FileNotFoundError(f"Source file does not exist: {source}")
-                    target.parent.mkdir(parents=True, exist_ok=True)
-                    source.rename(target)
-                    moved.append((source, target))
-            except Exception:
-                for source, target in reversed(moved):
-                    try:
-                        if target.exists() and not source.exists():
-                            source.parent.mkdir(parents=True, exist_ok=True)
-                            target.rename(source)
-                    except Exception:
-                        pass
-                raise
-
-            moved_paths = {source: target for source, target in move_pairs}
-            self.file_names = [new_name if item == name else item for item in self.file_names]
-            for role in IMAGE_ROLES:
-                if name in self.files[role]:
-                    source = self.files[role].pop(name)
-                    self.files[role][new_name] = moved_paths.get(source, source)
-            if name in self.txt_files:
-                source = self.txt_files.pop(name)
-                self.txt_files[new_name] = moved_paths.get(source, source)
-            if name in self.txt_content:
-                self.txt_content[new_name] = self.txt_content.pop(name)
-            if name in self.caption_overrides:
-                self.caption_overrides[new_name] = self.caption_overrides.pop(name)
-            if name in self.caption_deleted:
-                self.caption_deleted.discard(name)
-                self.caption_deleted.add(new_name)
-            if name in self.excluded_names:
-                self.excluded_names.discard(name)
-                self.excluded_names.add(new_name)
-
-            self._image_sizes.clear()
-            self._resolution_mismatch.clear()
-            self._resolution_index_ready = False
-            self._mark_global_segments_dirty()
-            self.file_names = sorted(self.file_names, key=_natural_key)
-            self._save_workspace_state()
-            self._ensure_resolution_index()
-            return {
-                "old_name": name,
-                "new_name": new_name,
-                "moved": [{"from": str(source), "to": str(target)} for source, target in move_pairs],
-                "item": self._serialize_item(new_name),
-                "workspace": self.get_workspace_summary(),
-            }
-
-    def move_items_to_folder(self, names: list[str], target_folder: str) -> dict:
-        with self._lock:
-            selected = [str(name or "").strip() for name in names if str(name or "").strip()]
-            if not selected:
-                raise ValueError("No items selected.")
-            clean_folder = self._clean_relative_folder(target_folder) if str(target_folder or "").strip() else ""
-            moved_items: list[dict] = []
-            for name in selected:
-                result = self.move_item_to_folder(name, clean_folder)
-                moved_items.append({
-                    "old_name": result["old_name"],
-                    "new_name": result["new_name"],
-                    "moved": result["moved"],
-                })
-            return {
-                "moved": moved_items,
-                "workspace": self.get_workspace_summary(),
-            }
-
-    def create_folder(self, folder: str) -> dict:
-        with self._lock:
-            clean_folder = self._clean_relative_folder(folder)
-            self._workspace_folders.add(clean_folder)
-            self._save_workspace_state()
-            created: list[str] = []
-            for role in IMAGE_ROLES:
-                root = self.dirs.get(role)
-                if not root:
-                    continue
-                target = root.joinpath(*clean_folder.split("/"))
-                target.mkdir(parents=True, exist_ok=True)
-                created.append(str(target))
-            return {
-                "folder": clean_folder,
-                "created": created,
-                "workspace": self.get_workspace_summary(),
-            }
-
-    def rename_folder(self, folder: str, new_folder: str) -> dict:
-        with self._lock:
-            source = self._clean_relative_folder(folder)
-            target = self._clean_relative_folder(new_folder)
-            if source == target:
-                return {
-                    "old_folder": source,
-                    "new_folder": target,
-                    "renamed": [],
-                    "workspace": self.get_workspace_summary(),
-                }
-
-            source_prefix = f"{source}/"
-            if target == source or target.startswith(source_prefix):
-                raise ValueError("Target folder cannot be inside the source folder.")
-
-            matched_names = [name for name in self.file_names if name == source or name.startswith(source_prefix)]
-            if not matched_names and not self._folder_exists_on_disk(source):
-                raise FileNotFoundError(f"Folder does not exist: {source}")
-
-            rename_pairs: list[tuple[Path, Path]] = []
-            roots = self._workspace_roots()
-            for root in roots:
-                source_path = root / Path(source)
-                if not source_path.exists():
-                    continue
-                target_path = root / Path(target)
-                if target_path.exists():
-                    raise FileExistsError(f"Target folder already exists: {target}")
-                rename_pairs.append((source_path, target_path))
-
-            moved_roots: list[tuple[Path, Path]] = []
-            try:
-                for source_path, target_path in rename_pairs:
-                    target_path.parent.mkdir(parents=True, exist_ok=True)
-                    source_path.rename(target_path)
-                    moved_roots.append((source_path, target_path))
-            except Exception:
-                for source_path, target_path in reversed(moved_roots):
-                    try:
-                        if target_path.exists() and not source_path.exists():
-                            target_path.rename(source_path)
-                    except Exception:
-                        pass
-                raise
-
-            updated_names: dict[str, str] = {}
-            for name in self.file_names:
-                if name == source:
-                    updated_names[name] = target
-                elif name.startswith(source_prefix):
-                    suffix = name[len(source_prefix):]
-                    updated_names[name] = f"{target}/{suffix}"
-
-            if updated_names:
-                self.file_names = [updated_names.get(name, name) for name in self.file_names]
-                for role in IMAGE_ROLES:
-                    self.files[role] = {
-                        updated_names.get(name, name): path
-                        for name, path in self.files[role].items()
-                    }
-                self.txt_files = {
-                    updated_names.get(name, name): path
-                    for name, path in self.txt_files.items()
-                }
-                self.txt_content = {
-                    updated_names.get(name, name): content
-                    for name, content in self.txt_content.items()
-                }
-                self.caption_overrides = {
-                    updated_names.get(name, name): content
-                    for name, content in self.caption_overrides.items()
-                }
-                self.caption_deleted = {updated_names.get(name, name) for name in self.caption_deleted}
-                self.excluded_names = {updated_names.get(name, name) for name in self.excluded_names}
-
-            self._rewrite_workspace_folder_prefix(source, target)
-            self._refresh_workspace_folders()
-            self._image_sizes.clear()
-            self._resolution_mismatch.clear()
-            self._resolution_index_ready = False
-            self._mark_global_segments_dirty()
-            self.file_names = sorted(self.file_names, key=_natural_key)
-            self._save_workspace_state()
-            self._ensure_resolution_index()
-            return {
-                "old_folder": source,
-                "new_folder": target,
-                "renamed": [{"from": str(source_path), "to": str(target_path)} for source_path, target_path in moved_roots],
-                "workspace": self.get_workspace_summary(),
-            }
-
-    def delete_folder(self, folder: str) -> dict:
-        with self._lock:
-            clean_folder = self._clean_relative_folder(folder)
-            folder_prefix = f"{clean_folder}/"
-            if any(name == clean_folder or name.startswith(folder_prefix) for name in self.file_names):
-                raise ValueError("Folder is not empty. Move or delete its items first.")
-            roots = self._workspace_roots()
-            removed: list[str] = []
-            for root in roots:
-                target = root / Path(clean_folder)
-                if not target.exists():
-                    continue
-                self._prune_empty_dir(target, root)
-                removed.append(str(target))
-            self._workspace_folders = {
-                folder_name
-                for folder_name in self._workspace_folders
-                if not (folder_name == clean_folder or folder_name.startswith(folder_prefix))
-            }
-            self._refresh_workspace_folders()
-            self._save_workspace_state()
-            return {
-                "folder": clean_folder,
-                "removed": removed,
-                "workspace": self.get_workspace_summary(),
-            }
-
-    def delete_item(self, name: str) -> dict:
-        with self._lock:
-            if name not in self.file_names:
-                raise KeyError(name)
-
-            self.excluded_names.add(name)
-            self.caption_overrides.pop(name, None)
-            self.caption_deleted.discard(name)
-            self._mark_global_segments_dirty()
-            self.file_names = [item for item in self.file_names if item != name]
-            self._resolution_mismatch.discard(name)
-            for key in list(self._image_sizes.keys()):
-                if key[1] == name:
-                    self._image_sizes.pop(key, None)
-            self._save_workspace_state()
-
-            return {
-                "removed": [],
-                "errors": [],
-                "excluded": [name],
-                "message": "Item excluded from export set. Source files were not changed.",
-            }
-
-    def primary_item_path(self, name: str) -> Path:
-        with self._lock:
-            if name not in self.file_names:
-                raise KeyError(name)
-            for role in ("result", "control1", "control2", "control3"):
-                path = self.files.get(role, {}).get(name)
-                if path and path.exists():
-                    return path
-            txt_path = self.txt_files.get(name)
-            if txt_path and txt_path.exists():
-                return txt_path
-            raise FileNotFoundError(f"No source file found for item: {name}")
-
-    def _first_item_image_path(self, name: str) -> Path:
-        for role in ("result", "control1", "control2", "control3"):
-            path = self.files.get(role, {}).get(name)
-            if path and path.exists():
-                return path
-        raise FileNotFoundError(f"No image file found for item: {name}")
-
-    def _item_image_path_for_role(self, name: str, role: str) -> Path:
-        if role not in IMAGE_ROLES:
-            raise ValueError("Source role must be an image role.")
-        path = self.files.get(role, {}).get(name)
-        if path and path.exists():
-            return path
-        raise FileNotFoundError(f"No {role} image found for item: {name}")
-
-    def _item_image_path_for_preferred_role(self, name: str, role: str) -> tuple[Path, str]:
-        if role:
-            try:
-                return self._item_image_path_for_role(name, role), role
-            except FileNotFoundError:
-                pass
-        for fallback_role in ("result", "control1", "control2", "control3"):
-            path = self.files.get(fallback_role, {}).get(name)
-            if path and path.exists():
-                return path, fallback_role
-        raise FileNotFoundError(f"No image found for item: {name}")
-
-    def _derive_control_dir(self, role: str) -> Path:
-        for reference_role in CONTROL_ROLES:
-            reference_dir = self.dirs.get(reference_role)
-            if reference_dir:
-                return reference_dir.parent / role
-        result_dir = self.dirs.get("result")
-        if result_dir:
-            result_folder_names = {"result", "results", "output", "outputs", "target", "targets", "final", "edited"}
-            return (result_dir.parent if result_dir.name.lower() in result_folder_names else result_dir) / role
-        raise ValueError("At least one loaded image directory is required before creating a control folder.")
-
-    def _control_dir_for_role(self, role: str) -> Path:
-        current = self.dirs.get(role)
-        target_dir = current if current else self._derive_control_dir(role)
-        target_dir.mkdir(parents=True, exist_ok=True)
-        self.dirs[role] = target_dir
-        return target_dir
-
-    def _derive_result_dir(self) -> Path:
-        for reference_role in CONTROL_ROLES:
-            reference_dir = self.dirs.get(reference_role)
-            if reference_dir:
-                return reference_dir.parent / "result"
-        raise ValueError("At least one loaded image directory is required before creating a result folder.")
-
-    def _result_dir_for_drop(self) -> Path:
-        current = self.dirs.get("result")
-        target_dir = current if current else self._derive_result_dir()
-        target_dir.mkdir(parents=True, exist_ok=True)
-        self.dirs["result"] = target_dir
-        return target_dir
-
-    def _clean_upload_image_stem(self, filename: str) -> str:
-        stem = Path(str(filename or "")).stem.strip() or "dropped"
-        stem = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "_", stem)
-        stem = stem.strip(" .") or "dropped"
-        if stem in {".", ".."}:
-            stem = "dropped"
-        if stem.upper() in WINDOWS_RESERVED_NAMES:
-            stem = f"{stem}_image"
-        return stem
-
-    def _next_result_drop_path(self, filename: str, suffix: str) -> Path:
-        result_dir = self._result_dir_for_drop()
-        stem = self._clean_upload_image_stem(filename)
-        index = 1
-        while True:
-            raw_name = stem if index <= 1 else f"{stem}_{index}"
-            target_path = self._image_path_for_raw_name(result_dir, raw_name, suffix)
-            if not any(self._image_path_for_raw_name(result_dir, raw_name, ext).exists() for ext in IMAGE_EXTS):
-                return target_path
-            index += 1
-
-    def _image_dir_for_role_drop(self, role: str, folder: str = "") -> Path:
-        if role == "result":
-            target = self._result_dir_for_drop()
-            if folder:
-                target = target.joinpath(*self._clean_relative_folder(folder).split("/"))
-                target.mkdir(parents=True, exist_ok=True)
-            return target
-        if role in CONTROL_ROLES:
-            role_index = CONTROL_ROLES.index(role) + 1
-            if self.control_count < role_index:
-                raise ValueError(f"{role} is not enabled in the current workspace.")
-            target = self._control_dir_for_role(role)
-            if folder:
-                target = target.joinpath(*self._clean_relative_folder(folder).split("/"))
-                target.mkdir(parents=True, exist_ok=True)
-            return target
-        raise ValueError("Target role must be an image role.")
-
-    def _next_role_drop_path(self, role: str, filename: str, suffix: str, folder: str = "") -> Path:
-        target_dir = self._image_dir_for_role_drop(role, folder)
-        stem = self._clean_upload_image_stem(filename)
-        index = 1
-        while True:
-            raw_name = stem if index <= 1 else f"{stem}_{index}"
-            target_path = self._image_path_for_raw_name(target_dir, raw_name, suffix)
-            if not any(self._image_path_for_raw_name(target_dir, raw_name, ext).exists() for ext in IMAGE_EXTS):
-                return target_path
-            index += 1
-
-    def _reference_raw_name_for_control_drop(self, target_name: str) -> str:
-        for role in ("result", "control1", "control2", "control3"):
-            root = self.dirs.get(role)
-            path = self.files.get(role, {}).get(target_name)
-            if root and path and path.exists():
-                return self._relative_stem(root, path)
-        return target_name
-
-    def _next_control_drop_path(self, target_name: str, target_role: str, suffix: str) -> Path:
-        target_dir = self._control_dir_for_role(target_role)
-        reference_raw_name = self._reference_raw_name_for_control_drop(target_name)
-        index = 1
-        while True:
-            target_raw_name = reference_raw_name if index <= 1 else self._append_name_suffix(reference_raw_name, "", index)
-            target_path = self._image_path_for_raw_name(target_dir, target_raw_name, suffix)
-            if not target_path.exists():
-                return target_path
-            index += 1
-
-    def _validate_control_drop_target(self, target_name: str, target_role: str, allow_replace: bool = True):
-        if target_role not in CONTROL_ROLES:
-            raise ValueError("Target role must be a control image role.")
-        role_index = CONTROL_ROLES.index(target_role) + 1
-        if self.control_count < role_index:
-            raise ValueError(f"{target_role} is not enabled in the current workspace.")
-        if target_name not in self.file_names:
-            raise KeyError(target_name)
-        if not allow_replace and target_name in self.files[target_role]:
-            raise ValueError(f"{target_role} already exists for {target_name}.")
-
-    def _control_drop_target_path(self, target_name: str, target_role: str, suffix: str) -> tuple[Path, Path | None]:
-        existing_path = self.files[target_role].get(target_name)
-        if existing_path and existing_path.exists():
-            suffix = suffix.lower()
-            target_path = existing_path.with_suffix(suffix)
-            if target_path != existing_path and target_path.exists():
-                raise FileExistsError(f"Target file already exists: {target_path}")
-            return target_path, existing_path
-        return self._next_control_drop_path(target_name, target_role, suffix), None
-
-    def _apply_control_drop_result(self, target_name: str, target_role: str, target_path: Path):
-        self.files[target_role][target_name] = target_path
-        self.workspace_key = self._compute_workspace_key()
-        self._refresh_item_resolution_flag(target_name)
-        self._mark_global_segments_dirty()
-        return self.get_workspace_summary()
-
-    def assign_control_image(self, source_name: str, target_name: str, target_role: str, source_role: str = "") -> dict:
-        with self._lock:
-            source_name = str(source_name or "").strip()
-            target_name = str(target_name or "").strip()
-            target_role = str(target_role or "").strip()
-            source_role = str(source_role or "").strip()
-            if source_name not in self.file_names:
-                raise KeyError(source_name)
-            self._validate_control_drop_target(target_name, target_role, allow_replace=True)
-
-            source_path, actual_source_role = self._item_image_path_for_preferred_role(source_name, source_role)
-            target_path, replaced_path = self._control_drop_target_path(target_name, target_role, source_path.suffix)
-            target_path.parent.mkdir(parents=True, exist_ok=True)
-            if source_path.resolve() != target_path.resolve():
-                shutil.copy2(source_path, target_path)
-                if replaced_path and replaced_path != target_path and replaced_path.exists():
-                    replaced_path.unlink()
-
-            summary = self._apply_control_drop_result(target_name, target_role, target_path)
-            return {
-                "source_name": source_name,
-                "source_role": actual_source_role,
-                "requested_source_role": source_role,
-                "target_name": target_name,
-                "target_role": target_role,
-                "copied": {"from": str(source_path), "to": str(target_path)},
-                "replaced": str(replaced_path) if replaced_path else "",
-                "workspace": summary,
-            }
-
-    def upload_control_image(self, target_name: str, target_role: str, filename: str, image_data: str, mime_type: str = "") -> dict:
-        with self._lock:
-            target_name = str(target_name or "").strip()
-            target_role = str(target_role or "").strip()
-            filename = str(filename or "").strip() or "dropped.png"
-            suffix = _infer_image_suffix(filename, mime_type)
-            if suffix not in IMAGE_EXTS:
-                raise ValueError("Dropped file must be an image.")
-            self._validate_control_drop_target(target_name, target_role, allow_replace=True)
-            raw_data = str(image_data or "")
-            if "," in raw_data and raw_data.split(",", 1)[0].lower().startswith("data:"):
-                raw_data = raw_data.split(",", 1)[1]
-            try:
-                payload = base64.b64decode(raw_data, validate=True)
-            except Exception as exc:
-                raise ValueError(f"Invalid dropped image data: {exc}") from exc
-            if not payload:
-                raise ValueError("Dropped image is empty.")
-
-            target_path, replaced_path = self._control_drop_target_path(target_name, target_role, suffix)
-            target_path.parent.mkdir(parents=True, exist_ok=True)
-            target_path.write_bytes(payload)
-            if replaced_path and replaced_path != target_path and replaced_path.exists():
-                replaced_path.unlink()
-
-            summary = self._apply_control_drop_result(target_name, target_role, target_path)
-            return {
-                "target_name": target_name,
-                "target_role": target_role,
-                "saved": {"filename": filename, "path": str(target_path)},
-                "replaced": str(replaced_path) if replaced_path else "",
-                "workspace": summary,
-            }
-
-    def upload_result_image(self, filename: str, image_data: str) -> dict:
-        return self.upload_role_image("result", filename, image_data)
-
-    def upload_role_image(self, role: str, filename: str, image_data: str, mime_type: str = "", folder: str = "") -> dict:
-        with self._lock:
-            role = str(role or "").strip()
-            if role not in IMAGE_ROLES:
-                raise ValueError("Target role must be an image role.")
-            filename = str(filename or "").strip() or "dropped.png"
-            suffix = _infer_image_suffix(filename, mime_type)
-            if suffix not in IMAGE_EXTS:
-                raise ValueError("Dropped file must be an image.")
-            clean_folder = self._clean_relative_folder(folder) if str(folder or "").strip() else ""
-            raw_data = str(image_data or "")
-            if "," in raw_data and raw_data.split(",", 1)[0].lower().startswith("data:"):
-                raw_data = raw_data.split(",", 1)[1]
-            try:
-                payload = base64.b64decode(raw_data, validate=True)
-            except Exception as exc:
-                raise ValueError(f"Invalid dropped image data: {exc}") from exc
-            if not payload:
-                raise ValueError("Dropped image is empty.")
-
-            target_path = self._next_role_drop_path(role, filename, suffix, clean_folder)
-            target_path.parent.mkdir(parents=True, exist_ok=True)
-            target_path.write_bytes(payload)
-            root = self.dirs.get(role)
-            saved_name = self._relative_stem(root, target_path) if root else target_path.stem
-            self.files[role][saved_name] = target_path
-            if saved_name not in self.file_names and saved_name not in self.excluded_names:
-                self.file_names.append(saved_name)
-                self.file_names = sorted(self.file_names, key=_natural_key)
-            self.workspace_key = self._compute_workspace_key()
-            self._refresh_item_resolution_flag(saved_name)
-            self._mark_global_segments_dirty()
-            summary = self.get_workspace_summary()
-            return {
-                "name": saved_name,
-                "role": role,
-                "saved": {"filename": filename, "path": str(target_path)},
-                "workspace": summary,
-            }
-
-    def trash_item_files(self, name: str) -> dict:
-        with self._lock:
-            if name not in self.file_names:
-                raise KeyError(name)
-
-            path_entries: list[tuple[str, Path]] = []
-            seen_paths: set[Path] = set()
-            for role in IMAGE_ROLES:
-                path = self.files[role].get(name)
-                if path and path.exists() and path not in seen_paths:
-                    path_entries.append((role, path))
-                    seen_paths.add(path)
-            txt_path = self.txt_files.get(name)
-            if txt_path and txt_path.exists() and txt_path not in seen_paths:
-                path_entries.append(("txt", txt_path))
-                seen_paths.add(txt_path)
-
-            if not path_entries:
-                self.file_names = [item for item in self.file_names if item != name]
-                self.caption_overrides.pop(name, None)
-                self.caption_deleted.discard(name)
-                self.excluded_names.discard(name)
-                self._save_workspace_state()
-                return {"trashed": [], "workspace": self.get_workspace_summary()}
-
-            trashed: list[tuple[str, Path]] = []
-            for role, path in path_entries:
-                _send_to_trash(path)
-                trashed.append((role, path))
-
-            for role, path in trashed:
-                if role in IMAGE_ROLES and self.files[role].get(name) == path:
-                    self.files[role].pop(name, None)
-                elif role == "txt" and self.txt_files.get(name) == path:
-                    self.txt_files.pop(name, None)
-                    self.txt_content.pop(name, None)
-
-            self.caption_overrides.pop(name, None)
-            self.caption_deleted.discard(name)
-            self.excluded_names.discard(name)
-            has_remaining = any(name in self.files[role] for role in IMAGE_ROLES) or name in self.txt_files
-            if not has_remaining:
-                self.file_names = [item for item in self.file_names if item != name]
-            for key in list(self._image_sizes.keys()):
-                if key[1] == name:
-                    self._image_sizes.pop(key, None)
-            self._resolution_mismatch.discard(name)
-            self._resolution_index_ready = False
-            self._mark_global_segments_dirty()
-            self._save_workspace_state()
-            self._ensure_resolution_index()
-            return {
-                "trashed": [{"role": role, "path": str(path)} for role, path in trashed],
-                "removed_name": name if not has_remaining else "",
-                "workspace": self.get_workspace_summary(),
-            }
+            return self._scanner.list_items(**kwargs)
 
     def get_export_items(self, names: Optional[list[str]] = None) -> list[dict]:
         with self._lock:
-            self._ensure_resolution_index()
-            export_names = list(names) if names else list(self.file_names)
-            return [
-                self._serialize_item(name)
-                for name in export_names
-                if name in self.file_names and name not in self.excluded_names
-            ]
+            return self._scanner.get_export_items(names)
+
+    # ------------------------------------------------------------------
+    # Items 委托
+    # ------------------------------------------------------------------
+    def get_item(self, name: str) -> dict:
+        with self._lock:
+            return self._items.get_item(name)
+
+    def get_global_segments(self) -> list[dict]:
+        with self._lock:
+            return self._items.get_global_segments()
+
+    def get_global_tags(self) -> list[dict]:
+        with self._lock:
+            return self._items.get_global_tags()
+
+    def save_segments(self, name: str, segments: list[str]) -> dict:
+        with self._lock:
+            return self._items.save_segments(name, segments)
+
+    def save_tags(self, name: str, tags: list[str]) -> dict:
+        with self._lock:
+            return self._items.save_tags(name, tags)
+
+    def save_text(self, name: str, content: str) -> dict:
+        with self._lock:
+            return self._items.save_text(name, content)
+
+    def rename_item(self, name: str, new_basename: str) -> dict:
+        with self._lock:
+            return self._items.rename_item(name, new_basename)
+
+    def clone_item(self, name: str) -> dict:
+        with self._lock:
+            return self._items.clone_item(name)
+
+    def swap_item_roles(self, name: str, source_role: str, target_role: str) -> dict:
+        with self._lock:
+            return self._items.swap_item_roles(name, source_role, target_role)
+
+    def apply_name_aliases(self, aliases: dict[str, str]) -> dict:
+        with self._lock:
+            return self._items.apply_name_aliases(aliases)
+
+    def delete_item(self, name: str) -> dict:
+        with self._lock:
+            return self._items.delete_item(name)
+
+    def primary_item_path(self, name: str) -> Path:
+        with self._lock:
+            return self._items.primary_item_path(name)
 
     def resolve_image_path(self, role: str, name: str) -> Optional[Path]:
         with self._lock:
-            return self.files.get(role, {}).get(name)
+            return self._items.resolve_image_path(role, name)
 
     def replace_item_paths(self, name: str, paths: dict[str, str]) -> dict:
         with self._lock:
-            if name not in self.file_names:
-                raise KeyError(name)
-            for role, value in (paths or {}).items():
-                if role not in IMAGE_ROLES:
-                    continue
-                path = Path(str(value or ""))
-                if not path.is_file():
-                    continue
-                self.files[role][name] = path
-            for key in list(self._image_sizes.keys()):
-                if key[1] == name:
-                    self._image_sizes.pop(key, None)
-            self._resolution_mismatch.discard(name)
-            self._resolution_index_ready = False
-            self._ensure_resolution_index()
-            return self._serialize_item(name)
+            return self._items.replace_item_paths(name, paths)
 
+    def _read_text_file(self, path: Path) -> str:
+        return self._items._read_text_file(path)
+
+    def _write_text_file(self, path: Path, content: str):
+        return self._items._write_text_file(path, content)
+
+    def _get_save_dir(self) -> Optional[Path]:
+        return self._items._get_save_dir()
+
+    def _clean_rename_basename(self, value: str) -> str:
+        return self._items._clean_rename_basename(value)
+
+    # ------------------------------------------------------------------
+    # Batch 委托
+    # ------------------------------------------------------------------
+    def batch_add_segments(self, names: list[str], segments: list[str], position: str = "after") -> dict:
+        with self._lock:
+            return self._batch.batch_add_segments(names, segments, position)
+
+    def batch_add_tags(self, names: list[str], tags: list[str], position: str = "after") -> dict:
+        with self._lock:
+            return self._batch.batch_add_tags(names, tags, position)
+
+    def batch_delete_segments(self, names: list[str], segments: list[str]) -> dict:
+        with self._lock:
+            return self._batch.batch_delete_segments(names, segments)
+
+    def batch_delete_tags(self, names: list[str], tags: list[str]) -> dict:
+        with self._lock:
+            return self._batch.batch_delete_tags(names, tags)
+
+    def batch_replace_segment(self, names: list[str], old_segment: str, new_segment: str) -> dict:
+        with self._lock:
+            return self._batch.batch_replace_segment(names, old_segment, new_segment)
+
+    def batch_replace_tag(self, names: list[str], old_tag: str, new_tag: str) -> dict:
+        with self._lock:
+            return self._batch.batch_replace_tag(names, old_tag, new_tag)
+
+    def batch_rename_items(self, names: list[str], **kwargs) -> dict:
+        with self._lock:
+            return self._batch.batch_rename_items(names, **kwargs)
+
+    def swap_control_result_pairs(self, **kwargs) -> dict:
+        with self._lock:
+            return self._batch.swap_control_result_pairs(**kwargs)
+
+    def assign_control_image(self, source_name: str, target_name: str, target_role: str, source_role: str = "") -> dict:
+        with self._lock:
+            return self._batch.assign_control_image(source_name, target_name, target_role, source_role)
+
+    def upload_control_image(self, target_name: str, target_role: str, filename: str, image_data: str, mime_type: str = "") -> dict:
+        with self._lock:
+            return self._batch.upload_control_image(target_name, target_role, filename, image_data, mime_type)
+
+    def upload_result_image(self, filename: str, image_data: str) -> dict:
+        with self._lock:
+            return self._batch.upload_result_image(filename, image_data)
+
+    def upload_role_image(self, role: str, filename: str, image_data: str, mime_type: str = "", folder: str = "") -> dict:
+        with self._lock:
+            return self._batch.upload_role_image(role, filename, image_data, mime_type, folder)
+
+    def move_item_to_folder(self, name: str, target_folder: str) -> dict:
+        with self._lock:
+            return self._batch.move_item_to_folder(name, target_folder)
+
+    def move_items_to_folder(self, names: list[str], target_folder: str) -> dict:
+        with self._lock:
+            return self._batch.move_items_to_folder(names, target_folder)
+
+    def create_folder(self, folder: str) -> dict:
+        with self._lock:
+            return self._batch.create_folder(folder)
+
+    def rename_folder(self, folder: str, new_folder: str) -> dict:
+        with self._lock:
+            return self._batch.rename_folder(folder, new_folder)
+
+    def delete_folder(self, folder: str) -> dict:
+        with self._lock:
+            return self._batch.delete_folder(folder)
+
+    def trash_item_files(self, name: str) -> dict:
+        with self._lock:
+            return self._batch.trash_item_files(name)
+
+    # ------------------------------------------------------------------
+    # 无状态依赖方法（保留在门面）
+    # ------------------------------------------------------------------
     def translate_text(self, text: str) -> str:
         query = (text or "").strip()
         if not query:

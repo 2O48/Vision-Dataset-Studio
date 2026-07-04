@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import tempfile
 import threading
-import time
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -12,7 +11,7 @@ from captioning.api_caption_client import APICaptionClient
 from captioning.caption_client import CaptionServiceClient
 from captioning.ollama_caption_client import OllamaCaptionClient
 from core.dataset_workspace import DatasetWorkspace
-
+from server.job_manager import BaseJobManager
 
 VALIDATION_EXISTING_CAPTION = "woman standing near a window, soft natural light, blue dress, indoor portrait"
 
@@ -164,7 +163,10 @@ def collect_item_images(item: dict, *, control_count: int = 3) -> list[str]:
     return paths
 
 
-class BatchCaptionManager:
+class BatchCaptionManager(BaseJobManager):
+    log_tag = "batch"
+    log_max_entries = 400
+
     def __init__(
         self,
         workspace: DatasetWorkspace,
@@ -173,54 +175,29 @@ class BatchCaptionManager:
         ollama_client: OllamaCaptionClient,
         on_content_change: Optional[Callable[[str], None]] = None,
     ):
+        super().__init__()
         self.workspace = workspace
         self.client = client
         self.api_client = api_client
         self.ollama_client = ollama_client
         self.on_content_change = on_content_change
-        self._lock = threading.RLock()
-        self._thread: Optional[threading.Thread] = None
-        self.running = False
         self.stop_requested = False
-        self.total = 0
-        self.done = 0
         self.success = 0
         self.failed = 0
         self.skipped = 0
-        self.current = ""
-        self.status = "idle"
         self.backend = "local"
-        self.logs: list[dict] = []
-
-    def _log(self, message: str, level: str = "info"):
-        ts = time.strftime("%H:%M:%S")
-        self.logs.append(
-            {
-                "ts": ts,
-                "level": level,
-                "message": message,
-            }
-        )
-        self.logs = self.logs[-400:]
-        try:
-            print(f"[{ts}] [batch] [{level}] {message}", flush=True)
-        except OSError:
-            pass
+        self._review_log: list[dict] = []
 
     def snapshot(self) -> dict:
         with self._lock:
             return {
-                "running": self.running,
+                **self.base_snapshot(),
                 "stop_requested": self.stop_requested,
-                "total": self.total,
-                "done": self.done,
                 "success": self.success,
                 "failed": self.failed,
                 "skipped": self.skipped,
-                "current": self.current,
-                "status": self.status,
                 "backend": self.backend,
-                "logs": list(self.logs),
+                "review_log": list(self._review_log),
             }
 
     def start(self, *, names: list[str], options: dict):
@@ -230,14 +207,13 @@ class BatchCaptionManager:
             self.running = True
             self.stop_requested = False
             self.total = len(names)
-            self.done = 0
+            self._reset_common()
+            self.total = len(names)
+            self._review_log = []
             self.success = 0
             self.failed = 0
             self.skipped = 0
-            self.current = ""
-            self.status = "running"
             self.backend = str(options.get("backend", "local") or "local")
-            self.logs = []
             self._thread = threading.Thread(target=self._run, args=(list(names), dict(options)), daemon=True)
             self._thread.start()
 
@@ -315,7 +291,16 @@ class BatchCaptionManager:
                         ollama_client=self.ollama_client,
                     )
                     output_text = apply_caption_result(item["text"], result, request["write_mode"])
+                    old_text = str(item.get("text", "") or "")
                     self.workspace.save_text(name, output_text)
+                    with self._lock:
+                        self._review_log.append({
+                            "name": name,
+                            "old_text": old_text,
+                            "new_text": output_text,
+                        })
+                        if len(self._review_log) > 200:
+                            self._review_log = self._review_log[-200:]
                     if self.on_content_change:
                         self.on_content_change(project_id)
                     with self._lock:
@@ -342,5 +327,4 @@ class BatchCaptionManager:
                     )
         finally:
             with self._lock:
-                self.running = False
-                self.current = ""
+                self._finish()

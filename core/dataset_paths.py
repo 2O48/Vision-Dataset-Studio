@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import json
+import os
+import re
 import shutil
 import time
 from pathlib import Path
-
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATASETS_DIR = BASE_DIR / "datasets"
@@ -13,6 +14,30 @@ TMP_DIR = DATASETS_DIR / "tmp"
 EXPORTS_DIR = DATASETS_DIR / "exports"
 PROCESSED_DIR = DATASETS_DIR / "processed"
 WORKSPACES_DIR = DATASETS_DIR / "workspaces"
+
+
+def resolve_user_path(value: str) -> Path:
+    """将用户输入的路径字符串解析为 Path。
+
+    支持 Windows 盘符路径（在 WSL/Linux 下自动转 /mnt/<drive>/...）、
+    UNC 风格反斜杠路径、以及 ~ 家目录展开。
+    """
+    raw = (value or "").strip()
+    if not raw:
+        return Path(raw)
+
+    drive_match = re.match(r"^([a-zA-Z]):[\\/](.*)$", raw)
+    if drive_match:
+        if os.name == "nt":
+            return Path(raw)
+        drive = drive_match.group(1).lower()
+        rest = drive_match.group(2).replace("\\", "/").strip("/")
+        return Path("/mnt") / drive / rest
+
+    if "\\" in raw and "/" not in raw:
+        raw = raw.replace("\\", "/")
+
+    return Path(raw).expanduser()
 
 
 def ensure_dataset_dirs() -> None:

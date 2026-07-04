@@ -1,53 +1,34 @@
 from __future__ import annotations
 
 import threading
-import time
 from pathlib import Path
-from typing import Optional
 
 from core.dataset_exporter import ExportCancelled, export_dataset
 from core.dataset_workspace import DatasetWorkspace
+from server.job_manager import BaseJobManager
 
 
-class ExportManager:
+class ExportManager(BaseJobManager):
+    log_tag = "export"
+    log_max_entries = 300
+
     def __init__(self, workspace: DatasetWorkspace):
+        super().__init__()
         self.workspace = workspace
-        self._lock = threading.RLock()
-        self._thread: Optional[threading.Thread] = None
         self._stop = threading.Event()
-        self.running = False
-        self.total = 0
-        self.done = 0
         self.exported = 0
         self.skipped = 0
-        self.current = ""
-        self.status = "idle"
         self.result: dict = {}
-        self.logs: list[dict] = []
-
-    def _log(self, message: str, level: str = "info"):
-        ts = time.strftime("%H:%M:%S")
-        self.logs.append({"ts": ts, "level": level, "message": message})
-        self.logs = self.logs[-300:]
-        try:
-            print(f"[{ts}] [export] [{level}] {message}", flush=True)
-        except OSError:
-            pass
 
     def snapshot(self) -> dict:
         with self._lock:
             pct = int((self.done / self.total) * 100) if self.total else (100 if self.status == "done" else 0)
             return {
-                "running": self.running,
-                "total": self.total,
-                "done": self.done,
+                **self.base_snapshot(),
                 "exported": self.exported,
                 "skipped": self.skipped,
-                "current": self.current,
-                "status": self.status,
                 "progress_pct": max(0, min(pct, 100)),
                 "result": dict(self.result),
-                "logs": list(self.logs),
             }
 
     def start(self, *, options: dict):
@@ -61,13 +42,11 @@ class ExportManager:
             self._stop.clear()
             self.running = True
             self.total = len(items)
-            self.done = 0
+            self._reset_common()
+            self.total = len(items)
             self.exported = 0
             self.skipped = 0
-            self.current = ""
-            self.status = "running"
             self.result = {}
-            self.logs = []
             self._log(f"Export started. total={len(items)}", "info")
             self._thread = threading.Thread(target=self._run, args=(items, dict(options)), daemon=True)
             self._thread.start()
@@ -142,4 +121,4 @@ class ExportManager:
                 self._log(str(exc), "error")
         finally:
             with self._lock:
-                self.running = False
+                self._finish()

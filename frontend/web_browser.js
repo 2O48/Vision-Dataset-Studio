@@ -1,3 +1,5 @@
+import { setNativeDragFeedbackActive } from "./shared/drag.js";
+
 export function createBrowserModule({
   state,
   refs,
@@ -39,11 +41,6 @@ export function createBrowserModule({
   let itemDragSource = null;
   let imagePreview = null;
   let documentFileDropGuardBound = false;
-
-  function setNativeDragFeedbackActive(active) {
-    document.documentElement.classList.toggle("html5-dragging", Boolean(active));
-    document.body?.classList.toggle("html5-dragging", Boolean(active));
-  }
 
   function animateListHeaderControls() {
     const controls = [

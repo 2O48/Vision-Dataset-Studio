@@ -2,9 +2,9 @@ import io
 import tempfile
 import unittest
 from pathlib import Path
+
 from PIL import Image
 
-from server.web_server import _render_thumbnail_bytes
 from server.caption_workflow import (
     VALIDATION_EXISTING_CAPTION,
     apply_caption_result,
@@ -12,6 +12,7 @@ from server.caption_workflow import (
     normalize_overwrite_mode,
     resolve_caption_request,
 )
+from server.web_server import _render_thumbnail_bytes
 
 
 class WebServerCaptionModeTests(unittest.TestCase):

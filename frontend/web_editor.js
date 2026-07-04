@@ -1,3 +1,5 @@
+import { setNativeDragFeedbackActive } from "./shared/drag.js";
+
 export function createEditorModule({
   state,
   refs,
@@ -34,11 +36,6 @@ export function createEditorModule({
   let globalTagScrollEndTimer = 0;
   let globalTagViewportSignature = "";
   let globalTagScrolling = false;
-
-  function setNativeDragFeedbackActive(active) {
-    document.documentElement.classList.toggle("html5-dragging", Boolean(active));
-    document.body?.classList.toggle("html5-dragging", Boolean(active));
-  }
 
   function normalizeGlobalTagQuery(value = state.globalTagQuery) {
     return `${value || ""}`.trim().toLowerCase();

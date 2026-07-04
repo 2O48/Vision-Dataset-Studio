@@ -34,6 +34,13 @@ datasets/workspaces/*
 .tmp/
 ._*
 
+# Node (frontend type-checking deps)
+frontend/node_modules/
+frontend/dist/
+
+# Project metadata
+.workbuddy/
+
 # Local tool state
 .claude/
 .codex

@@ -1,0 +1,48 @@
+"""FastAPI 主应用。
+
+渐进式迁移：新端点在 /api/v1/ 下，旧路径保留在 web_server.py 的 ThreadingHTTPServer 中。
+可通过 uvicorn 独立启动:  uvicorn server.app:app --host 127.0.0.1 --port 8101
+"""
+
+from __future__ import annotations
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from server.routers import ai, batch, caption, export, image_process, items, projects, workspace
+
+app = FastAPI(
+    title="Vision Dataset Studio API",
+    description="视觉数据集工作台 API — 多控制图浏览 / Caption 编辑 / AI 标注 / 图像预处理 / 导出",
+    version="1.0.0",
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.include_router(workspace.router, prefix="/api/v1")
+app.include_router(items.router, prefix="/api/v1")
+app.include_router(batch.router, prefix="/api/v1")
+app.include_router(export.router, prefix="/api/v1")
+app.include_router(image_process.router, prefix="/api/v1")
+app.include_router(projects.router, prefix="/api/v1")
+app.include_router(ai.router, prefix="/api/v1")
+app.include_router(caption.router, prefix="/api/v1")
+
+
+@app.on_event("startup")
+async def startup():
+    """启动时开启 WebSocket 广播后台任务。"""
+    import asyncio
+
+    from server.routers.ai import _broadcast_snapshots
+    asyncio.create_task(_broadcast_snapshots())
+
+
+@app.get("/api/v1/health")
+async def health():
+    return {"ok": True, "status": "healthy"}

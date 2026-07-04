@@ -9,7 +9,6 @@ from pathlib import Path
 from core.dataset_paths import is_relative_to
 from core.dataset_workspace import CONTROL_ROLES, IMAGE_EXTS
 
-
 APP_DATA_DIR = Path.home() / ".vision_dataset_studio"
 LEGACY_APP_DATA_DIR = Path.home() / ".lora_dataset_edit"
 PROJECTS_DIR = APP_DATA_DIR / "projects"

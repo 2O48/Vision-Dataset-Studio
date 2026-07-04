@@ -5,7 +5,6 @@ from pathlib import Path
 
 from PIL import Image
 
-
 ROOT = Path(__file__).resolve().parents[1]
 CURSOR_DIR = ROOT / "frontend" / "assets" / "cursors"
 TARGET_SIZE = 32

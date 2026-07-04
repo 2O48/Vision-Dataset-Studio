@@ -13,8 +13,16 @@ from threading import RLock
 
 from PIL import Image
 
-from captioning.api_caption_client import DEFAULT_PROMPTS
 from captioning.caption_image_preprocess import prepare_caption_images
+from captioning.prompt_common import (
+    compact_text as _compact_text,
+)
+from captioning.prompt_common import (
+    prompt_for_mode as _prompt_for_mode,
+)
+from captioning.prompt_common import (
+    prompt_with_image_name_context as _prompt_with_image_name_context,
+)
 
 
 def _normalize_base_url(base_url: str) -> str:
@@ -42,13 +50,6 @@ def _tags_endpoint(base_url: str) -> str:
     return f"{value}/api/tags"
 
 
-def _prompt_for_mode(mode: str, prompt: str) -> str:
-    custom = (prompt or "").strip()
-    if custom:
-        return custom
-    return DEFAULT_PROMPTS.get(mode or "natural", DEFAULT_PROMPTS["natural"])
-
-
 def _image_base64(image_path: str) -> str:
     path = Path(image_path)
     if not path.exists():
@@ -58,24 +59,6 @@ def _image_base64(image_path: str) -> str:
     if mime_type.startswith("image/"):
         return encoded
     return encoded
-
-
-def _compact_text(text: str) -> str:
-    return " ".join((text or "").split())
-
-
-def _prompt_with_image_name_context(prompt: str, *, image_name: str = "", image_file_names: list[str] | None = None) -> str:
-    lines: list[str] = []
-    clean_name = (image_name or "").strip()
-    if clean_name:
-        lines.append(f"Dataset item name: {clean_name}")
-    clean_files = [str(name).strip() for name in (image_file_names or []) if str(name).strip()]
-    if clean_files:
-        label = "Image file names" if len(clean_files) > 1 else "Image file name"
-        lines.append(f"{label}: {', '.join(clean_files)}")
-    if not lines:
-        return prompt
-    return f"{prompt.rstrip()}\n\nFile name context:\n" + "\n".join(lines)
 
 
 class OllamaCaptionClient:

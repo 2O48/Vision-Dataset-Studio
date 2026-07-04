@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install ruff
+        run: pip install ruff
+      - name: Ruff check
+        run: ruff check core/ server/ captioning/ tools/ tests/ bootstrap_env.py
+
+  test:
+    name: Tests (pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install pillow send2trash pytest
+      - name: Run tests
+        run: pytest tests/ -q
+
+  typecheck:
+    name: Type check (mypy, baseline)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install mypy
+        run: pip install mypy pillow send2trash
+      # 阶段 0 基线：当前 18 个已知错误，后续阶段逐步修复后改为阻塞
+      - name: Mypy check
+        run: mypy core/ server/ captioning/ --ignore-missing-imports

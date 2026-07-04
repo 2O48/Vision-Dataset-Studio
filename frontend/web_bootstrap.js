@@ -1322,6 +1322,13 @@ export function createBootstrapModule({
         runWithStatus(`正在使用${activeCaptionBackendLabel()}标注当前图片...`, () => captionCurrentWithPayload(activeCaptionPayload())).catch(showError);
         return;
       }
+      // a 单张标注（Enter 的别名）
+      if (event.key === "a") {
+        if (event.repeat || isTaskShortcutBlocked) return;
+        event.preventDefault();
+        runWithStatus(`正在使用${activeCaptionBackendLabel()}标注当前图片...`, () => captionCurrentWithPayload(activeCaptionPayload())).catch(showError);
+        return;
+      }
       if (event.key === "Delete") {
         if (event.repeat || shouldIgnoreListArrowNavigation(event.target)) return;
         event.preventDefault();
@@ -1331,14 +1338,30 @@ export function createBootstrapModule({
       if (shouldIgnoreListArrowNavigation(event.target)) return;
       const activeItems = state.selectedPanel === "secondary" && state.splitListOpen ? state.secondaryVisibleItems : state.visibleItems;
       if (!activeItems?.length) return;
-      if (event.key === "ArrowDown") {
+      // j/k 作为 ArrowDown/ArrowUp 的快捷别名（vim 风格）
+      if (event.key === "j" || event.key === "ArrowDown") {
         event.preventDefault();
         selectRelativeItem(1).catch(showError);
         return;
       }
-      if (event.key === "ArrowUp") {
+      if (event.key === "k" || event.key === "ArrowUp") {
         event.preventDefault();
         selectRelativeItem(-1).catch(showError);
+      }
+      // e 编辑当前 caption（聚焦编辑器）
+      if (event.key === "e") {
+        event.preventDefault();
+        if (refs.captionEditor) {
+          refs.captionEditor.focus();
+          refs.captionEditor.select();
+        }
+        return;
+      }
+      // / 聚焦搜索
+      if (event.key === "/") {
+        event.preventDefault();
+        const searchInput = refs.tagSearch || refs.secondaryTagSearch;
+        if (searchInput) { searchInput.focus(); searchInput.select(); }
       }
     });
 

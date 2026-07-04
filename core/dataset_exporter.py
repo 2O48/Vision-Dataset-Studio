@@ -11,25 +11,44 @@ from typing import Optional
 
 from PIL import Image, ImageOps
 
-from core.dataset_paths import DATASETS_DIR, EXPORTS_DIR
-from core.dataset_workspace import CONTROL_ROLES, _resolve_user_path
-
+from core.dataset_paths import DATASETS_DIR, EXPORTS_DIR, resolve_user_path
+from core.dataset_workspace import CONTROL_ROLES
 
 APP_STATE_DIR = DATASETS_DIR
+
+__all__ = [
+    "ExportCancelled",
+    "export_dataset",
+    "clean_name",
+    "unique_name",
+    "clean_relative_export_name",
+    "unique_export_name",
+    "target_size_for",
+    "resample_lanczos",
+    "resize_center_crop",
+    "write_processed_image",
+    "copy_original_image",
+    "active_control_roles",
+    "role_folder_name",
+    "role_folder",
+    "image_target_path",
+    "resolve_output_parent",
+    "build_export_root",
+]
 
 
 class ExportCancelled(RuntimeError):
     pass
 
 
-def _clean_name(value: str, fallback: str = "untitled") -> str:
+def clean_name(value: str, fallback: str = "untitled") -> str:
     name = re.sub(r"[\\/:*?\"<>|]+", "_", value or fallback).strip()
     name = re.sub(r"\s+", " ", name).strip(" .")
     return name or fallback
 
 
-def _unique_name(name: str, used: set[str]) -> str:
-    base = _clean_name(Path(name).stem)
+def unique_name(name: str, used: set[str]) -> str:
+    base = clean_name(Path(name).stem)
     if base not in used:
         used.add(base)
         return base
@@ -42,19 +61,19 @@ def _unique_name(name: str, used: set[str]) -> str:
         index += 1
 
 
-def _clean_relative_export_name(value: str, fallback: str = "untitled") -> str:
+def clean_relative_export_name(value: str, fallback: str = "untitled") -> str:
     raw = str(value or "").strip().replace("\\", "/")
-    parts = [_clean_name(part, fallback if index == 0 else "folder") for index, part in enumerate(raw.split("/")) if part.strip()]
+    parts = [clean_name(part, fallback if index == 0 else "folder") for index, part in enumerate(raw.split("/")) if part.strip()]
     if not parts:
-        parts = [_clean_name(fallback)]
+        parts = [clean_name(fallback)]
     return "/".join(parts)
 
 
-def _unique_export_name(name: str, used: set[str], *, preserve_subfolders: bool) -> str:
+def unique_export_name(name: str, used: set[str], *, preserve_subfolders: bool) -> str:
     if not preserve_subfolders:
-        return _unique_name(name, used)
+        return unique_name(name, used)
 
-    clean_name = _clean_relative_export_name(name)
+    clean_name = clean_relative_export_name(name)
     path = Path(clean_name)
     parent = path.parent.as_posix()
     base = path.name
@@ -73,7 +92,7 @@ def _unique_export_name(name: str, used: set[str], *, preserve_subfolders: bool)
         index += 1
 
 
-def _target_size_for(source_size: tuple[int, int], target_pixels: int, multiple: int) -> tuple[int, int]:
+def target_size_for(source_size: tuple[int, int], target_pixels: int, multiple: int) -> tuple[int, int]:
     width, height = source_size
     if width <= 0 or height <= 0:
         raise ValueError("Invalid image size.")
@@ -94,14 +113,14 @@ def _target_size_for(source_size: tuple[int, int], target_pixels: int, multiple:
     return target_width, target_height
 
 
-def _resample_lanczos() -> int:
+def resample_lanczos() -> int:
     try:
         return Image.Resampling.LANCZOS
     except AttributeError:
         return Image.LANCZOS
 
 
-def _resize_center_crop(image: Image.Image, target_size: tuple[int, int]) -> Image.Image:
+def resize_center_crop(image: Image.Image, target_size: tuple[int, int]) -> Image.Image:
     image = ImageOps.exif_transpose(image)
     if image.mode not in {"RGB", "RGBA"}:
         image = image.convert("RGB")
@@ -109,41 +128,41 @@ def _resize_center_crop(image: Image.Image, target_size: tuple[int, int]) -> Ima
     width, height = image.size
     scale = max(target_width / width, target_height / height)
     resized_size = (max(target_width, math.ceil(width * scale)), max(target_height, math.ceil(height * scale)))
-    resized = image.resize(resized_size, _resample_lanczos())
+    resized = image.resize(resized_size, resample_lanczos())
     left = max(0, (resized.width - target_width) // 2)
     top = max(0, (resized.height - target_height) // 2)
     return resized.crop((left, top, left + target_width, top + target_height))
 
 
-def _write_processed_image(source: Path, target: Path, target_size: tuple[int, int]):
+def write_processed_image(source: Path, target: Path, target_size: tuple[int, int]):
     target.parent.mkdir(parents=True, exist_ok=True)
     with Image.open(source) as image:
-        processed = _resize_center_crop(image, target_size)
+        processed = resize_center_crop(image, target_size)
         if processed.mode == "RGBA":
             processed.save(target, format="PNG", optimize=True)
         else:
             processed.convert("RGB").save(target, format="PNG", optimize=True)
 
 
-def _copy_original_image(source: Path, target: Path):
+def copy_original_image(source: Path, target: Path):
     target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(source, target)
 
 
-def _active_control_roles(control_count: int) -> tuple[str, ...]:
+def active_control_roles(control_count: int) -> tuple[str, ...]:
     count = max(1, min(3, int(control_count or 1)))
     return CONTROL_ROLES[:count]
 
 
-def _role_folder_name(export_prefix: str, role: str) -> str:
+def role_folder_name(export_prefix: str, role: str) -> str:
     return f"{export_prefix}_{role}"
 
 
-def _role_folder(root: Path, export_prefix: str, role: str) -> Path:
-    return root / _role_folder_name(export_prefix, role)
+def role_folder(root: Path, export_prefix: str, role: str) -> Path:
+    return root / role_folder_name(export_prefix, role)
 
 
-def _image_target_path(
+def image_target_path(
     root: Path,
     export_prefix: str,
     export_name: str,
@@ -153,20 +172,20 @@ def _image_target_path(
     role: str,
 ) -> Path:
     ext = ".png" if process_images else source.suffix.lower() or ".png"
-    folder = _role_folder(root, export_prefix, role)
+    folder = role_folder(root, export_prefix, role)
     parts = [part for part in str(export_name or "").replace("\\", "/").split("/") if part]
     if not parts:
         parts = ["untitled"]
     return folder.joinpath(*parts).with_suffix(ext)
 
 
-def _resolve_output_parent(value: str) -> Path:
+def resolve_output_parent(value: str) -> Path:
     if (value or "").strip():
-        return _resolve_user_path(value)
+        return resolve_user_path(value)
     return EXPORTS_DIR
 
 
-def _build_export_root(output_parent: Path, export_name: str) -> Path:
+def build_export_root(output_parent: Path, export_name: str) -> Path:
     root = output_parent / export_name
     if not root.exists():
         return root
@@ -202,17 +221,17 @@ def export_dataset(
         raise ValueError("Size multiple must be 16, 32, or 64.")
 
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    clean_project_name = _clean_name(project_name, "dataset")
+    clean_project_name = clean_name(project_name, "dataset")
     export_prefix = f"{timestamp}_{clean_project_name}"
     export_name = export_prefix
-    output_parent = _resolve_output_parent(output_dir)
+    output_parent = resolve_output_parent(output_dir)
     output_parent.mkdir(parents=True, exist_ok=True)
-    export_root = _build_export_root(output_parent, export_name)
+    export_root = build_export_root(output_parent, export_name)
     export_root.mkdir(parents=True, exist_ok=True)
 
-    control_roles = _active_control_roles(control_count) if include_controls else ()
+    control_roles = active_control_roles(control_count) if include_controls else ()
     for role in (*control_roles, "result"):
-        _role_folder(export_root, export_prefix, role).mkdir(parents=True, exist_ok=True)
+        role_folder(export_root, export_prefix, role).mkdir(parents=True, exist_ok=True)
 
     used_names: set[str] = set()
     exported = 0
@@ -275,7 +294,7 @@ def export_dataset(
             if stopped():
                 raise ExportCancelled("Export cancelled.")
 
-            export_name_for_item = _unique_export_name(
+            export_name_for_item = unique_export_name(
                 str(item.get("name") or source.stem),
                 used_names,
                 preserve_subfolders=preserve_subfolders,
@@ -283,15 +302,15 @@ def export_dataset(
             target_size: Optional[tuple[int, int]] = None
             if process_images:
                 with Image.open(source) as image:
-                    target_size = _target_size_for(image.size, target_pixels, multiple)
-                image_target = _image_target_path(export_root, export_prefix, export_name_for_item, source, process_images=True, role="result")
-                _write_processed_image(source, image_target, target_size)
+                    target_size = target_size_for(image.size, target_pixels, multiple)
+                image_target = image_target_path(export_root, export_prefix, export_name_for_item, source, process_images=True, role="result")
+                write_processed_image(source, image_target, target_size)
             else:
-                image_target = _image_target_path(export_root, export_prefix, export_name_for_item, source, process_images=False, role="result")
-                _copy_original_image(source, image_target)
+                image_target = image_target_path(export_root, export_prefix, export_name_for_item, source, process_images=False, role="result")
+                copy_original_image(source, image_target)
             step(str(image_target), f"Exported result image: {export_name_for_item}")
 
-            text_target = _role_folder(export_root, export_prefix, "result").joinpath(
+            text_target = role_folder(export_root, export_prefix, "result").joinpath(
                 *[part for part in export_name_for_item.split("/") if part]
             ).with_suffix(".txt")
             text_target.parent.mkdir(parents=True, exist_ok=True)
@@ -303,7 +322,7 @@ def export_dataset(
                 for role, role_source in role_sources:
                     if stopped():
                         raise ExportCancelled("Export cancelled.")
-                    role_target = _image_target_path(
+                    role_target = image_target_path(
                         export_root,
                         export_prefix,
                         export_name_for_item,
@@ -312,9 +331,9 @@ def export_dataset(
                         role=role,
                     )
                     if process_images and target_size:
-                        _write_processed_image(role_source, role_target, target_size)
+                        write_processed_image(role_source, role_target, target_size)
                     else:
-                        _copy_original_image(role_source, role_target)
+                        copy_original_image(role_source, role_target)
                     exported_roles[role] = str(role_target.relative_to(export_root))
                     step(str(role_target), f"Exported {role}: {export_name_for_item}")
 
@@ -384,3 +403,20 @@ def export_dataset(
         except Exception:
             pass
         raise
+
+# Backward-compatible aliases (阶段 1: 原私有函数名保留以兼容既有导入)
+_clean_name = clean_name
+_unique_name = unique_name
+_clean_relative_export_name = clean_relative_export_name
+_unique_export_name = unique_export_name
+_target_size_for = target_size_for
+_resample_lanczos = resample_lanczos
+_resize_center_crop = resize_center_crop
+_write_processed_image = write_processed_image
+_copy_original_image = copy_original_image
+_active_control_roles = active_control_roles
+_role_folder_name = role_folder_name
+_role_folder = role_folder
+_image_target_path = image_target_path
+_resolve_output_parent = resolve_output_parent
+_build_export_root = build_export_root

@@ -9,7 +9,6 @@ import sys
 import threading
 import time
 from collections import OrderedDict
-from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Optional
@@ -24,31 +23,45 @@ if str(BASE_DIR) not in sys.path:
 
 from captioning.api_caption_client import APICaptionClient
 from captioning.caption_client import CaptionServiceClient, DependencyInstaller
-from server.caption_workflow import (
-    BatchCaptionManager,
-    VALIDATION_EXISTING_CAPTION,
-    apply_caption_result as _apply_caption_result,
-    caption_with_backend as _caption_with_backend,
-    collect_item_images as _collect_item_images,
-    create_validation_images as _create_validation_images,
-    normalize_overwrite_mode as _normalize_overwrite_mode,
-    remove_validation_images as _remove_validation_images,
-    resolve_caption_request as _resolve_caption_request,
-)
+from captioning.ollama_caption_client import OllamaCaptionClient
 from core.dataset_exporter import export_dataset
 from core.dataset_image_processor import (
     process_viewer_item_match_result,
     process_viewer_item_scale,
+    process_workspace_images,
 )
-from core.dataset_paths import cleanup_tmp, ensure_dataset_dirs, is_relative_to
+from core.dataset_paths import cleanup_tmp, ensure_dataset_dirs, is_relative_to, resolve_user_path
 from core.dataset_projects import ProjectStore
-from core.dataset_workspace import DatasetWorkspace, IMAGE_EXTS, _resolve_user_path
-from server.export_jobs import ExportManager
-from server.image_process_jobs import ImageProcessManager
-from captioning.ollama_caption_client import OllamaCaptionClient
+from core.dataset_workspace import IMAGE_EXTS, DatasetWorkspace
 from core.prompt_templates import PromptTemplateStore
 from core.qwen_models import list_qwen_model_configs
-
+from server.caption_workflow import (
+    VALIDATION_EXISTING_CAPTION,
+    BatchCaptionManager,
+)
+from server.caption_workflow import (
+    apply_caption_result as _apply_caption_result,
+)
+from server.caption_workflow import (
+    caption_with_backend as _caption_with_backend,
+)
+from server.caption_workflow import (
+    collect_item_images as _collect_item_images,
+)
+from server.caption_workflow import (
+    create_validation_images as _create_validation_images,
+)
+from server.caption_workflow import (
+    normalize_overwrite_mode as _normalize_overwrite_mode,
+)
+from server.caption_workflow import (
+    remove_validation_images as _remove_validation_images,
+)
+from server.caption_workflow import (
+    resolve_caption_request as _resolve_caption_request,
+)
+from server.export_jobs import ExportManager
+from server.image_process_jobs import ImageProcessManager
 
 FRONTEND_DIR = BASE_DIR / "frontend"
 INDEX_FILE = FRONTEND_DIR / "index.html"
@@ -104,7 +117,7 @@ def _infer_project_id_from_workspace(workspace: dict) -> str:
         if not raw:
             continue
         try:
-            paths.append(_resolve_user_path(raw).resolve())
+            paths.append(resolve_user_path(raw).resolve())
         except Exception:
             continue
     if not paths:
@@ -167,7 +180,7 @@ EXPORT_MANAGER = ExportManager(WORKSPACE)
 def _list_child_directories(path_value: str) -> dict:
     if not (path_value or "").strip():
         raise ValueError("Missing directory path.")
-    root = _resolve_user_path(path_value)
+    root = resolve_user_path(path_value)
     if not root.exists():
         raise FileNotFoundError(f"Directory does not exist: {path_value}")
     if not root.is_dir():

@@ -1,0 +1,16 @@
+{
+  "name": "vision-dataset-studio-frontend",
+  "private": true,
+  "description": "Vite + TypeScript 前端（阶段 4）",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "vite": "^8.1.3"
+  }
+}

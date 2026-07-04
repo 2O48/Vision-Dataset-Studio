@@ -1,7 +1,7 @@
+import base64
 import tempfile
 import unittest
 import zipfile
-import base64
 from pathlib import Path
 from unittest import mock
 

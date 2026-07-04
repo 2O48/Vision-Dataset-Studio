@@ -8,19 +8,18 @@ from typing import Callable
 from PIL import Image
 
 from core.dataset_exporter import (
-    _active_control_roles,
-    _build_export_root,
-    _clean_name,
-    _copy_original_image,
-    _image_target_path,
-    _role_folder,
-    _target_size_for,
-    _unique_name,
-    _write_processed_image,
+    active_control_roles,
+    build_export_root,
+    clean_name,
+    copy_original_image,
+    image_target_path,
+    role_folder,
+    target_size_for,
+    unique_name,
+    write_processed_image,
 )
-from core.dataset_paths import TMP_DIR
-from core.dataset_workspace import APP_STATE_DIR, CONTROL_ROLES, IMAGE_ROLES, _resolve_user_path
-
+from core.dataset_paths import TMP_DIR, resolve_user_path
+from core.dataset_workspace import CONTROL_ROLES
 
 PROCESSED_DIR = TMP_DIR / "processed"
 VIEWER_PROCESS_DIR = TMP_DIR / "viewer"
@@ -28,20 +27,20 @@ VIEWER_PROCESS_DIR = TMP_DIR / "viewer"
 
 def _resolve_output_parent(value: str) -> Path:
     if (value or "").strip():
-        return _resolve_user_path(value)
+        return resolve_user_path(value)
     return PROCESSED_DIR
 
 
 def _viewer_process_root(name: str, operation: str) -> Path:
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    clean_name = _clean_name(name, "item")
-    root = VIEWER_PROCESS_DIR / f"{timestamp}_{clean_name}_{operation}"
+    cleaned = clean_name(name, "item")
+    root = VIEWER_PROCESS_DIR / f"{timestamp}_{cleaned}_{operation}"
     root.mkdir(parents=True, exist_ok=True)
     return root
 
 
 def _viewer_target_path(root: Path, role: str, name: str) -> Path:
-    return root / role / f"{_clean_name(name, 'item')}.png"
+    return root / role / f"{clean_name(name, 'item')}.png"
 
 
 def _item_active_roles(control_count: int) -> tuple[str, ...]:
@@ -65,9 +64,9 @@ def process_viewer_item_scale(*, item: dict, target_megapixels: float, control_c
         if not source.is_file():
             continue
         with Image.open(source) as image:
-            target_size = _target_size_for(image.size, target_pixels, 16)
+            target_size = target_size_for(image.size, target_pixels, 16)
         target = _viewer_target_path(root, role, str(item.get("name", "") or source.stem))
-        _write_processed_image(source, target, target_size)
+        write_processed_image(source, target, target_size)
         output_paths[role] = str(target)
         target_sizes[role] = [target_size[0], target_size[1]]
 
@@ -98,7 +97,7 @@ def process_viewer_item_match_result(*, item: dict, control_count: int = 1) -> d
         if not source.is_file():
             continue
         target = _viewer_target_path(root, role, str(item.get("name", "") or source.stem))
-        _write_processed_image(source, target, target_size)
+        write_processed_image(source, target, target_size)
         output_paths[role] = str(target)
 
     if not output_paths:
@@ -124,17 +123,17 @@ def process_workspace_images(
         raise ValueError("Size multiple must be 16, 32, or 64.")
 
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    clean_project_name = _clean_name(project_name, "processed")
+    clean_project_name = clean_name(project_name, "processed")
     process_prefix = f"{timestamp}_{clean_project_name}"
     output_parent = _resolve_output_parent(output_dir)
     output_parent.mkdir(parents=True, exist_ok=True)
-    process_root = _build_export_root(output_parent, process_prefix)
+    process_root = build_export_root(output_parent, process_prefix)
     process_root.mkdir(parents=True, exist_ok=True)
 
-    control_roles = _active_control_roles(control_count) if include_controls else ()
+    control_roles = active_control_roles(control_count) if include_controls else ()
     active_roles = (*control_roles, "result")
     role_dirs = {
-        role: _role_folder(process_root, process_prefix, role)
+        role: role_folder(process_root, process_prefix, role)
         for role in active_roles
     }
     for path in role_dirs.values():
@@ -176,11 +175,11 @@ def process_workspace_images(
             continue
 
         try:
-            base_name = _unique_name(str(item.get("name") or result_source.stem), used_names)
+            base_name = unique_name(str(item.get("name") or result_source.stem), used_names)
             with Image.open(result_source) as image:
-                target_size = _target_size_for(image.size, target_pixels, multiple)
+                target_size = target_size_for(image.size, target_pixels, multiple)
 
-            result_target = _image_target_path(
+            result_target = image_target_path(
                 process_root,
                 process_prefix,
                 base_name,
@@ -188,7 +187,7 @@ def process_workspace_images(
                 process_images=True,
                 role="result",
             )
-            _write_processed_image(result_source, result_target, target_size)
+            write_processed_image(result_source, result_target, target_size)
             text_target = role_dirs["result"] / f"{base_name}.txt"
             text_target.write_text(str(item.get("text") or "").strip(), encoding="utf-8")
 
@@ -204,7 +203,7 @@ def process_workspace_images(
                 role_source = Path(value)
                 if not role_source.exists():
                     continue
-                role_target = _image_target_path(
+                role_target = image_target_path(
                     process_root,
                     process_prefix,
                     base_name,
@@ -212,7 +211,7 @@ def process_workspace_images(
                     process_images=True,
                     role=role,
                 )
-                _write_processed_image(role_source, role_target, target_size)
+                write_processed_image(role_source, role_target, target_size)
                 processed_files[role] = str(role_target.relative_to(process_root))
 
             processed += 1
@@ -270,16 +269,16 @@ def process_workspace_match_results(
     progress_callback: Callable[[dict], None] | None = None,
 ) -> dict:
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    clean_project_name = _clean_name(project_name, "matched")
+    clean_project_name = clean_name(project_name, "matched")
     process_prefix = f"{timestamp}_{clean_project_name}_matched"
     output_parent = _resolve_output_parent(output_dir)
     output_parent.mkdir(parents=True, exist_ok=True)
-    process_root = _build_export_root(output_parent, process_prefix)
+    process_root = build_export_root(output_parent, process_prefix)
     process_root.mkdir(parents=True, exist_ok=True)
 
-    control_roles = _active_control_roles(control_count) if include_controls else ()
+    control_roles = active_control_roles(control_count) if include_controls else ()
     active_roles = (*control_roles, "result")
-    role_dirs = {role: _role_folder(process_root, process_prefix, role) for role in active_roles}
+    role_dirs = {role: role_folder(process_root, process_prefix, role) for role in active_roles}
     for path in role_dirs.values():
         path.mkdir(parents=True, exist_ok=True)
 
@@ -319,11 +318,11 @@ def process_workspace_match_results(
             continue
 
         try:
-            base_name = _unique_name(str(item.get("name") or result_source.stem), used_names)
+            base_name = unique_name(str(item.get("name") or result_source.stem), used_names)
             with Image.open(result_source) as image:
                 target_size = image.size
 
-            result_target = _image_target_path(
+            result_target = image_target_path(
                 process_root,
                 process_prefix,
                 base_name,
@@ -331,7 +330,7 @@ def process_workspace_match_results(
                 process_images=False,
                 role="result",
             )
-            _copy_original_image(result_source, result_target)
+            copy_original_image(result_source, result_target)
             text_target = role_dirs["result"] / f"{base_name}.txt"
             text_target.write_text(str(item.get("text") or "").strip(), encoding="utf-8")
 
@@ -352,7 +351,7 @@ def process_workspace_match_results(
                 with Image.open(role_source) as role_image:
                     role_size = role_image.size
                 needs_resize = role_size != target_size
-                role_target = _image_target_path(
+                role_target = image_target_path(
                     process_root,
                     process_prefix,
                     base_name,
@@ -361,10 +360,10 @@ def process_workspace_match_results(
                     role=role,
                 )
                 if only_mismatched and not needs_resize:
-                    _copy_original_image(role_source, role_target)
+                    copy_original_image(role_source, role_target)
                     copied_controls += 1
                 else:
-                    _write_processed_image(role_source, role_target, target_size)
+                    write_processed_image(role_source, role_target, target_size)
                     resized_controls += 1
                 processed_files[role] = str(role_target.relative_to(process_root))
 
