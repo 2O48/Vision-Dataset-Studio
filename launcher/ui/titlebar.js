@@ -154,7 +154,9 @@
 
     const caption = document.querySelector(".command-caption");
     const commandTop = document.querySelector(".command-top");
-    if (!caption || !commandTop) return;
+    const commandBar = document.querySelector(".command-bar");
+    const siteShell = document.querySelector(".site-shell");
+    if (!caption || !commandTop || !commandBar || !siteShell) return;
     document.documentElement.classList.add("vds-tauri-launcher-ready");
     if (macWindowChrome) {
       document.documentElement.classList.add("vds-tauri-mac-chrome");
@@ -183,6 +185,7 @@
       }, true);
     }
 
+    commandBar.setAttribute("data-tauri-drag-region", "");
     commandTop.setAttribute("data-tauri-drag-region", "");
     if (runActions) runActions.setAttribute("data-tauri-drag-region", "");
     caption.setAttribute("data-tauri-drag-region", "");
@@ -336,20 +339,11 @@
 	      html.vds-tauri-mac-chrome #vds-launcher-window-controls button[data-action="close"]:hover {
 	        background: #ff5f57 !important;
 	      }
-      #vds-launcher-top-drag-zone {
-        position: fixed;
-        top: 0;
-        left: 0;
-        right: 0;
-        z-index: 2147483646;
-        height: 0;
-        background: transparent;
-        cursor: default;
-      }
       html.vds-launcher-frameless .top-caption-progress,
       html.vds-launcher-frameless .top-caption-progress-status {
         cursor: pointer;
       }
+      html.vds-launcher-frameless .command-bar,
       html.vds-launcher-frameless .command-top,
       html.vds-launcher-frameless .command-run-actions,
       html.vds-launcher-frameless .command-caption {
@@ -358,19 +352,6 @@
     `;
     document.head.appendChild(style);
     document.documentElement.classList.add("vds-launcher-frameless");
-
-    const topDragZone = document.createElement("div");
-    topDragZone.id = "vds-launcher-top-drag-zone";
-    topDragZone.setAttribute("data-tauri-drag-region", "deep");
-    document.body.prepend(topDragZone);
-
-    const syncTopDragZone = () => {
-      const top = Math.max(0, Math.floor(commandTop.getBoundingClientRect().top));
-      topDragZone.style.height = `${top}px`;
-    };
-    syncTopDragZone();
-    window.addEventListener("resize", syncTopDragZone, { passive: true });
-    window.addEventListener("vds-layout-updated", syncTopDragZone, { passive: true });
 
     const controls = document.createElement("div");
     controls.id = "vds-launcher-window-controls";
@@ -397,12 +378,35 @@
       control(button.getAttribute("data-action"));
     });
 
-    topDragZone.addEventListener("mousedown", (event) => {
+    function shouldStartDragFromPoint(event) {
+      if (event.button !== 0) return false;
+      if (event.target.closest(statusSelector) || event.target.closest(interactiveSelector)) return false;
+
+      const shellRect = siteShell.getBoundingClientRect();
+      const barRect = commandBar.getBoundingClientRect();
+      const x = event.clientX;
+      const y = event.clientY;
+
+      const insideShell = x >= shellRect.left && x <= shellRect.right && y >= shellRect.top && y <= shellRect.bottom;
+      if (!insideShell) return false;
+
+      const inTopPadding = y >= shellRect.top && y < barRect.top;
+      if (inTopPadding) return true;
+
+      const inBarBounds = x >= barRect.left && x <= barRect.right && y >= barRect.top && y <= barRect.bottom;
+      return inBarBounds;
+    }
+
+    function handleDragMouseDown(event) {
+      if (!shouldStartDragFromPoint(event)) return;
       if (event.button !== 0) return;
       event.preventDefault();
+      event.stopPropagation();
       if (event.detail === 2) control("maximize");
       else control("drag");
-    });
+    }
+
+    document.addEventListener("mousedown", handleDragMouseDown, true);
 
     commandTop.addEventListener("mousedown", (event) => {
       if (event.button !== 0) return;

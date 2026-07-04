@@ -825,9 +825,14 @@ async function updateBottomStatusContrast() {
   if (!footer) return;
   const background = await sampleBottomStatusBackgroundColor();
   if (!footer.isConnected) return;
-  const darkText = parseRgbColor(window.getComputedStyle(document.documentElement).getPropertyValue("--list-heading")) || [66, 73, 86];
-  const shouldUseLight = contrastRatio(darkText, background) < 4.5;
-  footer.classList.toggle("status-contrast-light", shouldUseLight);
+  const rootStyle = window.getComputedStyle(document.documentElement);
+  const darkText = parseRgbColor(rootStyle.getPropertyValue("--emphasis-color")) || [66, 73, 86];
+  const lightText = parseRgbColor(rootStyle.getPropertyValue("--ink-contrast")) || [247, 249, 245];
+  const darkContrast = contrastRatio(darkText, background);
+  const lightContrast = contrastRatio(lightText, background);
+  const preferredMode = lightContrast > darkContrast ? "light" : "dark";
+  footer.classList.toggle("status-contrast-light", preferredMode === "light");
+  footer.classList.toggle("status-contrast-dark", preferredMode === "dark");
 }
 
 function scheduleBottomStatusContrastUpdate() {

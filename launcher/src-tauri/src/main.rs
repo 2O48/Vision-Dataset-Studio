@@ -184,10 +184,10 @@ fn main() {
         }))
         .setup(|app| {
             if let Some(window) = app.get_webview_window("main") {
-                if let Ok(icon) = Image::from_bytes(include_bytes!("../icons/icon-512.png")) {
-                    let _ = window.set_icon(icon);
-                }
-                apply_platform_window_style(&window);
+                apply_launcher_window_style(&window);
+            }
+            if let Some(window) = app.get_webview_window("terminal") {
+                apply_launcher_window_style(&window);
             }
 
             start_backend_for_app(app.handle().clone(), app.state::<Arc<LauncherState>>().inner().clone());
@@ -320,13 +320,12 @@ fn launcher_terminal_theme(state: tauri::State<'_, Arc<LauncherState>>) -> Strin
 #[tauri::command]
 fn launcher_open_terminal(app: AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("terminal") {
-        apply_platform_window_style(&window);
+        apply_launcher_window_style(&window);
         let _ = window.show();
         let _ = window.set_focus();
         return Ok(());
     }
 
-    let icon = Image::from_bytes(include_bytes!("../icons/icon-512.png")).ok();
     let mut builder = WebviewWindowBuilder::new(
         &app,
         "terminal",
@@ -338,13 +337,26 @@ fn launcher_open_terminal(app: AppHandle) -> Result<(), String> {
     .center()
     .resizable(true)
     .decorations(false);
-    if let Some(icon) = icon {
+    if let Some(icon) = launcher_window_icon() {
         builder = builder.icon(icon).map_err(|error| error.to_string())?;
     }
     let window = builder.build().map_err(|error| error.to_string())?;
-    apply_platform_window_style(&window);
+    apply_launcher_window_style(&window);
     let _ = window.set_focus();
     Ok(())
+}
+
+const LAUNCHER_WINDOW_ICON: &[u8] = include_bytes!("../icons/icon-512.png");
+
+fn launcher_window_icon() -> Option<Image<'static>> {
+    Image::from_bytes(LAUNCHER_WINDOW_ICON).ok()
+}
+
+fn apply_launcher_window_style(window: &tauri::WebviewWindow) {
+    if let Some(icon) = launcher_window_icon() {
+        let _ = window.set_icon(icon);
+    }
+    apply_platform_window_style(window);
 }
 
 #[cfg(not(target_os = "macos"))]

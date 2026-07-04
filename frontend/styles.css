@@ -2,8 +2,8 @@
   color-scheme: light;
   --bg: #eeeeee;
   --bg-deep: #eeeeee;
-  --paper: rgba(251, 252, 248, 0.82);
-  --paper-strong: rgba(255, 255, 252, 0.96);
+  --paper: rgba(251, 252, 248, 0.52);
+  --paper-strong: rgba(255, 255, 252, 0.66);
   --emphasis-color: #37383C;
   --emphasis-rgb: 55, 56, 60;
   --ink: var(--emphasis-color);
@@ -22,16 +22,19 @@
   --warn: #9b6b18;
   --danger: #da4b44;
   --shadow: none;
-  --glass-panel-bg: linear-gradient(180deg, rgba(249, 249, 249, 0.9) 0%, rgba(238, 238, 238, 0.9) 100%);
-  --glass-control-bg: linear-gradient(180deg, rgba(249, 249, 249, 0.82) 0%, rgba(238, 238, 238, 0.82) 100%);
-  --glass-control-bg-hover: linear-gradient(180deg, rgba(226, 231, 238, 0.9) 0%, rgba(214, 220, 229, 0.9) 100%);
+  --glass-panel-bg: linear-gradient(180deg, rgba(249, 249, 249, 0.5) 0%, rgba(238, 238, 238, 0.5) 100%);
+  --glass-control-bg: linear-gradient(180deg, rgba(249, 249, 249, 0.4) 0%, rgba(238, 238, 238, 0.4) 100%);
+  --glass-control-bg-hover: linear-gradient(180deg, rgba(226, 231, 238, 0.54) 0%, rgba(214, 220, 229, 0.54) 100%);
+  --glass-panel-fill: rgba(248, 250, 252, 0.34);
+  --glass-panel-tint: linear-gradient(180deg, rgba(255, 255, 255, 0.32) 0%, rgba(255, 255, 255, 0.12) 100%);
+  --glass-edge-color: rgba(255, 255, 255, 0.44);
   --glass-border: 1px solid rgba(255, 255, 255, 0.92);
   --glass-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.15), inset 0 1px 1px rgba(255, 255, 255, 0.9);
   --glass-control-shadow: 0 4px 16px rgba(0, 0, 0, 0.1), inset 0 1px 1px rgba(255, 255, 255, 0.82);
   --glass-control-shadow-hover: 0 4px 16px rgba(0, 0, 0, 0.08), inset 0 1px 1px rgba(255, 255, 255, 0.62);
   --control-top-highlight: inset 0 1px 1px rgba(255, 255, 255, 0.32);
   --control-top-highlight-soft: inset 0 1px 1px rgba(255, 255, 255, 0.22);
-  --glass-filter: saturate(135%) blur(20px);
+  --glass-filter: saturate(132%) blur(16px);
   --panel-border: var(--glass-border);
   --panel-bg: var(--glass-panel-bg);
   --panel-shadow: var(--glass-shadow);
@@ -53,6 +56,7 @@
   --surface-border-width: 1px;
   --surface-border-gradient: linear-gradient(180deg, rgba(255, 255, 255, 0.92) 0%, rgba(250, 250, 250, 0.72) 100%);
   --surface-card-fill: rgba(249, 249, 249, 0.9);
+  --panel-solid-fill: #f7f9f5;
   --surface-button-fill: rgba(249, 249, 249, 0.82);
   --button-active-border: rgba(107, 114, 128, 0.15);
   --button-active-fill: #37383c;
@@ -97,7 +101,7 @@
   --workbench-left-rail-gap: var(--layout-gap);
   --side-panel-duration: 0.5s;
   --side-panel-ease: cubic-bezier(0.16, 1, 0.3, 1);
-  --side-panel-blur: 18px;
+  --side-panel-blur: 14px;
   --control-bg: rgba(255, 255, 252, 0.5);
   --control-bg-strong: rgba(255, 255, 252, 0.62);
   --control-border: rgba(var(--emphasis-rgb), 0.09);
@@ -147,8 +151,8 @@
   color-scheme: dark;
   --bg: #141414;
   --bg-deep: #141414;
-  --paper: rgba(36, 36, 36, 0.85);
-  --paper-strong: #242424;
+  --paper: rgba(36, 36, 36, 0.76);
+  --paper-strong: rgba(36, 36, 36, 0.88);
   --ink: #dee2e9;
   --ink-contrast: #eeeeee;
   --ink-soft: #9ca4b3;
@@ -164,16 +168,19 @@
   --ok: #68778b;
   --warn: #c39e5c;
   --danger: #da4b44;
-  --glass-panel-bg: linear-gradient(180deg, rgba(36, 36, 36, 0.9) 0%, rgba(36, 36, 36, 0.9) 100%);
-  --glass-control-bg: linear-gradient(180deg, rgba(47, 48, 52, 0.9) 0%, rgba(41, 42, 46, 0.9) 100%);
-  --glass-control-bg-hover: linear-gradient(180deg, rgba(56, 58, 63, 0.92) 0%, rgba(47, 49, 54, 0.92) 100%);
+  --glass-panel-bg: linear-gradient(180deg, rgba(36, 36, 36, 0.78) 0%, rgba(36, 36, 36, 0.78) 100%);
+  --glass-control-bg: linear-gradient(180deg, rgba(47, 48, 52, 0.72) 0%, rgba(41, 42, 46, 0.72) 100%);
+  --glass-control-bg-hover: linear-gradient(180deg, rgba(56, 58, 63, 0.8) 0%, rgba(47, 49, 54, 0.8) 100%);
+  --glass-panel-fill: rgba(19, 24, 31, 0.34);
+  --glass-panel-tint: linear-gradient(180deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.035) 100%);
+  --glass-edge-color: rgba(168, 180, 198, 0.18);
   --glass-border: 1px solid rgba(68, 68, 68, 0.92);
   --glass-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.15), inset 0 1px 1px rgba(255, 255, 255, 0.16);
   --glass-control-shadow: 0 1px 2px rgba(12, 16, 25, 0.2), inset 0 1px 1px rgba(255, 255, 255, 0.1);
   --glass-control-shadow-hover: 0 4px 12px rgba(0, 0, 0, 0.16), inset 0 1px 1px rgba(255, 255, 255, 0.12);
   --control-top-highlight: inset 0 1px 1px rgba(255, 255, 255, 0.16);
   --control-top-highlight-soft: inset 0 1px 1px rgba(255, 255, 255, 0.1);
-  --glass-filter: saturate(120%) blur(40px);
+  --glass-filter: saturate(118%) blur(16px);
   --panel-border: var(--glass-border);
   --panel-bg: var(--glass-panel-bg);
   --panel-shadow: var(--glass-shadow);
@@ -187,6 +194,7 @@
   --list-danger-text: #e78f8a;
   --surface-border-gradient: linear-gradient(180deg, rgba(255, 255, 255, 0.06) 0%, rgba(68, 68, 68, 0.9) 100%);
   --surface-card-fill: rgba(36, 36, 36, 0.85);
+  --panel-solid-fill: #242424;
   --surface-button-fill: rgba(55, 56, 60, 0.85);
   --button-active-border: rgba(156, 165, 181, 0.15);
   --button-active-fill: #68778B;
@@ -231,11 +239,11 @@
 :root[data-theme="dark"] .utility-page-shell .utility-panel > .card,
 :root[data-theme="dark"] .caption-settings-shell > .card,
 :root[data-theme="dark"] .dialog-panel {
-  background: var(--panel-bg);
-  border: var(--panel-border);
+  background: var(--panel-solid-fill);
+  border: 1px solid var(--glass-edge-color);
   box-shadow: var(--panel-shadow);
-  -webkit-backdrop-filter: var(--glass-filter);
-  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
 }
 
 :root[data-theme="dark"] .top-icon-button,
@@ -637,6 +645,18 @@ button {
   border-left-color: rgba(247, 249, 245, 0.22);
 }
 
+.bottom-status-bar.status-contrast-dark .bottom-status-item span,
+.bottom-status-bar.status-contrast-dark .bottom-status-item strong,
+.bottom-status-bar.status-contrast-dark .bottom-status-title-en,
+.bottom-status-bar.status-contrast-dark .bottom-status-title-zh {
+  color: rgba(66, 73, 86, 0.96);
+  text-shadow: 0 1px 2px rgba(255, 255, 255, 0.2);
+}
+
+.bottom-status-bar.status-contrast-dark .bottom-status-item + .bottom-status-item {
+  border-left-color: rgba(66, 73, 86, 0.2);
+}
+
 .dialog-backdrop {
   position: fixed;
   inset: 0;
@@ -668,14 +688,12 @@ button {
   gap: 14px;
   width: min(420px, 100%);
   padding: 20px;
-  border: var(--surface-border-width) solid transparent;
+  border: 1px solid var(--glass-edge-color);
   border-radius: 36px;
-  background:
-    var(--glass-panel-bg) padding-box,
-    var(--surface-border-gradient) border-box;
+  background: var(--panel-solid-fill);
   box-shadow: var(--panel-shadow);
-  -webkit-backdrop-filter: var(--glass-filter);
-  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
   opacity: 0;
   transform: translateY(12px) scale(0.6);
   transition:
@@ -1579,15 +1597,13 @@ label span,
 
 .card {
   min-width: 0;
-  border: var(--surface-border-width) solid transparent;
+  border: 1px solid var(--glass-edge-color);
   border-radius: var(--panel-radius);
   padding: 16px;
-  background:
-    var(--glass-panel-bg) padding-box,
-    var(--surface-border-gradient) border-box;
+  background: var(--panel-solid-fill);
   box-shadow: var(--panel-shadow);
-  -webkit-backdrop-filter: var(--glass-filter);
-  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
 }
 
 .card-head,
@@ -1866,14 +1882,12 @@ textarea::-webkit-resizer {
   overflow: hidden;
   gap: 10px;
   padding: 16px;
-  border: var(--surface-border-width) solid transparent;
+  border: 1px solid var(--glass-edge-color);
   border-radius: var(--list-panel-radius);
-  background:
-    var(--glass-panel-bg) padding-box,
-    var(--surface-border-gradient) border-box;
+  background: var(--panel-solid-fill);
   box-shadow: var(--panel-shadow);
-  -webkit-backdrop-filter: var(--glass-filter);
-  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
   color: var(--list-muted);
   font-family: var(--list-font);
 }
@@ -3388,15 +3402,13 @@ textarea::-webkit-resizer {
 .global-tags-card {
   gap: 10px;
   padding: 16px;
-  border: var(--surface-border-width) solid transparent;
+  border: 1px solid var(--glass-edge-color);
   border-radius: var(--list-panel-radius);
-  background:
-    var(--glass-panel-bg) padding-box,
-    var(--surface-border-gradient) border-box;
+  background: var(--panel-solid-fill);
   color: var(--list-muted);
   box-shadow: var(--panel-shadow);
-  -webkit-backdrop-filter: var(--glass-filter);
-  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
   font-family: var(--list-font);
 }
 
@@ -3900,7 +3912,6 @@ textarea::-webkit-resizer {
   gap: var(--layout-gap);
   height: 100%;
   min-height: 0;
-  isolation: isolate;
   overflow: visible;
   padding: 16px;
   border-radius: var(--panel-radius);
@@ -3911,7 +3922,7 @@ textarea::-webkit-resizer {
   grid-template-columns: 44px var(--utility-panel-visible-width);
   grid-template-rows: minmax(0, 1fr);
   align-content: stretch;
-  z-index: 20;
+  z-index: 0;
   padding: 0;
   background: transparent;
   border: 0;
@@ -3922,10 +3933,12 @@ textarea::-webkit-resizer {
 
 .workbench-shell:not(.utility-open) .utility-page-shell {
   grid-template-columns: 44px 0px;
+  z-index: 2;
 }
 
 .workbench-shell.utility-open .utility-page-shell {
   --utility-panel-visible-width: max(0px, calc(var(--left-panel-width) - var(--layout-gap)));
+  z-index: 0;
 }
 
 .utility-page-shell .side-panel-head {
@@ -3992,6 +4005,8 @@ textarea::-webkit-resizer {
   opacity: 1;
   visibility: visible;
   transform: translateX(0);
+  overflow: visible;
+  overflow-clip-margin: 32px;
   transition:
     width var(--side-panel-duration) var(--side-panel-ease),
     opacity 260ms cubic-bezier(0.16, 1, 0.3, 1) 190ms,
@@ -4054,14 +4069,22 @@ textarea::-webkit-resizer {
   width: var(--utility-panel-visible-width);
   min-width: 0;
   min-height: 0;
-  contain: layout;
   overflow: hidden;
   padding: 0;
   margin: 0;
   position: relative;
   z-index: 2;
   display: none;
-  transition: width var(--side-panel-duration) var(--side-panel-ease);
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateX(-16px);
+  will-change: opacity, transform, width;
+  transition:
+    width var(--side-panel-duration) var(--side-panel-ease),
+    opacity 180ms cubic-bezier(0.16, 1, 0.3, 1),
+    transform 180ms cubic-bezier(0.16, 1, 0.3, 1),
+    visibility 0s linear 180ms;
 }
 
 .utility-page-shell .utility-panel.active {
@@ -4070,8 +4093,17 @@ textarea::-webkit-resizer {
 }
 
 .workbench-shell.utility-open .utility-page-shell .utility-panel.active {
+  pointer-events: auto;
+  opacity: 1;
+  visibility: visible;
+  transform: translateX(0);
   overflow: visible;
   overflow-clip-margin: 32px;
+  transition:
+    width var(--side-panel-duration) var(--side-panel-ease),
+    opacity 260ms cubic-bezier(0.16, 1, 0.3, 1) 190ms,
+    transform 260ms cubic-bezier(0.16, 1, 0.3, 1) 190ms,
+    visibility 0s linear 0s;
 }
 
 .workbench-shell:not(.utility-open) .utility-page-shell .utility-panel.active {
@@ -4095,7 +4127,6 @@ textarea::-webkit-resizer {
   box-shadow: var(--panel-shadow);
   -webkit-backdrop-filter: saturate(135%) blur(var(--side-panel-blur));
   backdrop-filter: saturate(135%) blur(var(--side-panel-blur));
-  contain: layout paint style;
   transition:
     background-color var(--side-panel-duration) var(--side-panel-ease),
     border-color var(--side-panel-duration) var(--side-panel-ease);
@@ -4104,8 +4135,6 @@ textarea::-webkit-resizer {
 .workbench-shell.side-panel-animating .utility-page-shell .utility-panel>.card,
 .workbench-shell.side-panel-animating .caption-settings-shell>.card {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
-  -webkit-backdrop-filter: none;
-  backdrop-filter: none;
 }
 
 .workbench-shell:not(.utility-open) .utility-page-shell .utility-panel>.card,
@@ -4125,6 +4154,11 @@ textarea::-webkit-resizer {
 .caption-settings-shell>.card {
   width: var(--right-panel-width);
   height: 100%;
+}
+
+.workbench-layout {
+  position: relative;
+  z-index: 1;
 }
 
 .workbench-shell.utility-open .utility-page-shell .utility-panel>.card {
@@ -4807,22 +4841,19 @@ textarea::-webkit-resizer {
 .caption-settings-shell>.card {
   gap: 10px;
   padding: 16px;
-  border: var(--surface-border-width) solid transparent;
+  border: 1px solid var(--glass-edge-color);
   border-radius: var(--list-panel-radius);
-  background:
-    var(--glass-panel-bg) padding-box,
-    var(--surface-border-gradient) border-box;
+  background: var(--panel-solid-fill);
   color: var(--list-muted);
   box-shadow: var(--panel-shadow);
-  -webkit-backdrop-filter: var(--glass-filter);
-  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  contain: none;
 }
 
 .workbench-shell.side-panel-animating .utility-page-shell .utility-panel>.card,
 .workbench-shell.side-panel-animating .caption-settings-shell>.card {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
-  -webkit-backdrop-filter: none;
-  backdrop-filter: none;
 }
 
 .workbench-shell:not(.utility-open) .utility-page-shell .utility-panel>.card,
