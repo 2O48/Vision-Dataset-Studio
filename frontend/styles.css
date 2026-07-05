@@ -22,7 +22,7 @@
   --warn: #9b6b18;
   --danger: #da4b44;
   --shadow: none;
-  --glass-panel-bg: linear-gradient(180deg, rgba(249, 249, 249, 0.5) 0%, rgba(238, 238, 238, 0.5) 100%);
+  --glass-panel-bg: linear-gradient(180deg, rgba(249, 249, 249, 0.8) 0%, rgba(238, 238, 238, 0.8) 100%);
   --glass-control-bg: linear-gradient(180deg, rgba(249, 249, 249, 0.4) 0%, rgba(238, 238, 238, 0.4) 100%);
   --glass-control-bg-hover: linear-gradient(180deg, rgba(226, 231, 238, 0.54) 0%, rgba(214, 220, 229, 0.54) 100%);
   --glass-panel-fill: rgba(248, 250, 252, 0.34);
@@ -34,7 +34,7 @@
   --glass-control-shadow-hover: 0 4px 16px rgba(0, 0, 0, 0.08), inset 0 1px 1px rgba(255, 255, 255, 0.62);
   --control-top-highlight: inset 0 1px 1px rgba(255, 255, 255, 0.32);
   --control-top-highlight-soft: inset 0 1px 1px rgba(255, 255, 255, 0.22);
-  --glass-filter: saturate(132%) blur(16px);
+  --glass-filter: var(--glass-surface-filter);
   --panel-border: var(--glass-border);
   --panel-bg: var(--glass-panel-bg);
   --panel-shadow: var(--glass-shadow);
@@ -101,7 +101,25 @@
   --workbench-left-rail-gap: var(--layout-gap);
   --side-panel-duration: 0.5s;
   --side-panel-ease: cubic-bezier(0.16, 1, 0.3, 1);
-  --side-panel-blur: 14px;
+  --side-panel-blur: 10px;
+  --panel-glass-filter: var(--glass-surface-filter);
+  --panel-visual-bg: var(--glass-surface-bg);
+  --panel-visual-border: var(--glass-surface-border);
+  --panel-visual-shadow: var(--glass-surface-shadow);
+  --panel-visual-filter: var(--glass-surface-filter);
+  --panel-visual-radius: var(--list-panel-radius);
+  --panel-inner-bg: var(--glass-inner-bg);
+  --panel-inner-bg-strong: var(--glass-inner-bg);
+  --panel-inner-bg-active: var(--glass-inner-bg-active);
+  --panel-inner-filter: var(--glass-surface-filter);
+  --glass-surface-bg: rgba(248, 250, 252, 0.72);
+  --glass-surface-bg-active: rgba(222, 226, 233, 0.78);
+  --glass-surface-border: 1px solid rgba(255, 255, 255, 0.68);
+  --glass-surface-shadow: 0 18px 48px rgba(14, 17, 22, 0.16);
+  --glass-surface-filter: saturate(128%) blur(8px);
+  --glass-surface-highlight: rgba(255, 255, 255, 0.42);
+  --glass-inner-bg: rgba(255, 255, 252, 0.38);
+  --glass-inner-bg-active: rgba(222, 226, 233, 0.62);
   --control-bg: rgba(255, 255, 252, 0.5);
   --control-bg-strong: rgba(255, 255, 252, 0.62);
   --control-border: rgba(var(--emphasis-rgb), 0.09);
@@ -168,7 +186,7 @@
   --ok: #68778b;
   --warn: #c39e5c;
   --danger: #da4b44;
-  --glass-panel-bg: linear-gradient(180deg, rgba(36, 36, 36, 0.78) 0%, rgba(36, 36, 36, 0.78) 100%);
+  --glass-panel-bg: linear-gradient(180deg, rgba(36, 36, 36, 0.8) 0%, rgba(36, 36, 36, 0.8) 100%);
   --glass-control-bg: linear-gradient(180deg, rgba(47, 48, 52, 0.72) 0%, rgba(41, 42, 46, 0.72) 100%);
   --glass-control-bg-hover: linear-gradient(180deg, rgba(56, 58, 63, 0.8) 0%, rgba(47, 49, 54, 0.8) 100%);
   --glass-panel-fill: rgba(19, 24, 31, 0.34);
@@ -180,10 +198,26 @@
   --glass-control-shadow-hover: 0 4px 12px rgba(0, 0, 0, 0.16), inset 0 1px 1px rgba(255, 255, 255, 0.12);
   --control-top-highlight: inset 0 1px 1px rgba(255, 255, 255, 0.16);
   --control-top-highlight-soft: inset 0 1px 1px rgba(255, 255, 255, 0.1);
-  --glass-filter: saturate(118%) blur(16px);
+  --glass-filter: var(--glass-surface-filter);
   --panel-border: var(--glass-border);
   --panel-bg: var(--glass-panel-bg);
   --panel-shadow: var(--glass-shadow);
+  --panel-visual-bg: var(--glass-surface-bg);
+  --panel-visual-border: var(--glass-surface-border);
+  --panel-visual-shadow: var(--glass-surface-shadow);
+  --panel-visual-filter: var(--glass-surface-filter);
+  --panel-inner-bg: var(--glass-inner-bg);
+  --panel-inner-bg-strong: var(--glass-inner-bg);
+  --panel-inner-bg-active: var(--glass-inner-bg-active);
+  --panel-inner-filter: var(--glass-surface-filter);
+  --glass-surface-bg: rgba(36, 36, 36, 0.72);
+  --glass-surface-bg-active: rgba(52, 56, 61, 0.78);
+  --glass-surface-border: 1px solid rgba(168, 180, 198, 0.22);
+  --glass-surface-shadow: 0 22px 58px rgba(0, 0, 0, 0.48);
+  --glass-surface-filter: saturate(128%) blur(8px);
+  --glass-surface-highlight: rgba(255, 255, 255, 0.16);
+  --glass-inner-bg: rgba(41, 42, 46, 0.38);
+  --glass-inner-bg-active: rgba(52, 56, 61, 0.62);
   --list-muted: #9ca4b3;
   --list-heading: #dee2e9;
   --list-border: rgba(156, 165, 181, 0.15);
@@ -235,9 +269,6 @@
   --scrollbar-thumb-border: rgba(20, 20, 20, 0.78);
 }
 
-:root[data-theme="dark"] .card,
-:root[data-theme="dark"] .utility-page-shell .utility-panel > .card,
-:root[data-theme="dark"] .caption-settings-shell > .card,
 :root[data-theme="dark"] .dialog-panel {
   background: var(--panel-solid-fill);
   border: 1px solid var(--glass-edge-color);
@@ -427,6 +458,19 @@ body {
   color: var(--ink);
   font-family: "-apple-system-body", "ui-sans-serif", "-apple-system", "HarmonyOS Sans SC", "SF Pro", "Pingfang SC", "system-ui", "Segoe UI", Helvetica, "Apple Color Emoji", Arial, sans-serif, "Segoe UI Emoji", "Segoe UI Symbol";
   cursor: var(--cursor-default);
+}
+
+html.vds-tauri-launcher,
+html.vds-tauri-launcher body {
+  background-color: transparent;
+}
+
+html.vds-tauri-launcher body {
+  background-image: var(--app-wallpaper-image);
+}
+
+html.vds-tauri-launcher[data-wallpaper="none"] body {
+  background-image: none;
 }
 
 .html5-dragging,
@@ -666,20 +710,28 @@ button {
   padding: 24px;
   background: rgba(0, 0, 0, 0.36);
   opacity: 0;
+  visibility: hidden;
   pointer-events: none;
-  transition: opacity 180ms cubic-bezier(0.16, 1, 0.3, 1);
+  transition:
+    opacity 180ms cubic-bezier(0.16, 1, 0.3, 1),
+    visibility 0s linear 180ms;
 }
 
 .dialog-backdrop[aria-hidden="true"] {
-  display: none;
+  visibility: hidden;
 }
 
 .dialog-backdrop.dialog-open {
   opacity: 1;
+  visibility: visible;
   pointer-events: auto;
+  transition:
+    opacity 180ms cubic-bezier(0.16, 1, 0.3, 1),
+    visibility 0s linear 0s;
 }
 
 .dialog-backdrop.dialog-closing {
+  visibility: visible;
   pointer-events: none;
 }
 
@@ -699,7 +751,7 @@ button {
   transition:
     opacity 180ms cubic-bezier(0.16, 1, 0.3, 1),
     transform 220ms cubic-bezier(0.16, 1, 0.3, 1);
-  will-change: opacity, transform;
+  will-change: opacity, transform, backdrop-filter;
 }
 
 .dialog-backdrop.dialog-open .dialog-panel {
@@ -1884,10 +1936,10 @@ textarea::-webkit-resizer {
   padding: 16px;
   border: 1px solid var(--glass-edge-color);
   border-radius: var(--list-panel-radius);
-  background: var(--panel-solid-fill);
+  background: var(--panel-bg);
   box-shadow: var(--panel-shadow);
-  -webkit-backdrop-filter: none;
-  backdrop-filter: none;
+  -webkit-backdrop-filter: var(--panel-glass-filter);
+  backdrop-filter: var(--panel-glass-filter);
   color: var(--list-muted);
   font-family: var(--list-font);
 }
@@ -3404,11 +3456,11 @@ textarea::-webkit-resizer {
   padding: 16px;
   border: 1px solid var(--glass-edge-color);
   border-radius: var(--list-panel-radius);
-  background: var(--panel-solid-fill);
+  background: var(--panel-bg);
   color: var(--list-muted);
   box-shadow: var(--panel-shadow);
-  -webkit-backdrop-filter: none;
-  backdrop-filter: none;
+  -webkit-backdrop-filter: var(--panel-glass-filter);
+  backdrop-filter: var(--panel-glass-filter);
   font-family: var(--list-font);
 }
 
@@ -4043,9 +4095,9 @@ textarea::-webkit-resizer {
   overflow-clip-margin: 32px;
 }
 
-.workbench-shell:not(.utility-open) .utility-page-shell .side-panel-head,
-.workbench-shell:not(.utility-open) .utility-page-shell .utility-panel>.card>*,
-.workbench-shell:not(.caption-settings-open) .caption-settings-shell>.card>* {
+.workbench-shell:not(.side-panel-animating):not(.utility-open) .utility-page-shell .side-panel-head,
+.workbench-shell:not(.side-panel-animating):not(.utility-open) .utility-page-shell .utility-panel>.card>*,
+.workbench-shell:not(.side-panel-animating):not(.caption-settings-open) .caption-settings-shell>.card>* {
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
@@ -4137,8 +4189,8 @@ textarea::-webkit-resizer {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
 }
 
-.workbench-shell:not(.utility-open) .utility-page-shell .utility-panel>.card,
-.workbench-shell:not(.caption-settings-open) .caption-settings-shell>.card {
+.workbench-shell:not(.side-panel-animating):not(.utility-open) .utility-page-shell .utility-panel>.card,
+.workbench-shell:not(.side-panel-animating):not(.caption-settings-open) .caption-settings-shell>.card {
   content-visibility: hidden;
   contain-intrinsic-size: 360px 720px;
   box-shadow: none;
@@ -4170,8 +4222,8 @@ textarea::-webkit-resizer {
 .utility-page-shell .utility-tab {
   width: 40px;
   min-width: 40px;
-  min-height: 112px;
-  padding: 10px 6px;
+  min-height: 84px;
+  padding: 8px 6px;
   writing-mode: vertical-rl;
   text-orientation: sideways;
   transform: none;
@@ -4843,21 +4895,23 @@ textarea::-webkit-resizer {
   padding: 16px;
   border: 1px solid var(--glass-edge-color);
   border-radius: var(--list-panel-radius);
-  background: var(--panel-solid-fill);
+  background: var(--panel-bg);
   color: var(--list-muted);
   box-shadow: var(--panel-shadow);
-  -webkit-backdrop-filter: none;
-  backdrop-filter: none;
+  -webkit-backdrop-filter: var(--panel-glass-filter);
+  backdrop-filter: var(--panel-glass-filter);
   contain: none;
 }
 
 .workbench-shell.side-panel-animating .utility-page-shell .utility-panel>.card,
 .workbench-shell.side-panel-animating .caption-settings-shell>.card {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  -webkit-backdrop-filter: var(--panel-glass-filter);
+  backdrop-filter: var(--panel-glass-filter);
 }
 
-.workbench-shell:not(.utility-open) .utility-page-shell .utility-panel>.card,
-.workbench-shell:not(.caption-settings-open) .caption-settings-shell>.card {
+.workbench-shell:not(.side-panel-animating):not(.utility-open) .utility-page-shell .utility-panel>.card,
+.workbench-shell:not(.side-panel-animating):not(.caption-settings-open) .caption-settings-shell>.card {
   content-visibility: hidden;
   contain-intrinsic-size: 360px 720px;
   box-shadow: none;
@@ -4868,6 +4922,42 @@ textarea::-webkit-resizer {
 .workbench-shell.utility-open .utility-page-shell .utility-panel>.card {
   border-radius: var(--list-panel-radius);
   padding: 16px;
+}
+
+.panel-visual-side,
+.utility-page-shell .utility-panel>.card,
+.caption-settings-shell>.card {
+  overflow: hidden;
+  contain: none;
+}
+
+.panel-visual-center,
+.list-card,
+.viewer-card,
+.edit-card,
+.global-tags-card {
+  overflow: hidden;
+}
+
+.workbench-shell.side-panel-animating .panel-visual-side,
+.workbench-shell.side-panel-animating .utility-page-shell .utility-panel>.card,
+.workbench-shell.side-panel-animating .caption-settings-shell>.card {
+  box-shadow: var(--panel-visual-shadow);
+}
+
+.workbench-shell:not(.side-panel-animating):not(.utility-open) .utility-page-shell .panel-visual-side,
+.workbench-shell:not(.side-panel-animating):not(.utility-open) .utility-page-shell .utility-panel>.card,
+.workbench-shell:not(.side-panel-animating):not(.caption-settings-open) .caption-settings-shell>.card {
+  content-visibility: hidden;
+  contain-intrinsic-size: 360px 720px;
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+.workbench-shell.side-panel-opening .panel-visual-side,
+.workbench-shell.side-panel-closing .panel-visual-side {
+  will-change: width, opacity;
 }
 
 .utility-page-shell .card-kicker,
@@ -5689,6 +5779,256 @@ textarea::-webkit-resizer {
     var(--paper);
 }
 
+.dialog-backdrop {
+  background: rgba(0, 0, 0, 0.24);
+}
+
+.custom-select-option,
+.model-picker-option,
+.model-picker-empty,
+.item-context-menu button,
+.wallpaper-option {
+  background-color: transparent;
+  background-image: none;
+}
+
+/* Final glass pass: every panel, menu, and dialog uses the same surface recipe. */
+.utility-page-shell .utility-panel>.card,
+.caption-settings-shell>.card,
+.list-card,
+.viewer-card,
+.edit-card,
+.global-tags-card {
+  position: relative;
+  isolation: isolate;
+  z-index: 1;
+  border: var(--glass-surface-border);
+  background-color: var(--glass-surface-bg);
+  background-image: none;
+  box-shadow: var(--glass-surface-shadow);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  transform: translateZ(0);
+}
+
+.dialog-panel,
+:root[data-theme="dark"] .dialog-panel,
+.item-context-menu,
+.custom-select-menu,
+.model-picker-menu,
+.wallpaper-menu {
+  isolation: isolate;
+  border: var(--glass-surface-border);
+  background: var(--glass-surface-bg);
+  background-image: none;
+  box-shadow: var(--glass-surface-shadow);
+  -webkit-backdrop-filter: var(--glass-surface-filter);
+  backdrop-filter: var(--glass-surface-filter);
+}
+
+.dialog-panel {
+  position: relative;
+  overflow: hidden;
+}
+
+.command-bar>.command-top {
+  border: 0;
+  background: transparent;
+  background-image: none;
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+.utility-page-shell .utility-panel>.card::before,
+.caption-settings-shell>.card::before,
+.list-card::before,
+.viewer-card::before,
+.edit-card::before,
+.global-tags-card::before {
+  content: none;
+}
+
+.utility-page-shell .utility-panel>.card::after,
+.caption-settings-shell>.card::after,
+.list-card::after,
+.viewer-card::after,
+.edit-card::after,
+.global-tags-card::after {
+  content: none;
+}
+
+.utility-page-shell .utility-panel>.card,
+.caption-settings-shell>.card,
+.list-card,
+.viewer-card,
+.edit-card,
+.global-tags-card {
+  background-color: transparent;
+  background-image: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+.utility-page-shell .utility-panel>.card,
+.caption-settings-shell>.card {
+  overflow: hidden;
+}
+
+.utility-page-shell .utility-panel>.card>.panel-scroll-content,
+.caption-settings-shell>.card>.panel-scroll-content {
+  display: grid;
+  align-content: start;
+  gap: inherit;
+  width: 100%;
+  height: calc(100% + 32px);
+  min-width: 0;
+  min-height: 0;
+  max-height: calc(100% + 32px);
+  margin-block: -16px;
+  padding-block: 16px;
+  overflow: auto;
+}
+
+.utility-page-shell .utility-panel>.card>.panel-scroll-content>*,
+.caption-settings-shell>.card>.panel-scroll-content>* {
+  min-width: 0;
+}
+
+.utility-page-shell .utility-panel>.card::before,
+.caption-settings-shell>.card::before,
+.list-card::before,
+.viewer-card::before,
+.edit-card::before,
+.global-tags-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  border-radius: calc(var(--panel-visual-radius) - 1px);
+  clip-path: inset(0 round calc(var(--panel-visual-radius) - 1px));
+  background-color: var(--bg);
+  background-image: var(--app-wallpaper-image);
+  background-position: var(--glass-sample-position, center);
+  background-repeat: no-repeat;
+  background-size: var(--glass-sample-size, cover);
+  background-attachment: scroll;
+  filter: var(--glass-surface-filter);
+}
+
+.utility-page-shell .utility-panel>.card::after,
+.caption-settings-shell>.card::after,
+.list-card::after,
+.viewer-card::after,
+.edit-card::after,
+.global-tags-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  border-radius: calc(var(--panel-visual-radius) - 1px);
+  clip-path: inset(0 round calc(var(--panel-visual-radius) - 1px));
+  background: var(--glass-surface-bg);
+  box-shadow: inset 0 1px 1px var(--glass-surface-highlight);
+}
+
+.utility-page-shell .utility-panel>.card>*,
+.caption-settings-shell>.card>*,
+.list-card>*,
+.viewer-card>*,
+.edit-card>*,
+.global-tags-card>* {
+  position: relative;
+  z-index: 2;
+}
+
+.workbench-shell:not(.side-panel-animating):not(.utility-open) .utility-page-shell .utility-panel>.card::before,
+.workbench-shell:not(.side-panel-animating):not(.caption-settings-open) .caption-settings-shell>.card::before,
+.workbench-shell:not(.side-panel-animating):not(.utility-open) .utility-page-shell .utility-panel>.card::after,
+.workbench-shell:not(.side-panel-animating):not(.caption-settings-open) .caption-settings-shell>.card::after {
+  content: none;
+}
+
+.workbench-shell:not(.side-panel-animating):not(.utility-open) .utility-page-shell .utility-panel>.card,
+.workbench-shell:not(.side-panel-animating):not(.caption-settings-open) .caption-settings-shell>.card {
+  background-color: transparent;
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+.list-card .item-card,
+.viewer-card .image-card,
+.edit-card .caption-editor-wrap,
+.edit-card .translated-box,
+.edit-card .chip-editor,
+.global-tags-card .global-tag-row {
+  background-color: var(--glass-inner-bg);
+  background-image: none;
+  -webkit-backdrop-filter: var(--glass-surface-filter);
+  backdrop-filter: var(--glass-surface-filter);
+  -webkit-transform: translateZ(0);
+  transform: translateZ(0);
+}
+
+.utility-page-shell .utility-inner-section,
+.utility-page-shell .folder-browser-path,
+.utility-page-shell .folder-browser-empty,
+.utility-page-shell .config-footnote,
+.utility-page-shell .export-status,
+.utility-page-shell .checkbox-row,
+.utility-page-shell .toggle-row,
+.utility-page-shell .project-card,
+.utility-page-shell .project-empty,
+.utility-page-shell .summary-row,
+.utility-page-shell .metric-tile,
+.caption-settings-shell .utility-inner-section,
+.caption-settings-shell .template-row,
+.caption-settings-shell .model-picker,
+.caption-settings-shell .caption-backend-tabs,
+.caption-settings-shell .toggle-row {
+  background-color: transparent;
+  background-image: none;
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+.list-card .item-card:hover,
+.list-card .item-card.active,
+.list-card .item-card.active.multi-selected,
+.list-card .item-card.multi-selected,
+.viewer-card .image-card.role-drop-target,
+.global-tags-card .global-tag-row:hover,
+.global-tags-card .global-tag-row.active {
+  background-color: var(--glass-inner-bg-active);
+  background-image: none;
+  -webkit-backdrop-filter: var(--glass-surface-filter);
+  backdrop-filter: var(--glass-surface-filter);
+}
+
+.edit-card .quick-tag-panel,
+.edit-card .quick-tag-grid,
+.edit-card .quick-tag-btn,
+.edit-card .quick-tag-btn:hover,
+.edit-card .quick-tag-btn:focus-visible {
+  background: transparent;
+  background-image: none;
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+.edit-card .caption-editor {
+  background: transparent;
+}
+
+.edit-card .caption-highlight-layer {
+  background: transparent;
+}
+
 @media (max-width: 1520px) {
   .command-top {
     grid-template-columns: auto minmax(300px, 1fr) minmax(232px, auto);
@@ -5958,6 +6298,8 @@ textarea::-webkit-resizer {
   }
 
   .workbench-shell.utility-open .utility-page-shell {
+    z-index: 60;
+    isolation: isolate;
     width: min(100%, calc(44px + var(--layout-gap) + 400px));
     grid-template-columns: 44px 400px;
     pointer-events: auto;
@@ -5983,7 +6325,7 @@ textarea::-webkit-resizer {
   .utility-page-shell .utility-tab {
     width: 40px;
     min-width: 40px;
-    min-height: 112px;
+    min-height: 84px;
     writing-mode: vertical-rl;
     text-orientation: sideways;
     transform: none;

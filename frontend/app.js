@@ -25,6 +25,11 @@ import { createBrowserModule } from "./frontend/web_browser.js";
 import { createShellModule } from "./frontend/web_shell.js";
 import { createBootstrapModule } from "./frontend/web_bootstrap.js";
 
+const launcherParams = new URLSearchParams(window.location.search);
+if (window.__TAURI__ || window.__TAURI_INTERNALS__ || launcherParams.get("vds_launcher") === "1") {
+  document.documentElement.classList.add("vds-tauri-launcher");
+}
+
 const state = {
   workspace: null,
   itemStats: null,

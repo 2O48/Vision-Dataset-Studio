@@ -359,8 +359,13 @@ fn apply_launcher_window_style(window: &tauri::WebviewWindow) {
     apply_platform_window_style(window);
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 fn apply_platform_window_style(_window: &tauri::WebviewWindow) {}
+
+#[cfg(target_os = "windows")]
+fn apply_platform_window_style(window: &tauri::WebviewWindow) {
+    let _ = window_vibrancy::apply_acrylic(window, Some((238, 238, 238, 0)));
+}
 
 #[cfg(target_os = "macos")]
 fn apply_platform_window_style(window: &tauri::WebviewWindow) {
@@ -423,6 +428,13 @@ fn apply_platform_window_style(window: &tauri::WebviewWindow) {
         place_standard_button(ns_window, 1, 38.0);
         place_standard_button(ns_window, 2, 58.0);
     }
+
+    let _ = window_vibrancy::apply_vibrancy(
+        window,
+        window_vibrancy::NSVisualEffectMaterial::UnderWindowBackground,
+        Some(window_vibrancy::NSVisualEffectState::Active),
+        Some(CORNER_RADIUS),
+    );
 
     unsafe {
         if let Ok(ns_window_ptr) = window.ns_window() {
