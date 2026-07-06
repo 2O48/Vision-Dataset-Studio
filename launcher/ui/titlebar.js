@@ -341,13 +341,13 @@
 	      }
       html.vds-launcher-frameless .top-caption-progress,
       html.vds-launcher-frameless .top-caption-progress-status {
-        cursor: pointer;
+        cursor: var(--cursor-pointer, pointer);
       }
       html.vds-launcher-frameless .command-bar,
       html.vds-launcher-frameless .command-top,
       html.vds-launcher-frameless .command-run-actions,
       html.vds-launcher-frameless .command-caption {
-        cursor: default;
+        cursor: var(--cursor-default, default);
       }
     `;
     document.head.appendChild(style);

@@ -199,12 +199,16 @@
 	      }
 
       .terminal-shell {
+        position: relative;
         min-height: 0;
         padding: 0;
+        overflow: hidden;
         background: var(--bg);
       }
 
       .terminal {
+        position: absolute;
+        inset: 0;
         width: 100%;
         height: 100%;
         margin: 0;
@@ -221,6 +225,11 @@
         white-space: pre-wrap;
         user-select: text;
         -webkit-user-select: text;
+      }
+
+      .terminal-buffer {
+        visibility: hidden;
+        pointer-events: none;
       }
     </style>
   </head>
@@ -241,6 +250,7 @@
     </header>
     <main class="terminal-shell">
       <pre class="terminal" id="terminal">loading...</pre>
+      <pre class="terminal terminal-buffer" id="terminalBuffer" aria-hidden="true"></pre>
     </main>
 	    <script>
 	      (function () {
@@ -250,9 +260,63 @@
         }
 
 	        const terminal = document.getElementById("terminal");
+        const terminalBuffer = document.getElementById("terminalBuffer");
 	        const themeStyle = document.createElement("style");
 	        themeStyle.id = "terminal-theme-bridge";
 	        document.head.appendChild(themeStyle);
+        let displayLogs = "";
+        let latestLogs = "";
+        let selectionPinned = false;
+        let terminalPointerActive = false;
+        let pinnedWasAtBottom = true;
+
+        function hasActiveTerminalSelection() {
+          const selection = window.getSelection && window.getSelection();
+          if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return false;
+          const anchorNode = selection.anchorNode;
+          const focusNode = selection.focusNode;
+          return Boolean(
+            (anchorNode && terminal.contains(anchorNode)) ||
+            (focusNode && terminal.contains(focusNode))
+          );
+        }
+
+        function isScrolledToBottom(element) {
+          return element.scrollTop + element.clientHeight >= element.scrollHeight - 24;
+        }
+
+        function writeLogs(element, nextLogs, shouldStick) {
+          element.textContent = nextLogs;
+          if (shouldStick) element.scrollTop = element.scrollHeight;
+        }
+
+        function syncBufferLogs(nextLogs) {
+          if (!terminalBuffer || terminalBuffer.textContent === nextLogs) return;
+          const shouldStick = isScrolledToBottom(terminalBuffer);
+          writeLogs(terminalBuffer, nextLogs, shouldStick);
+        }
+
+        function syncDisplayLogs(nextLogs, { forceStick = false } = {}) {
+          if (nextLogs === displayLogs) return;
+          const shouldStick = forceStick || isScrolledToBottom(terminal);
+          writeLogs(terminal, nextLogs, shouldStick);
+          displayLogs = nextLogs;
+        }
+
+        function releaseSelectionPin() {
+          selectionPinned = false;
+          terminalPointerActive = false;
+          syncDisplayLogs(latestLogs || "[launcher] no logs yet", { forceStick: pinnedWasAtBottom });
+        }
+
+        function syncSelectionPinned() {
+          if (hasActiveTerminalSelection()) {
+            selectionPinned = true;
+            return;
+          }
+          if (terminalPointerActive) return;
+          releaseSelectionPin();
+        }
 
         function internalsInvoke(command, args) {
           const internals = window.__TAURI_INTERNALS__;
@@ -305,14 +369,56 @@
 
         async function refresh() {
           try {
-            const logs = await tauriInvoke("launcher_terminal_logs");
-            const shouldStick = terminal.scrollTop + terminal.clientHeight >= terminal.scrollHeight - 24;
-            terminal.textContent = logs || "[launcher] no logs yet";
-            if (shouldStick) terminal.scrollTop = terminal.scrollHeight;
+            latestLogs = (await tauriInvoke("launcher_terminal_logs")) || "[launcher] no logs yet";
+            syncBufferLogs(latestLogs);
+            if (selectionPinned || hasActiveTerminalSelection()) {
+              selectionPinned = true;
+              return;
+            }
+            syncDisplayLogs(latestLogs);
           } catch (error) {
-            terminal.textContent = "[launcher] failed to load logs\n" + String(error);
+            latestLogs = "[launcher] failed to load logs\n" + String(error);
+            syncBufferLogs(latestLogs);
+            if (selectionPinned || hasActiveTerminalSelection()) {
+              selectionPinned = true;
+              return;
+            }
+            syncDisplayLogs(latestLogs);
           }
         }
+
+        terminal.addEventListener("pointerdown", function (event) {
+          if (event.button !== 0) return;
+          terminalPointerActive = true;
+          pinnedWasAtBottom = isScrolledToBottom(terminal);
+          selectionPinned = true;
+        });
+
+        document.addEventListener("pointerup", function () {
+          terminalPointerActive = false;
+          window.setTimeout(syncSelectionPinned, 0);
+        });
+
+        terminal.addEventListener("mouseup", function () {
+          window.setTimeout(syncSelectionPinned, 0);
+        });
+
+        terminal.addEventListener("keyup", function () {
+          window.setTimeout(syncSelectionPinned, 0);
+        });
+
+        document.addEventListener("selectionchange", function () {
+          if (hasActiveTerminalSelection()) {
+            selectionPinned = true;
+            return;
+          }
+          window.setTimeout(syncSelectionPinned, 0);
+        });
+
+        document.addEventListener("pointerdown", function (event) {
+          if (event.target && terminal.contains(event.target)) return;
+          window.setTimeout(syncSelectionPinned, 0);
+        });
 
         async function refreshTheme() {
           try {
