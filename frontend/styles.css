@@ -5865,6 +5865,25 @@ textarea::-webkit-resizer {
   box-shadow: var(--control-top-highlight);
 }
 
+:root[data-theme="dark"] .project-tag-choice {
+  border-color: rgba(255, 255, 255, 0.28);
+  background: #111827;
+  color: #fff;
+  box-shadow: var(--control-top-highlight), 0 1px 2px rgba(12, 16, 25, 0.2);
+}
+
+:root[data-theme="dark"] .project-tag-choice:hover,
+:root[data-theme="dark"] .project-tag-choice:focus-visible {
+  border-color: rgba(255, 255, 255, 0.46);
+}
+
+:root[data-theme="dark"] .project-tag-choice.active {
+  border-color: #fff;
+  background: #fff;
+  color: #111827;
+  box-shadow: 0 1px 2px rgba(12, 16, 25, 0.2);
+}
+
 :root[data-theme="dark"] .viewer-pixels-field {
   border-color: var(--list-border);
   background: var(--glass-control-bg);
@@ -6109,9 +6128,11 @@ textarea::-webkit-resizer {
   backdrop-filter: var(--glass-surface-filter);
 }
 
-.dialog-panel {
+.dialog-panel,
+:root[data-theme="dark"] .dialog-panel {
   position: relative;
   overflow: hidden;
+  box-shadow: var(--glass-surface-shadow), inset 0 1px 1px var(--glass-surface-highlight);
 }
 
 .command-bar>.command-top {
@@ -6269,7 +6290,6 @@ textarea::-webkit-resizer {
 .utility-page-shell .export-status,
 .utility-page-shell .checkbox-row,
 .utility-page-shell .toggle-row,
-.utility-page-shell .project-card,
 .utility-page-shell .project-empty,
 .utility-page-shell .summary-row,
 .utility-page-shell .metric-tile,
@@ -6283,6 +6303,13 @@ textarea::-webkit-resizer {
   box-shadow: none;
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
+}
+
+.utility-page-shell .project-card {
+  background-color: var(--glass-inner-bg);
+  background-image: none;
+  -webkit-backdrop-filter: var(--glass-surface-filter);
+  backdrop-filter: var(--glass-surface-filter);
 }
 
 .list-card .item-card:hover,

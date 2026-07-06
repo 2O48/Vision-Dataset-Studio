@@ -484,6 +484,40 @@ class ProjectStore:
         result = self._git(project_dir, "status", "--porcelain", check=True)
         return bool(result.stdout.strip())
 
+    def _git_changed_paths(self, project_dir: Path) -> set[str]:
+        result = self._git(project_dir, "status", "--porcelain", check=False)
+        paths: set[str] = set()
+        if result.returncode != 0:
+            return paths
+        for line in result.stdout.splitlines():
+            if len(line) < 4:
+                continue
+            raw = line[3:].strip().strip('"').replace("\\", "/")
+            if " -> " in raw:
+                paths.update(part.strip().strip('"').replace("\\", "/") for part in raw.split(" -> ") if part.strip())
+            elif raw:
+                paths.add(raw)
+        return paths
+
+    def _has_version_content_changes(self, project_dir: Path) -> bool:
+        for path in self._git_changed_paths(project_dir):
+            if path.startswith(("assets/", "captions/")):
+                return True
+            if path == "state/labels.json":
+                return True
+        return False
+
+    def _restore_non_version_save_changes(self, project_dir: Path) -> None:
+        paths = [
+            "project.json",
+            "manifest.json",
+            "workspace.json",
+            "state/progress.json",
+            "state/caption_config.json",
+            "state/ui_state.json",
+        ]
+        self._git(project_dir, "checkout", "--", *paths, check=False)
+
     def _git_commit(self, project_dir: Path, message: str, *, allow_empty: bool = False) -> dict:
         with self._git_lock:
             self._ensure_git_repo(project_dir)
@@ -553,16 +587,17 @@ class ProjectStore:
 
     def _version_change_summary(self, project_dir: Path, commit: str, subject: str) -> str:
         subject = subject or ""
-        rollback = re.search(r"回退(?:到)?版本\s*([0-9a-fA-F]{7,40})", subject)
+        action_subject = subject.split(":", 1)[0].strip()
+        rollback = re.search(r"回退(?:到)?版本\s*([0-9a-fA-F]{7,40})", action_subject)
         if rollback:
             return f"回退到版本 {rollback.group(1)[:7]}"
-        if "回退" in subject:
+        if "回退" in action_subject:
             parent = self._commit_first_parent(project_dir, commit)
             return f"回退到版本 {parent[:7]}" if parent else "回退到历史版本"
-        fork = re.search(r"分叉(?:自)?版本\s*([0-9a-fA-F]{7,40})", subject)
+        fork = re.search(r"分叉(?:自)?版本\s*([0-9a-fA-F]{7,40})", action_subject)
         if fork:
             return f"分叉自版本 {fork.group(1)[:7]}"
-        if "分叉" in subject:
+        if "分叉" in action_subject:
             parent = self._commit_first_parent(project_dir, commit)
             return f"分叉自版本 {parent[:7]}" if parent else "分叉自历史版本"
 
@@ -876,11 +911,23 @@ class ProjectStore:
             _sync_directory_contents(staging_dir, final_project_dir)
             _remove_tree(staging_dir)
             self._cleanup_tmp_projects(project_id)
-        version = self._git_commit(
-            final_project_dir,
-            self._commit_message("提交项目版本", project_name),
-            allow_empty=True,
-        )
+
+        if overwrite_id and not self._has_version_content_changes(final_project_dir):
+            self._restore_non_version_save_changes(final_project_dir)
+            head = self._git(final_project_dir, "rev-parse", "HEAD", check=False)
+            project_meta = _read_json(public_paths["project"], project_meta)
+            workspace_state = _read_json(public_paths["workspace"], workspace_state)
+            version = {
+                "committed": False,
+                "hash": head.stdout.strip() if head.returncode == 0 else "",
+                "message": "没有检测到项目变更。",
+            }
+        else:
+            version = self._git_commit(
+                final_project_dir,
+                self._commit_message("提交项目版本", project_name),
+                allow_empty=False,
+            )
         self._refresh_index()
         return {"project": project_meta, "workspace": workspace_state, "version": version}
 
