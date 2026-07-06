@@ -25,6 +25,11 @@ import { createBrowserModule } from "./frontend/web_browser.js";
 import { createShellModule } from "./frontend/web_shell.js";
 import { createBootstrapModule } from "./frontend/web_bootstrap.js";
 
+const launcherParams = new URLSearchParams(window.location.search);
+if (window.__TAURI__ || window.__TAURI_INTERNALS__ || launcherParams.get("vds_launcher") === "1") {
+  document.documentElement.classList.add("vds-tauri-launcher");
+}
+
 const state = {
   workspace: null,
   itemStats: null,
@@ -120,6 +125,7 @@ const state = {
 let renderTags = () => {};
 let renderGlobalTags = () => {};
 let flushCaptionAutosave = async () => true;
+let updateCaptionSearchHighlight = () => {};
 const wallpaperImageCache = new Map();
 let bottomStatusContrastRaf = 0;
 const slidingToggleGroups = new Set();
@@ -632,9 +638,11 @@ function registerSlidingToggleGroup(group) {
 }
 
 function syncSlidingToggleIndicators(root = document) {
-  root.querySelectorAll(".caption-backend-tabs, .list-search-mode-toggle").forEach(registerSlidingToggleGroup);
+  root.querySelectorAll(".caption-backend-tabs, .list-search-mode-toggle, .image-preview-controls").forEach(registerSlidingToggleGroup);
   slidingToggleGroups.forEach((group) => updateSlidingToggleIndicator(group));
 }
+
+window.__vdsScheduleSlidingToggleIndicators = scheduleSlidingToggleIndicators;
 
 const themeMediaQuery = window.matchMedia?.("(prefers-color-scheme: dark)");
 
@@ -1104,6 +1112,7 @@ const editorModule = createEditorModule({
 const {
   renderPromptTemplateSelectors,
   templateById,
+  updateCaptionSearchHighlight: syncCaptionSearchHighlight,
   appendSegmentsToCaption,
   toggleQuickTags,
   renderQuickTags,
@@ -1124,6 +1133,7 @@ const {
 renderTags = editorModule.renderTags;
 renderGlobalTags = editorModule.renderGlobalTags;
 flushCaptionAutosave = editorFlushCaptionAutosave;
+updateCaptionSearchHighlight = syncCaptionSearchHighlight;
 
 const {
   renderImageProcessStatus,
@@ -1224,6 +1234,7 @@ const { restorePersistedSettings, bindSettingsPersistence, bindEvents, bootstrap
   applyProjectUiState,
   renderViewer,
   renderTags,
+  updateCaptionSearchHighlight,
   renderQuickTags,
   renderGlobalTags,
   renderFilters,

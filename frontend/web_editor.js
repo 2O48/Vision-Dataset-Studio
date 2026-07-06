@@ -1416,6 +1416,7 @@ export function createEditorModule({
     renderPromptTemplateSelectors,
     templateById,
     renderTags,
+    updateCaptionSearchHighlight,
     appendSegmentsToCaption,
     toggleQuickTags,
     renderQuickTags,

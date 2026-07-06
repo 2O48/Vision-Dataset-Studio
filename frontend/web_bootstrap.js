@@ -26,6 +26,7 @@ export function createBootstrapModule({
   applyProjectUiState,
   renderViewer,
   renderTags,
+  updateCaptionSearchHighlight,
   renderQuickTags,
   renderGlobalTags,
   renderFilters,
@@ -168,11 +169,14 @@ export function createBootstrapModule({
   }
 
   function enhanceFloatingScrollbars() {
+    const sidePanelScrollerSelector = [
+      ".utility-page-shell .utility-panel>.card>.panel-scroll-content",
+      ".caption-settings-shell>.card>.panel-scroll-content",
+    ].join(", ");
     const selector = [
-      ".utility-page-shell .utility-panel>.card",
-      ".caption-settings-shell>.card",
+      ".utility-page-shell .utility-panel>.card>.panel-scroll-content",
+      ".caption-settings-shell>.card>.panel-scroll-content",
       ".bottom-status-bar",
-      ".viewer-card",
       ".edit-card-body",
       ".item-list",
       ".item-thumb-grid",
@@ -185,11 +189,6 @@ export function createBootstrapModule({
       ".workspace-browser-list",
       ".image-preview-controls",
     ].join(", ");
-    const trimmedSelector = [
-      ".utility-page-shell .utility-panel>.card",
-      ".caption-settings-shell>.card",
-    ].join(", ");
-
     const hosts = new Set();
     let rafId = 0;
     const resizeObserver = "ResizeObserver" in window ? new ResizeObserver(() => schedule()) : null;
@@ -343,9 +342,10 @@ export function createBootstrapModule({
       const railZ = Number.isFinite(zIndex) ? Math.min(199999, zIndex + 1) : 50000;
       const borderTop = el.clientTop || 0;
       const borderLeft = el.clientLeft || 0;
-      const shouldTrimToPanelRadius = el.matches(trimmedSelector);
-      const verticalTrim = shouldTrimToPanelRadius ? 32 : 2;
-      const horizontalTrim = shouldTrimToPanelRadius ? 32 : 2;
+      const isSidePanelScroller = el.matches(sidePanelScrollerSelector);
+      const verticalTrim = isSidePanelScroller ? 32 : 2;
+      const horizontalTrim = 2;
+      const outsideInset = 6;
 
       el.dataset.fsbVertical = canScrollY ? "true" : "false";
       el.dataset.fsbHorizontal = canScrollX ? "true" : "false";
@@ -358,15 +358,13 @@ export function createBootstrapModule({
 
       if (canScrollY) {
         const railWidth = 4;
-        const railInset = 2;
-        const railBottom = canScrollX ? 8 : railInset;
         const trackTopTrim = verticalTrim;
         const trackBottomTrim = canScrollX ? Math.max(verticalTrim, horizontalTrim + railWidth) : verticalTrim;
         const trackHeight = Math.max(0, viewH - trackTopTrim - trackBottomTrim);
         const thumbHeight = Math.max(36, Math.round(trackHeight * viewH / scrollH));
         const maxTop = Math.max(0, trackHeight - thumbHeight);
         rails.vertical.style.top = `${Math.round(rect.top + borderTop + trackTopTrim)}px`;
-        rails.vertical.style.left = `${Math.round(rect.left + borderLeft + viewW - railWidth - railInset)}px`;
+        rails.vertical.style.left = `${Math.round(rect.left + borderLeft + viewW + outsideInset)}px`;
         rails.vertical.style.right = "auto";
         rails.vertical.style.bottom = "auto";
         rails.vertical.style.width = `${railWidth}px`;
@@ -382,15 +380,13 @@ export function createBootstrapModule({
 
       if (canScrollX) {
         const railHeight = 4;
-        const railInset = 2;
-        const railRight = canScrollY ? 8 : railInset;
         const trackLeftTrim = horizontalTrim;
         const trackRightTrim = canScrollY ? Math.max(horizontalTrim, verticalTrim + railHeight) : horizontalTrim;
         const trackWidth = Math.max(0, viewW - trackLeftTrim - trackRightTrim);
         const thumbWidth = Math.max(36, Math.round(trackWidth * viewW / scrollW));
         const maxLeft = Math.max(0, trackWidth - thumbWidth);
         rails.horizontal.style.left = `${Math.round(rect.left + borderLeft + trackLeftTrim)}px`;
-        rails.horizontal.style.top = `${Math.round(rect.top + borderTop + viewH - railHeight - railInset)}px`;
+        rails.horizontal.style.top = `${Math.round(rect.top + borderTop + viewH + outsideInset)}px`;
         rails.horizontal.style.right = "auto";
         rails.horizontal.style.bottom = "auto";
         rails.horizontal.style.width = `${Math.round(trackWidth)}px`;
@@ -449,6 +445,117 @@ export function createBootstrapModule({
     }, { capture: true, passive: true });
     window.addEventListener("resize", schedule, { passive: true });
     window.addEventListener("load", schedule, { once: true });
+    schedule();
+  }
+
+  function enhancePanelGlassSampling() {
+    const selector = [
+      ".utility-page-shell .utility-panel>.card",
+      ".caption-settings-shell>.card",
+      ".list-card",
+      ".viewer-card",
+      ".edit-card",
+      ".global-tags-card",
+    ].join(", ");
+    const panels = new Set();
+    const imageCache = new Map();
+    let rafId = 0;
+    let activeImageUrl = "";
+    let activeImage = null;
+
+    const cssUrlValue = (value) => {
+      const match = `${value || ""}`.match(/url\((['"]?)(.*?)\1\)/);
+      return match?.[2] || "";
+    };
+
+    const loadGlassImage = (url) => {
+      if (!url) return Promise.resolve(null);
+      if (imageCache.has(url)) return imageCache.get(url);
+      const promise = new Promise((resolve) => {
+        const image = new Image();
+        image.decoding = "async";
+        image.onload = () => resolve(image);
+        image.onerror = () => resolve(null);
+        image.src = url;
+      });
+      imageCache.set(url, promise);
+      return promise;
+    };
+
+    const visiblePanel = (panel) => {
+      if (!panel?.isConnected) return false;
+      const rect = panel.getBoundingClientRect();
+      if (rect.width <= 1 || rect.height <= 1) return false;
+      const computed = window.getComputedStyle(panel);
+      return computed.display !== "none" && computed.visibility !== "hidden";
+    };
+
+    const syncPanels = () => {
+      const computedRoot = window.getComputedStyle(document.documentElement);
+      const imageUrl = cssUrlValue(computedRoot.getPropertyValue("--app-wallpaper-image"));
+      if (imageUrl !== activeImageUrl) {
+        activeImageUrl = imageUrl;
+        activeImage = null;
+        loadGlassImage(imageUrl).then((image) => {
+          if (imageUrl !== activeImageUrl) return;
+          activeImage = image;
+          schedule();
+        });
+      }
+
+      const bodyRect = document.body.getBoundingClientRect();
+      const areaWidth = Math.max(document.body.clientWidth, document.documentElement.clientWidth, 1);
+      const areaHeight = Math.max(document.body.scrollHeight, document.body.clientHeight, window.innerHeight, 1);
+      const naturalWidth = activeImage?.naturalWidth || 0;
+      const naturalHeight = activeImage?.naturalHeight || 0;
+      const hasImage = Boolean(activeImageUrl && naturalWidth && naturalHeight);
+      const scale = hasImage ? Math.max(areaWidth / naturalWidth, areaHeight / naturalHeight) : 1;
+      const renderedWidth = hasImage ? naturalWidth * scale : areaWidth;
+      const renderedHeight = hasImage ? naturalHeight * scale : areaHeight;
+      const imageLeft = hasImage ? (areaWidth - renderedWidth) / 2 : 0;
+      const imageTop = hasImage ? (areaHeight - renderedHeight) / 2 : 0;
+
+      panels.forEach((panel) => {
+        if (!visiblePanel(panel)) return;
+        const rect = panel.getBoundingClientRect();
+        const panelLeft = rect.left - bodyRect.left;
+        const panelTop = rect.top - bodyRect.top;
+        panel.style.setProperty("--glass-sample-size", `${Math.round(renderedWidth)}px ${Math.round(renderedHeight)}px`);
+        panel.style.setProperty("--glass-sample-position", `${Math.round(imageLeft - panelLeft)}px ${Math.round(imageTop - panelTop)}px`);
+      });
+    };
+
+    const schedule = () => {
+      if (rafId) return;
+      rafId = window.requestAnimationFrame(() => {
+        rafId = 0;
+        syncPanels();
+      });
+    };
+
+    const resizeObserver = "ResizeObserver" in window ? new ResizeObserver(schedule) : null;
+    const bindPanel = (panel) => {
+      if (!panel || panels.has(panel)) return;
+      panels.add(panel);
+      resizeObserver?.observe(panel);
+    };
+
+    document.querySelectorAll(selector).forEach(bindPanel);
+    const domObserver = new MutationObserver(() => {
+      document.querySelectorAll(selector).forEach(bindPanel);
+      schedule();
+    });
+    domObserver.observe(document.body, { childList: true, subtree: true });
+
+    const rootObserver = new MutationObserver(schedule);
+    rootObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["style", "data-wallpaper", "data-theme"] });
+    [refs.workbenchShell, refs.workbenchLayout, document.body].filter(Boolean).forEach((node) => resizeObserver?.observe(node));
+    window.addEventListener("resize", schedule, { passive: true });
+    window.addEventListener("scroll", schedule, { passive: true });
+    document.addEventListener("scroll", schedule, { capture: true, passive: true });
+    document.addEventListener("transitionend", (event) => {
+      if (event.target instanceof Element && event.target.closest("#workbenchShell, .workbench-layout, .utility-page-shell, .caption-settings-shell")) schedule();
+    }, true);
     schedule();
   }
 
@@ -1167,6 +1274,15 @@ export function createBootstrapModule({
       else state.segmentQuery = value || "";
     };
     const panelQuery = (panelId) => panelId === "secondary" ? (state.secondarySegmentQuery || "") : (state.segmentQuery || "");
+    const syncCaptionSearchHighlight = (panelId) => {
+      if (panelId !== "primary") return;
+      updateCaptionSearchHighlight?.();
+      renderTags?.();
+    };
+    const syncCaptionSearchTags = (panelId) => {
+      if (panelId !== "primary") return;
+      renderTags?.();
+    };
     const syncSearchClear = (panelId) => {
       const controls = panelControls[panelId];
       if (controls?.clearButton && controls.searchInput) controls.clearButton.hidden = !controls.searchInput.value.trim();
@@ -1201,6 +1317,7 @@ export function createBootstrapModule({
       const input = panelControls[panelId]?.searchInput;
       setPanelQuery(panelId, input?.value.trim() || "");
       syncSearchClear(panelId);
+      syncCaptionSearchTags(panelId);
       refreshItems(options).catch(showError);
     };
     const scheduleSearch = (panelId) => {
@@ -1231,7 +1348,9 @@ export function createBootstrapModule({
       const input = controls.searchInput;
       if (!input) return;
       input.addEventListener("input", () => {
+        setPanelQuery(panelId, input.value.trim() || "");
         syncSearchClear(panelId);
+        syncCaptionSearchHighlight(panelId);
         scheduleSearch(panelId);
       });
       input.addEventListener("change", () => {
@@ -1278,6 +1397,7 @@ export function createBootstrapModule({
         if (nextMode === panelSearchMode(panelId)) return;
         setPanelSearchMode(panelId, nextMode);
         syncSearchMode(panelId);
+        syncCaptionSearchTags(panelId);
         refreshItems({ skipDirtyCheck: true, suppressSelectionSync: true }).catch(showError);
       });
       controls.searchMatchGroup?.addEventListener("click", (event) => {
@@ -1289,6 +1409,7 @@ export function createBootstrapModule({
         if (nextMode === panelSearchMatchMode(panelId)) return;
         setPanelSearchMatchMode(panelId, nextMode);
         syncSearchMode(panelId);
+        syncCaptionSearchTags(panelId);
         refreshItems({ skipDirtyCheck: true, suppressSelectionSync: true }).catch(showError);
       });
     });
@@ -1485,6 +1606,7 @@ export function createBootstrapModule({
 
   async function bootstrap() {
     enhanceTextareaResizers();
+    enhancePanelGlassSampling();
     restorePersistedSettings();
     bindEvents();
     bindSettingsPersistence();

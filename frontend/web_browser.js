@@ -133,6 +133,10 @@ export function createBrowserModule({
     return panelId === "secondary" ? (state.secondaryItemFolderFilter || "") : (state.itemFolderFilter || "");
   }
 
+  function effectivePanelFolderFilter(panelId = "primary") {
+    return panelSegmentQuery(panelId).trim() ? "" : panelFolderFilter(panelId);
+  }
+
   function setPanelFolderFilter(panelId, value) {
     if (panelId === "secondary") state.secondaryItemFolderFilter = value || "";
     else state.itemFolderFilter = value || "";
@@ -746,7 +750,7 @@ export function createBrowserModule({
   }
 
   function displayItemListName(name, panelId = "primary") {
-    const currentFolder = normalizeFolderPath(panelFolderFilter(panelId));
+    const currentFolder = normalizeFolderPath(effectivePanelFolderFilter(panelId));
     const fullName = displayItemName(name);
     if (!currentFolder) return fullName;
     const currentPrefix = `${currentFolder}/`;
@@ -819,10 +823,11 @@ export function createBrowserModule({
   }
 
   function filteredItems(panelId = "primary") {
-    const folder = panelFolderFilter(panelId);
+    const folder = effectivePanelFolderFilter(panelId);
+    const searchActive = Boolean(panelSegmentQuery(panelId).trim());
     const mode = normalizeThumbMode(panelThumbMode(panelId));
     const items = panelItems(panelId).filter((item) => (
-      !/^(?:result|control[1-3])$/.test(mode) || item.exists?.[mode]
+      searchActive || !/^(?:result|control[1-3])$/.test(mode) || item.exists?.[mode]
     ));
     if (!folder) return [...items];
     const prefix = `${folder}/`;
@@ -940,15 +945,16 @@ export function createBrowserModule({
   function renderFolderFilters(panel) {
     if (!panel?.folderFilters) return;
     const panelId = panel.id || "primary";
+    const activeFolder = effectivePanelFolderFilter(panelId);
     const folders = itemFolders(panelId);
-    if (panelFolderFilter(panelId) && !folders.includes(panelFolderFilter(panelId))) {
+    if (activeFolder && !folders.includes(activeFolder)) {
       setPanelFolderFilter(panelId, "");
     }
     panel.folderFilters.textContent = "";
 
     const allButton = document.createElement("button");
     allButton.type = "button";
-    allButton.className = `folder-filter-chip all${panelFolderFilter(panelId) ? "" : " active"}`;
+    allButton.className = `folder-filter-chip all${activeFolder ? "" : " active"}`;
     allButton.textContent = "全部";
     allButton.addEventListener("click", () => {
       setPanelFolderFilter(panelId, "");
@@ -987,7 +993,7 @@ export function createBrowserModule({
     for (const folder of folders) {
       const button = document.createElement("button");
       button.type = "button";
-      button.className = `folder-filter-chip${panelFolderFilter(panelId) === folder ? " active" : ""}`;
+      button.className = `folder-filter-chip${activeFolder === folder ? " active" : ""}`;
       button.dataset.folder = folder;
       button.textContent = folder;
       button.addEventListener("click", () => {
@@ -1632,6 +1638,7 @@ export function createBrowserModule({
   function renderImagePreviewControls() {
     const preview = ensureImagePreviewOverlay();
     preview.controls.textContent = "";
+    preview.controls.classList.add("sliding-toggle-host");
     preview.controls.hidden = activeControlCount() === 0;
     if (preview.controls.hidden) return;
     for (const role of existingPreviewRoles()) {
@@ -1642,6 +1649,7 @@ export function createBrowserModule({
       button.addEventListener("click", () => setImagePreviewRole(role));
       preview.controls.appendChild(button);
     }
+    window.__vdsScheduleSlidingToggleIndicators?.(preview.root);
   }
 
   function setImagePreviewRole(role) {
@@ -1662,6 +1670,7 @@ export function createBrowserModule({
     preview.controls.querySelectorAll("button[data-preview-role]").forEach((button) => {
       button.classList.toggle("active", button.dataset.previewRole === role);
     });
+    window.__vdsScheduleSlidingToggleIndicators?.(preview.root);
     updateImagePreviewLayout();
   }
 
@@ -2033,10 +2042,11 @@ export function createBrowserModule({
     for (const panel of listPanels()) {
       const panelId = panel.id || "primary";
       const items = panelVisibleItems(panelId);
+      const activeFolder = effectivePanelFolderFilter(panelId);
       bindItemListResultDropTarget(panel);
       renderFolderFilters(panel);
       panel.itemList.textContent = "";
-      if (panel.listStats) panel.listStats.textContent = panelFolderFilter(panelId) ? `${items.length}/${panelItems(panelId).length} 项` : `${items.length} 项`;
+      if (panel.listStats) panel.listStats.textContent = activeFolder ? `${items.length}/${panelItems(panelId).length} 项` : `${items.length} 项`;
 
       for (const item of items) {
         const thumbRoles = thumbRolesForMode(panelThumbMode(panelId));
@@ -2448,18 +2458,19 @@ export function createBrowserModule({
 
   async function refreshItems(options = {}) {
     const { skipDirtyCheck = false, suppressSelectionSync = false, includeGlobalSegments = true } = options;
+    const shouldRefreshGlobalSegments = includeGlobalSegments && !panelSegmentQuery("primary");
     const loadPanelItems = async (panelId) => apiGet("/api/items", {
       filter: panelFilter(panelId),
       tag: panelSegmentQuery(panelId),
       search_mode: panelSearchMode(panelId) === "name" ? "name" : "phrase",
       match_mode: panelSearchMatchMode(panelId) === "exact" ? "exact" : "contains",
-      global_segments: panelId === "primary" && includeGlobalSegments ? "1" : "0",
+      global_segments: panelId === "primary" && shouldRefreshGlobalSegments ? "1" : "0",
     });
     const data = await loadPanelItems("primary");
     if (data.workspace) state.workspace = data.workspace;
     setPanelItems("primary", data.items || []);
     state.itemStats = data.stats;
-    if (includeGlobalSegments) state.globalSegments = data.global_segments || data.global_tags || [];
+    if (shouldRefreshGlobalSegments) state.globalSegments = data.global_segments || data.global_tags || [];
     if (state.splitListOpen) {
       const secondaryData = await loadPanelItems("secondary");
       setPanelItems("secondary", secondaryData.items || []);
@@ -2472,7 +2483,7 @@ export function createBrowserModule({
     }
     renderFilters();
     renderItemList();
-    if (includeGlobalSegments) renderGlobalTags();
+    if (shouldRefreshGlobalSegments) renderGlobalTags();
     renderWorkspaceSummary();
 
     const activePanel = rememberedSelection?.panel || activeListPanelId();

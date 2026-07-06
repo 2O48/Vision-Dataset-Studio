@@ -11,6 +11,8 @@ export function createShellModule({
 }) {
   let lastTerminalStatusLine = "";
   let sidePanelAnimationTimer = 0;
+  let panelVisualObserver = null;
+  let panelVisualRaf = 0;
 
   function launcherInvoke(command, args) {
     const api = window.__TAURI__?.core;
@@ -46,13 +48,66 @@ export function createShellModule({
     return refs.utilityPageShell?.querySelector(`.utility-panel[data-panel="${panel}"]`);
   }
 
-  function markSidePanelAnimating() {
+  function syncPanelVisualClasses() {
+    const sidePanels = [
+      refs.utilityPageShell?.querySelectorAll(".utility-panel>.card"),
+      refs.captionSettingsShell ? [refs.captionSettingsShell.querySelector(":scope>.card")].filter(Boolean) : [],
+    ].filter(Boolean);
+    sidePanels.forEach((group) => {
+      group.forEach((node) => {
+        node.classList.add("panel-visual", "panel-visual-side");
+        ensurePanelScrollContent(node);
+      });
+    });
+
+    document.querySelectorAll(".list-card, .viewer-card, .edit-card, .global-tags-card").forEach((node) => {
+      node.classList.add("panel-visual", "panel-visual-center");
+    });
+
+    refs.workbenchShell?.classList.add("panel-visual-ready");
+  }
+
+  function ensurePanelScrollContent(card) {
+    if (!card || card.querySelector(":scope>.panel-scroll-content")) return;
+    const scroller = document.createElement("div");
+    scroller.className = "panel-scroll-content";
+    Array.from(card.childNodes).forEach((child) => {
+      if (child.classList?.contains("floating-scrollbar-rail")) return;
+      scroller.appendChild(child);
+    });
+    card.appendChild(scroller);
+  }
+
+  function ensurePanelVisualObserver() {
+    if (panelVisualObserver || !document.body) return;
+    syncPanelVisualClasses();
+    const schedulePanelVisualSync = () => {
+      if (panelVisualRaf) return;
+      panelVisualRaf = window.requestAnimationFrame(() => {
+        panelVisualRaf = 0;
+        syncPanelVisualClasses();
+      });
+    };
+    panelVisualObserver = new MutationObserver(schedulePanelVisualSync);
+    panelVisualObserver.observe(document.body, {
+      childList: true,
+      subtree: true,
+    });
+    window.addEventListener("resize", schedulePanelVisualSync, { passive: true });
+  }
+
+  function markSidePanelAnimating(nextState = {}) {
     const shell = refs.workbenchShell;
     if (!shell) return;
+    const willOpenUtility = Boolean(nextState.utilityOpen);
+    const willOpenCaption = Boolean(nextState.captionSettingsOpen);
+    shell.classList.toggle("side-panel-opening", willOpenUtility || willOpenCaption);
+    shell.classList.toggle("side-panel-closing", !willOpenUtility && !willOpenCaption);
     shell.classList.add("side-panel-animating");
     window.clearTimeout(sidePanelAnimationTimer);
     sidePanelAnimationTimer = window.setTimeout(() => {
       shell.classList.remove("side-panel-animating");
+      shell.classList.remove("side-panel-opening", "side-panel-closing");
     }, 620);
   }
 
@@ -65,7 +120,11 @@ export function createShellModule({
   }
 
   function renderUtilityPanelState() {
-    markSidePanelAnimating();
+    ensurePanelVisualObserver();
+    markSidePanelAnimating({
+      utilityOpen: state.utilityOpen,
+      captionSettingsOpen: state.captionSettingsOpen,
+    });
     const panel = utilityPanelExists(state.utilityPanel) ? state.utilityPanel : "workspace";
     state.utilityPanel = panel;
     refs.utilityPageShell?.setAttribute("aria-hidden", state.utilityOpen ? "false" : "true");
@@ -81,6 +140,7 @@ export function createShellModule({
     });
     refs.openCaptionSettingsBtn?.classList.toggle("active", state.captionSettingsOpen);
     refs.openCaptionSettingsBtn?.setAttribute("aria-pressed", String(state.captionSettingsOpen));
+    syncPanelVisualClasses();
   }
 
   function setUtilityPanel(panel, { open = true, persist = true } = {}) {
