@@ -123,7 +123,7 @@ class ProjectStoreTests(unittest.TestCase):
                 "second caption",
             )
 
-    def test_rename_clone_and_delete_project(self):
+    def test_rename_fork_and_delete_project(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             store = ProjectStore(root / "app" / "projects")
@@ -131,19 +131,30 @@ class ProjectStoreTests(unittest.TestCase):
             saved = store.save_project(name="原项目", workspace=workspace)
             project_id = saved["project"]["id"]
 
-            renamed = store.rename_project(project_id, "新项目")
+            self.assertEqual(store.save_project_tags(["商用车", "待检查"]), ["商用车", "待检查"])
+            renamed = store.rename_project(project_id, "新项目", ["商用车"])
             self.assertEqual(renamed["name"], "新项目")
+            self.assertEqual(renamed["tags"], ["商用车"])
             self.assertNotEqual(renamed["id"], project_id)
             self.assertTrue((root / "app" / "projects" / renamed["id"]).is_dir())
             renamed_detail = store.get_project(renamed["id"])
+            self.assertEqual(renamed_detail["project"]["tags"], ["商用车"])
             self.assertIn(renamed["id"], renamed_detail["workspace"]["dirs"]["result"])
 
-            cloned = store.clone_project(renamed["id"], "新项目副本")
-            self.assertEqual(cloned["project"]["name"], "新项目副本")
-            self.assertNotEqual(cloned["project"]["id"], renamed["id"])
-            self.assertTrue((root / "app" / "projects" / cloned["project"]["id"]).is_dir())
-            self.assertIn(cloned["project"]["id"], cloned["workspace"]["dirs"]["result"])
-            self.assertNotEqual(cloned["workspace"]["dirs"]["result"], renamed_detail["workspace"]["dirs"]["result"])
+            forked = store.fork_project(renamed["id"], "新项目分叉")
+            self.assertEqual(forked["project"]["name"], "新项目分叉")
+            self.assertEqual(forked["project"]["tags"], ["商用车"])
+            self.assertNotEqual(forked["project"]["id"], renamed["id"])
+            self.assertTrue((root / "app" / "projects" / forked["project"]["id"]).is_dir())
+            self.assertIn(forked["project"]["id"], forked["workspace"]["dirs"]["result"])
+            self.assertNotEqual(forked["workspace"]["dirs"]["result"], renamed_detail["workspace"]["dirs"]["result"])
+            fork_versions = store.list_versions(forked["project"]["id"])["versions"]
+            self.assertEqual(fork_versions[0]["display_message"], f"分叉自版本 {forked['source_head'][:7]}")
+            self.assertEqual(store.list_project_tags(), ["商用车", "待检查"])
+            self.assertEqual(store.rename_project_tag("商用车", "工程车"), ["工程车", "待检查"])
+            self.assertEqual(store.get_project(forked["project"]["id"])["project"].get("tags"), ["工程车"])
+            self.assertEqual(store.save_project_tags(["待检查"]), ["待检查"])
+            self.assertEqual(store.get_project(forked["project"]["id"])["project"].get("tags"), [])
 
             deleted = store.delete_project(renamed["id"])
             self.assertEqual(deleted["deleted"], renamed["id"])
@@ -175,6 +186,60 @@ class ProjectStoreTests(unittest.TestCase):
             self.assertEqual(created["workspace"]["settings"]["control_count"], 0)
             self.assertEqual(detail["workspace"]["ui_state"], {"utility_panel": "projects"})
             self.assertEqual(projects[0]["id"], project_id)
+
+    def test_project_versions_rollback_and_fork(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = ProjectStore(root / "app" / "projects")
+            workspace = self._make_workspace(root)
+            saved = store.save_project(name="版本项目", workspace=workspace)
+            project_id = saved["project"]["id"]
+            first_head = saved["version"]["hash"]
+
+            reopened = DatasetWorkspace()
+            reopened.open_dirs(
+                control1_dir=saved["workspace"]["dirs"]["control1"],
+                result_dir=saved["workspace"]["dirs"]["result"],
+                control_count=1,
+            )
+            reopened.save_text("system/display_off", "second version")
+            second = store.save_project(name="版本项目", workspace=reopened, overwrite_id=project_id)
+            self.assertNotEqual(second["version"]["hash"], first_head)
+
+            versions = store.list_versions(project_id)["versions"]
+            self.assertGreaterEqual(len(versions), 2)
+            self.assertEqual(versions[0]["hash"], second["version"]["hash"])
+            self.assertEqual(versions[0]["display_message"], "添加0张图片，修改1张图片，删除0张图片")
+            renamed_version = store.rename_version(project_id, second["version"]["hash"], "检查后的版本名称")
+            self.assertEqual(renamed_version["name"], "检查后的版本名称")
+            renamed_versions = store.list_versions(project_id)["versions"]
+            self.assertEqual(renamed_versions[0]["display_message"], "检查后的版本名称")
+            self.assertEqual(renamed_versions[0]["custom_label"], "检查后的版本名称")
+            self.assertEqual(renamed_versions[0]["message"], "添加0张图片，修改1张图片，删除0张图片")
+            project_row = next(row for row in store.list_projects() if row["id"] == project_id)
+            self.assertEqual(project_row["created_at"], versions[-1]["created_at"])
+            self.assertEqual(project_row["updated_at"], versions[0]["created_at"])
+            self.assertEqual(project_row["created_commit"], versions[-1]["hash"])
+            self.assertEqual(project_row["updated_commit"], versions[0]["hash"])
+
+            rolled_back = store.rollback_to_version(project_id, first_head)
+            result_txt = Path(rolled_back["workspace"]["dirs"]["result"]) / "system" / "display_off.txt"
+            self.assertEqual(result_txt.read_text(encoding="utf-8"), "display is off")
+            self.assertNotEqual(rolled_back["head"], first_head)
+            versions_after_rollback = store.list_versions(project_id)["versions"]
+            hashes_after_rollback = [row["hash"] for row in versions_after_rollback]
+            self.assertIn(first_head, hashes_after_rollback)
+            self.assertIn(second["version"]["hash"], hashes_after_rollback)
+            self.assertEqual(hashes_after_rollback[0], rolled_back["head"])
+            self.assertEqual(versions_after_rollback[0]["display_message"], f"回退到版本 {first_head[:7]}")
+
+            forked = store.fork_project_version(project_id, first_head, "旧版本分叉")
+            self.assertEqual(forked["project"]["name"], "旧版本分叉")
+            self.assertNotEqual(forked["project"]["id"], project_id)
+            fork_txt = Path(forked["workspace"]["dirs"]["result"]) / "system" / "display_off.txt"
+            self.assertEqual(fork_txt.read_text(encoding="utf-8"), "display is off")
+            fork_versions = store.list_versions(forked["project"]["id"])["versions"]
+            self.assertEqual(fork_versions[0]["display_message"], f"分叉自版本 {first_head[:7]}")
 
     def test_list_projects_repairs_stale_metadata_id(self):
         with tempfile.TemporaryDirectory() as tmp:

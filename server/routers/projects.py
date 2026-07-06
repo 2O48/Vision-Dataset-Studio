@@ -40,6 +40,16 @@ class ProjectOpenRequest(BaseModel):
 class ProjectRenameRequest(BaseModel):
     id: str = ""
     name: str = ""
+    tags: list[str] = []
+
+
+class ProjectTagsRequest(BaseModel):
+    tags: list[str] = []
+
+
+class ProjectTagRenameRequest(BaseModel):
+    old: str = ""
+    name: str = ""
 
 
 class ProjectDeleteRequest(BaseModel):
@@ -51,6 +61,23 @@ class ProjectUiStateRequest(BaseModel):
     ui_state: dict = {}
 
 
+class ProjectVersionRequest(BaseModel):
+    id: str = ""
+    commit: str = ""
+
+
+class ProjectVersionForkRequest(BaseModel):
+    id: str = ""
+    commit: str = ""
+    name: str = ""
+
+
+class ProjectVersionRenameRequest(BaseModel):
+    id: str = ""
+    commit: str = ""
+    name: str = ""
+
+
 class TmpCleanupRequest(BaseModel):
     max_age_hours: int = 48
 
@@ -58,6 +85,21 @@ class TmpCleanupRequest(BaseModel):
 @router.get("/projects")
 def list_projects(store: ProjectStore = Depends(get_project_store)):
     return {"ok": True, "projects": store.list_projects()}
+
+
+@router.get("/projects/tags")
+def list_project_tags(store: ProjectStore = Depends(get_project_store)):
+    return {"ok": True, "tags": store.list_project_tags()}
+
+
+@router.post("/projects/tags")
+def save_project_tags(req: ProjectTagsRequest, store: ProjectStore = Depends(get_project_store)):
+    return {"ok": True, "tags": store.save_project_tags(req.tags)}
+
+
+@router.post("/projects/tags/rename")
+def rename_project_tag(req: ProjectTagRenameRequest, store: ProjectStore = Depends(get_project_store)):
+    return {"ok": True, "tags": store.rename_project_tag(req.old, req.name)}
 
 
 @router.get("/projects/detail")
@@ -94,6 +136,7 @@ def save_project(req: ProjectSaveRequest, ws: DatasetWorkspace = Depends(get_wor
         result_dir=dirs.get("result") or "",
         control_count=settings.get("control_count", result.get("project", {}).get("control_count", 1)),
         ignore_tokens=settings.get("ignore_tokens", []),
+        load_state=False,
     )
     items = workspace_info.get("items", []) if isinstance(workspace_info.get("items"), list) else []
     aliases = {
@@ -126,6 +169,7 @@ def open_project(req: ProjectOpenRequest, ws: DatasetWorkspace = Depends(get_wor
         result_dir=dirs.get("result") or "",
         control_count=settings.get("control_count", detail.get("project", {}).get("control_count", 1)),
         ignore_tokens=settings.get("ignore_tokens", []),
+        load_state=False,
     )
     items = workspace_info.get("items", []) if isinstance(workspace_info.get("items"), list) else []
     aliases = {
@@ -145,15 +189,52 @@ def open_project(req: ProjectOpenRequest, ws: DatasetWorkspace = Depends(get_wor
 @router.post("/projects/rename")
 def rename_project(req: ProjectRenameRequest, store: ProjectStore = Depends(get_project_store)):
     old_id = req.id
-    project = store.rename_project(old_id, req.name)
+    project = store.rename_project(old_id, req.name, req.tags)
     if get_active_project_id() == old_id:
         set_active_project(project.get("id", old_id))
     return {"ok": True, "project": project}
 
 
-@router.post("/projects/clone")
-def clone_project(req: ProjectRenameRequest, store: ProjectStore = Depends(get_project_store)):
-    result = store.clone_project(req.id, req.name)
+@router.post("/projects/fork")
+def fork_project(req: ProjectRenameRequest, store: ProjectStore = Depends(get_project_store)):
+    result = store.fork_project(req.id, req.name)
+    return {"ok": True, **result}
+
+
+@router.get("/projects/versions")
+def project_versions(id: str = "", store: ProjectStore = Depends(get_project_store)):
+    return {"ok": True, **store.list_versions(id)}
+
+
+@router.post("/projects/versions/rollback")
+def rollback_project_version(req: ProjectVersionRequest, ws: DatasetWorkspace = Depends(get_workspace), store: ProjectStore = Depends(get_project_store)):
+    result = store.rollback_to_version(req.id, req.commit)
+    workspace_info = result.get("workspace", {}) if isinstance(result.get("workspace"), dict) else {}
+    dirs = workspace_info.get("dirs", {}) if isinstance(workspace_info.get("dirs"), dict) else {}
+    settings = workspace_info.get("settings", {}) if isinstance(workspace_info.get("settings"), dict) else {}
+    summary = ws.open_dirs(
+        control1_dir=dirs.get("control1") or "",
+        control2_dir=dirs.get("control2") or "",
+        control3_dir=dirs.get("control3") or "",
+        result_dir=dirs.get("result") or "",
+        control_count=settings.get("control_count", result.get("project", {}).get("control_count", 1)),
+        ignore_tokens=settings.get("ignore_tokens", []),
+        load_state=False,
+    )
+    set_active_project(result.get("project", {}).get("id", req.id))
+    result["workspace"] = summary
+    return {"ok": True, **result}
+
+
+@router.post("/projects/versions/fork")
+def fork_project_version(req: ProjectVersionForkRequest, store: ProjectStore = Depends(get_project_store)):
+    result = store.fork_project_version(req.id, req.commit, req.name)
+    return {"ok": True, **result}
+
+
+@router.post("/projects/versions/rename")
+def rename_project_version(req: ProjectVersionRenameRequest, store: ProjectStore = Depends(get_project_store)):
+    result = store.rename_version(req.id, req.commit, req.name)
     return {"ok": True, **result}
 
 

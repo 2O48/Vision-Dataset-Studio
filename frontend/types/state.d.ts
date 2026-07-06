@@ -114,6 +114,7 @@ export interface AppState {
   currentProjectName: string;
   projectQuery: string;
   projectSortMode: string;
+  projectTagFilters: string[];
 
   // ===== browser 域 =====
   browserPath: string;

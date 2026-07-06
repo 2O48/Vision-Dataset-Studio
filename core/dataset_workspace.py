@@ -143,6 +143,7 @@ class DatasetWorkspace:
         result_dir: Optional[str] = None,
         control_count: Optional[int] = None,
         ignore_tokens=None,
+        load_state: bool = True,
     ) -> dict:
         with self._lock:
             if control_count is not None:
@@ -218,8 +219,9 @@ class DatasetWorkspace:
             self._resolution_mismatch.clear()
             self._resolution_index_ready = False
             self.workspace_key = self._compute_workspace_key()
-            self._load_workspace_state()
-            self._apply_workspace_state()
+            if load_state:
+                self._load_workspace_state()
+                self._apply_workspace_state()
             self._refresh_caption_search_cache()
             self._mark_global_segments_dirty()
             self.file_names = sorted(self.file_names, key=_natural_key)

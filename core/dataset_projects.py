@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
+import stat
+import subprocess
+import threading
 from datetime import datetime
 from pathlib import Path
 
@@ -14,6 +18,7 @@ LEGACY_APP_DATA_DIR = Path.home() / ".lora_dataset_edit"
 PROJECTS_DIR = APP_DATA_DIR / "projects"
 TRASH_DIR = APP_DATA_DIR / "trash"
 PROJECT_INDEX_FILE = APP_DATA_DIR / "projects_index.json"
+PROJECT_TAGS_FILE = APP_DATA_DIR / "project_tags.json"
 LEGACY_PROJECTS_DIR = LEGACY_APP_DATA_DIR / "projects"
 LEGACY_MIGRATION_MARKER = ".legacy_lora_dataset_edit_migrated.json"
 SCHEMA_VERSION = 2
@@ -31,6 +36,25 @@ def _clean_name(value: str, fallback: str = "未命名项目") -> str:
     name = re.sub(r"[\\/:*?\"<>|]+", "_", value or fallback).strip()
     name = re.sub(r"\s+", " ", name).strip(" .")
     return name or fallback
+
+
+def _clean_tag(value: str) -> str:
+    tag = re.sub(r"[\r\n\t]+", " ", str(value or "")).strip()
+    tag = re.sub(r"\s+", " ", tag).strip()
+    return tag[:40]
+
+
+def _clean_tags(values) -> list[str]:
+    tags: list[str] = []
+    seen: set[str] = set()
+    source = values if isinstance(values, list) else []
+    for value in source:
+        tag = _clean_tag(value)
+        key = tag.casefold()
+        if tag and key not in seen:
+            tags.append(tag)
+            seen.add(key)
+    return tags
 
 
 def _slug(value: str, fallback: str = "project") -> str:
@@ -71,6 +95,34 @@ def _write_json(path: Path, data) -> None:
     tmp = path.with_suffix(f"{path.suffix}.tmp")
     tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     tmp.replace(path)
+
+
+def _remove_tree(path: Path) -> None:
+    if not path.exists():
+        return
+
+    def onerror(func, value, _exc_info):
+        try:
+            os.chmod(value, stat.S_IWRITE)
+            func(value)
+        except Exception:
+            pass
+
+    try:
+        shutil.rmtree(path, ignore_errors=False, onerror=onerror)
+    except Exception:
+        for root, dirs, files in os.walk(path, topdown=False):
+            for name in files:
+                try:
+                    os.chmod(Path(root) / name, stat.S_IWRITE)
+                except Exception:
+                    pass
+            for name in dirs:
+                try:
+                    os.chmod(Path(root) / name, stat.S_IWRITE)
+                except Exception:
+                    pass
+        shutil.rmtree(path, ignore_errors=True)
 
 
 def _item_target_stem(name: str, used: set[str]) -> str:
@@ -182,6 +234,8 @@ def _sync_directory_contents(source: Path, target: Path) -> None:
     wanted: set[Path] = {target.resolve()}
 
     for source_path in sorted(source.rglob("*")):
+        if ".git" in source_path.relative_to(source).parts:
+            continue
         relative = source_path.relative_to(source)
         target_path = target / relative
         wanted.add(target_path.resolve())
@@ -194,6 +248,8 @@ def _sync_directory_contents(source: Path, target: Path) -> None:
     if not target.exists():
         return
     for target_path in sorted(target.rglob("*"), key=lambda item: len(item.parts), reverse=True):
+        if ".git" in target_path.relative_to(target).parts:
+            continue
         resolved = target_path.resolve()
         if resolved in wanted:
             continue
@@ -243,6 +299,7 @@ class ProjectStore:
         self.app_dir = self.projects_dir.parent
         self.trash_dir = self.app_dir / "trash"
         self.index_file = self.app_dir / "projects_index.json"
+        self.tags_file = self.app_dir / "project_tags.json"
         self.legacy_migration_marker = self.app_dir / LEGACY_MIGRATION_MARKER
         if legacy_projects_dir is not None:
             self.legacy_projects_dir: Path | None = legacy_projects_dir
@@ -253,6 +310,7 @@ class ProjectStore:
         else:
             self.legacy_projects_dir = None
             self.legacy_app_dir = None
+        self._git_lock = threading.RLock()
 
     def _write_legacy_migration_marker(self, legacy_app_dir: Path) -> None:
         _write_json(
@@ -301,6 +359,73 @@ class ProjectStore:
     def _write_index(self, rows: list[dict]) -> None:
         _write_json(self.index_file, {"schema_version": SCHEMA_VERSION, "projects": rows})
 
+    def _stored_project_tags(self) -> list[str]:
+        data = _read_json(self.tags_file, {"tags": []})
+        return _clean_tags(data.get("tags", []) if isinstance(data, dict) else [])
+
+    def list_project_tags(self) -> list[str]:
+        self.ensure()
+        tags = self._stored_project_tags()
+        seen = {tag.casefold() for tag in tags}
+        if self.projects_dir.is_dir():
+            for path in self.projects_dir.iterdir():
+                if not path.is_dir() or path.name.startswith("."):
+                    continue
+                meta = _read_json(path / "project.json", {})
+                for tag in _clean_tags(meta.get("tags", [])):
+                    key = tag.casefold()
+                    if key not in seen:
+                        tags.append(tag)
+                        seen.add(key)
+        return tags
+
+    def save_project_tags(self, tags: list[str]) -> list[str]:
+        self.ensure()
+        cleaned = _clean_tags(tags)
+        allowed = {tag.casefold() for tag in cleaned}
+        _write_json(self.tags_file, {"schema_version": SCHEMA_VERSION, "tags": cleaned})
+        if self.projects_dir.is_dir():
+            for path in self.projects_dir.iterdir():
+                if not path.is_dir() or path.name.startswith("."):
+                    continue
+                meta_path = path / "project.json"
+                meta = _read_json(meta_path, {})
+                if not meta:
+                    continue
+                current = _clean_tags(meta.get("tags", []))
+                next_tags = [tag for tag in current if tag.casefold() in allowed]
+                if next_tags != current:
+                    meta["tags"] = next_tags
+                    _write_json(meta_path, meta)
+        self._refresh_index()
+        return cleaned
+
+    def rename_project_tag(self, old: str, new: str) -> list[str]:
+        self.ensure()
+        old_tag = _clean_tag(old)
+        new_tag = _clean_tag(new)
+        if not old_tag or not new_tag:
+            return self.list_project_tags()
+        old_key = old_tag.casefold()
+        tags = [new_tag if tag.casefold() == old_key else tag for tag in self.list_project_tags()]
+        cleaned = _clean_tags(tags)
+        _write_json(self.tags_file, {"schema_version": SCHEMA_VERSION, "tags": cleaned})
+        if self.projects_dir.is_dir():
+            for path in self.projects_dir.iterdir():
+                if not path.is_dir() or path.name.startswith("."):
+                    continue
+                meta_path = path / "project.json"
+                meta = _read_json(meta_path, {})
+                if not meta:
+                    continue
+                current = _clean_tags(meta.get("tags", []))
+                next_tags = _clean_tags([new_tag if tag.casefold() == old_key else tag for tag in current])
+                if next_tags != current:
+                    meta["tags"] = next_tags
+                    _write_json(meta_path, meta)
+        self._refresh_index()
+        return cleaned
+
     def _cleanup_tmp_projects(self, project_id: str) -> None:
         prefix = f".tmp-{project_id}-"
         if not self.projects_dir.is_dir():
@@ -308,12 +433,198 @@ class ProjectStore:
         for path in self.projects_dir.iterdir():
             if not path.is_dir() or not path.name.startswith(prefix):
                 continue
-            shutil.rmtree(path, ignore_errors=True)
+            _remove_tree(path)
+
+    def _unique_tmp_project_dir(self, project_id: str) -> Path:
+        prefix = f".tmp-{project_id}-{datetime.now().strftime('%Y%m%d-%H%M%S-%f')}"
+        for index in range(100):
+            suffix = "" if index == 0 else f"-{index + 1}"
+            candidate = self._project_dir(f"{prefix}{suffix}")
+            if not candidate.exists():
+                return candidate
+        raise FileExistsError(f"Could not allocate a temporary project directory for {project_id}.")
+
+    def _git(self, project_dir: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+        with self._git_lock:
+            try:
+                result = subprocess.run(
+                    ["git", "-C", str(project_dir), *args],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                )
+            except FileNotFoundError as exc:
+                raise RuntimeError("Git is not installed or not available on PATH.") from exc
+        if check and result.returncode != 0:
+            detail = (result.stderr or result.stdout or "").strip()
+            raise RuntimeError(detail or f"Git command failed: {' '.join(args)}")
+        return result
+
+    def _ensure_git_repo(self, project_dir: Path) -> None:
+        project_dir.mkdir(parents=True, exist_ok=True)
+        created = False
+        if not (project_dir / ".git").is_dir():
+            init = self._git(project_dir, "init", "--initial-branch=main", check=False)
+            if init.returncode != 0:
+                self._git(project_dir, "init")
+            created = True
+        if created or self._git(project_dir, "config", "--get", "user.name", check=False).returncode != 0:
+            self._git(project_dir, "config", "user.name", "LoRA Dataset Edit")
+        if created or self._git(project_dir, "config", "--get", "user.email", check=False).returncode != 0:
+            self._git(project_dir, "config", "user.email", "local@lora-dataset-edit.invalid")
+        if created or self._git(project_dir, "config", "--get", "commit.gpgsign", check=False).returncode != 0:
+            self._git(project_dir, "config", "commit.gpgsign", "false")
+
+    def _git_has_head(self, project_dir: Path) -> bool:
+        return self._git(project_dir, "rev-parse", "--verify", "HEAD", check=False).returncode == 0
+
+    def _git_has_changes(self, project_dir: Path) -> bool:
+        result = self._git(project_dir, "status", "--porcelain", check=True)
+        return bool(result.stdout.strip())
+
+    def _git_commit(self, project_dir: Path, message: str, *, allow_empty: bool = False) -> dict:
+        with self._git_lock:
+            self._ensure_git_repo(project_dir)
+            self._git(project_dir, "add", "-A")
+            has_changes = self._git_has_changes(project_dir)
+            if not has_changes and not allow_empty:
+                head = self._git(project_dir, "rev-parse", "HEAD", check=False)
+                return {
+                    "committed": False,
+                    "hash": head.stdout.strip() if head.returncode == 0 else "",
+                    "message": "没有检测到文件变更。",
+                }
+            args = ["commit", "-m", message]
+            if allow_empty:
+                args.insert(1, "--allow-empty")
+            self._git(project_dir, *args)
+            head = self._git(project_dir, "rev-parse", "HEAD")
+            return {"committed": True, "hash": head.stdout.strip(), "message": message}
+
+    def _ensure_initial_commit(self, project_dir: Path, project_name: str = "") -> None:
+        self._ensure_git_repo(project_dir)
+        if self._git_has_head(project_dir):
+            return
+        self._git_commit(project_dir, self._commit_message("初始化项目版本库", project_name or project_dir.name))
+
+    def _verify_commit(self, project_dir: Path, commit: str) -> str:
+        value = str(commit or "").strip()
+        if not re.fullmatch(r"[0-9a-fA-F]{7,40}", value):
+            raise ValueError("Invalid commit id.")
+        self._ensure_git_repo(project_dir)
+        self._git(project_dir, "cat-file", "-e", f"{value}^{{commit}}")
+        full = self._git(project_dir, "rev-parse", value)
+        return full.stdout.strip()
+
+    def _remove_paths_added_after(self, project_dir: Path, target: str, head: str) -> None:
+        result = self._git(project_dir, "diff", "--name-only", "--diff-filter=A", f"{target}..{head}")
+        for raw in result.stdout.splitlines():
+            rel = raw.strip()
+            if not rel:
+                continue
+            path = (project_dir / rel).resolve()
+            if not is_relative_to(path, project_dir) or path == project_dir:
+                continue
+            if path.is_dir():
+                _remove_tree(path)
+            elif path.exists() or path.is_symlink():
+                path.unlink(missing_ok=True)
+
+    def _version_item_key(self, rel: str) -> str:
+        normalized = str(rel or "").replace("\\", "/")
+        path = Path(normalized)
+        parts = normalized.split("/")
+        if len(parts) >= 3 and parts[0] == "assets":
+            suffix = path.suffix.lower()
+            if suffix in IMAGE_EXTS or suffix == ".txt":
+                return Path("/".join(parts[2:])).with_suffix("").as_posix()
+        if len(parts) >= 2 and parts[0] == "captions" and path.suffix.lower() == ".txt":
+            return Path("/".join(parts[1:])).with_suffix("").as_posix()
+        return ""
+
+    def _commit_first_parent(self, project_dir: Path, commit: str) -> str:
+        result = self._git(project_dir, "rev-list", "--parents", "-n", "1", commit, check=False)
+        if result.returncode != 0:
+            return ""
+        parts = result.stdout.strip().split()
+        return parts[1] if len(parts) > 1 else ""
+
+    def _version_change_summary(self, project_dir: Path, commit: str, subject: str) -> str:
+        subject = subject or ""
+        rollback = re.search(r"回退(?:到)?版本\s*([0-9a-fA-F]{7,40})", subject)
+        if rollback:
+            return f"回退到版本 {rollback.group(1)[:7]}"
+        if "回退" in subject:
+            parent = self._commit_first_parent(project_dir, commit)
+            return f"回退到版本 {parent[:7]}" if parent else "回退到历史版本"
+        fork = re.search(r"分叉(?:自)?版本\s*([0-9a-fA-F]{7,40})", subject)
+        if fork:
+            return f"分叉自版本 {fork.group(1)[:7]}"
+        if "分叉" in subject:
+            parent = self._commit_first_parent(project_dir, commit)
+            return f"分叉自版本 {parent[:7]}" if parent else "分叉自历史版本"
+
+        result = self._git(project_dir, "diff-tree", "--root", "--no-commit-id", "--name-status", "-r", commit)
+        item_changes: dict[str, set[str]] = {}
+        for raw in result.stdout.splitlines():
+            if not raw.strip():
+                continue
+            parts = raw.split("\t")
+            status = parts[0][:1]
+            paths = parts[1:] if len(parts) > 1 else []
+            if status == "R" and len(paths) >= 2:
+                paths = paths[-1:]
+                status = "M"
+            for rel in paths:
+                key = self._version_item_key(rel)
+                if key:
+                    item_changes.setdefault(key, set()).add(status)
+
+        added = modified = deleted = 0
+        for statuses in item_changes.values():
+            if statuses and statuses <= {"A"}:
+                added += 1
+            elif statuses and statuses <= {"D"}:
+                deleted += 1
+            else:
+                modified += 1
+
+        pieces = [f"添加{added}张图片", f"修改{modified}张图片", f"删除{deleted}张图片"]
+        return "，".join(pieces)
+
+    def _version_label(self, project_dir: Path, commit: str) -> str:
+        result = self._git(project_dir, "notes", "--ref=vds-version-labels", "show", commit, check=False)
+        if result.returncode != 0:
+            return ""
+        return result.stdout.strip()
+
+    def _commit_message(self, action: str, project_name: str = "") -> str:
+        name = _clean_name(project_name or "未命名项目")
+        return f"{action}: {name} @ {_now()}"
 
     def _refresh_index(self) -> list[dict]:
         rows = self.list_projects(write_index=False)
         self._write_index(rows)
         return rows
+
+    def _project_version_refs(self, project_dir: Path) -> tuple[str, str, str, str]:
+        if not (project_dir / ".git").is_dir():
+            return "", "", "", ""
+        result = self._git(project_dir, "log", "--format=%H%x1f%cI", "--reverse", check=False)
+        if result.returncode != 0:
+            return "", "", "", ""
+        rows: list[tuple[str, str]] = []
+        for line in result.stdout.splitlines():
+            parts = line.strip().split("\x1f")
+            if len(parts) == 2 and parts[0] and parts[1]:
+                rows.append((parts[0], parts[1]))
+        if not rows:
+            return "", "", "", ""
+        first_hash, first_time = rows[0]
+        last_hash, last_time = rows[-1]
+        return first_time, last_time, first_hash, last_hash
 
     def list_projects(self, *, write_index: bool = True) -> list[dict]:
         self.ensure()
@@ -333,16 +644,20 @@ class ProjectStore:
                     _write_json(path / "workspace.json", workspace)
                 _write_json(path / "project.json", meta)
             stat = path.stat()
+            git_created_at, git_updated_at, git_created_commit, git_updated_commit = self._project_version_refs(path)
             rows.append(
                 {
                     "id": path.name,
                     "name": meta.get("name") or path.name,
-                    "created_at": meta.get("created_at", ""),
-                    "updated_at": meta.get("updated_at", datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds")),
+                    "created_at": git_created_at or meta.get("created_at", ""),
+                    "updated_at": git_updated_at or meta.get("updated_at", datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds")),
+                    "created_commit": git_created_commit,
+                    "updated_commit": git_updated_commit,
                     "item_count": int(meta.get("item_count", 0) or 0),
                     "captioned_count": int(meta.get("captioned_count", 0) or 0),
                     "control_count": int(meta.get("control_count", 1)),
                     "thumbnail": meta.get("thumbnail", ""),
+                    "tags": _clean_tags(meta.get("tags", [])),
                     "path": str(path),
                 }
             )
@@ -392,10 +707,8 @@ class ProjectStore:
             if not final_project_dir.is_dir():
                 raise FileNotFoundError(f"Project not found: {project_id}")
             existing_meta = _read_json(final_project_dir / "project.json", {})
-            staging_dir = self._project_dir(f".tmp-{project_id}-{_now_id()}")
-            if staging_dir.exists():
-                shutil.rmtree(staging_dir)
-            shutil.copytree(final_project_dir, staging_dir)
+            staging_dir = self._unique_tmp_project_dir(project_id)
+            shutil.copytree(final_project_dir, staging_dir, ignore=shutil.ignore_patterns(".git"))
             project_dir = staging_dir
         else:
             project_id, final_project_dir = self._unique_project_dir(name)
@@ -519,6 +832,7 @@ class ProjectStore:
             "captioned_count": _captioned_count(workspace_items),
             "control_count": saved_control_count,
             "thumbnail": cover,
+            "tags": _clean_tags(existing_meta.get("tags", [])),
         }
         manifest = {"schema_version": SCHEMA_VERSION, "items": manifest_items}
         dirs = {
@@ -560,10 +874,15 @@ class ProjectStore:
         _write_json(paths["state"] / "ui_state.json", workspace_state["ui_state"])
         if staging_dir is not None:
             _sync_directory_contents(staging_dir, final_project_dir)
-            shutil.rmtree(staging_dir, ignore_errors=True)
+            _remove_tree(staging_dir)
             self._cleanup_tmp_projects(project_id)
+        version = self._git_commit(
+            final_project_dir,
+            self._commit_message("提交项目版本", project_name),
+            allow_empty=True,
+        )
         self._refresh_index()
-        return {"project": project_meta, "workspace": workspace_state}
+        return {"project": project_meta, "workspace": workspace_state, "version": version}
 
     def create_project(self, *, name: str, control_count: int | None = None, ui_state: dict | None = None) -> dict:
         self.ensure()
@@ -591,6 +910,7 @@ class ProjectStore:
             "captioned_count": 0,
             "control_count": saved_control_count,
             "thumbnail": "",
+            "tags": [],
         }
         workspace_state = {
             "schema_version": SCHEMA_VERSION,
@@ -619,10 +939,11 @@ class ProjectStore:
         _write_json(paths["state"] / "labels.json", labels)
         _write_json(paths["state"] / "caption_config.json", workspace_state["ui_state"].get("caption_settings", {}))
         _write_json(paths["state"] / "ui_state.json", workspace_state["ui_state"])
+        version = self._git_commit(project_dir, self._commit_message("创建项目", project_name))
         self._refresh_index()
-        return {"project": project_meta, "workspace": workspace_state}
+        return {"project": project_meta, "workspace": workspace_state, "version": version}
 
-    def rename_project(self, project_id: str, name: str) -> dict:
+    def rename_project(self, project_id: str, name: str, tags: list[str] | None = None) -> dict:
         path = self._project_dir(project_id)
         if not path.is_dir():
             raise FileNotFoundError(f"Project not found: {project_id}")
@@ -640,6 +961,8 @@ class ProjectStore:
         meta = _read_json(path / "project.json", {})
         meta["id"] = next_id
         meta["name"] = _clean_name(name)
+        if tags is not None:
+            meta["tags"] = _clean_tags(tags)
         meta["updated_at"] = _now()
         _write_json(path / "project.json", meta)
         workspace = _read_json(path / "workspace.json", {})
@@ -650,13 +973,15 @@ class ProjectStore:
         self._refresh_index()
         return meta
 
-    def clone_project(self, project_id: str, name: str = "") -> dict:
+    def fork_project(self, project_id: str, name: str = "") -> dict:
         self.ensure()
         source = self._project_dir(project_id)
         if not source.is_dir():
             raise FileNotFoundError(f"Project not found: {project_id}")
         source_meta = _read_json(source / "project.json", {})
-        clone_name = _clean_name(name or f"{source_meta.get('name') or project_id} 副本")
+        self._ensure_initial_commit(source, source_meta.get("name") or project_id)
+        source_head = self._git(source, "rev-parse", "HEAD").stdout.strip()
+        clone_name = _clean_name(name or f"{source_meta.get('name') or project_id} 分叉")
         clone_id, clone_dir = self._unique_project_dir(clone_name)
         shutil.copytree(source, clone_dir)
         now = _now()
@@ -668,8 +993,112 @@ class ProjectStore:
         workspace["project_name"] = clone_name
         workspace["dirs"] = _workspace_dirs(clone_dir, int(meta.get("control_count", 1)))
         _write_json(clone_dir / "workspace.json", workspace)
+        version = self._git_commit(clone_dir, self._commit_message(f"分叉自版本 {source_head[:7]}", clone_name))
         self._refresh_index()
-        return {"project": meta, "workspace": workspace}
+        return {"project": meta, "workspace": workspace, "version": version, "source_head": source_head}
+
+    def list_versions(self, project_id: str, *, limit: int = 200) -> dict:
+        self.ensure()
+        path = self._project_dir(project_id)
+        if not path.is_dir():
+            raise FileNotFoundError(f"Project not found: {project_id}")
+        meta = _read_json(path / "project.json", {})
+        self._ensure_initial_commit(path, meta.get("name") or project_id)
+        result = self._git(
+            path,
+            "log",
+            f"--max-count={max(1, min(500, int(limit or 200)))}",
+            "--date=iso-strict",
+            "--format=%H%x1f%h%x1f%cI%x1f%s",
+        )
+        versions: list[dict] = []
+        for line in result.stdout.splitlines():
+            parts = line.split("\x1f")
+            if len(parts) < 4:
+                continue
+            display_message = self._version_change_summary(path, parts[0], parts[3])
+            custom_label = self._version_label(path, parts[0])
+            versions.append(
+                {
+                    "hash": parts[0],
+                    "short_hash": parts[1],
+                    "created_at": parts[2],
+                    "message": display_message,
+                    "raw_message": parts[3],
+                    "display_message": custom_label or display_message,
+                    "custom_label": custom_label,
+                }
+            )
+        head = self._git(path, "rev-parse", "HEAD", check=False)
+        return {"project": meta, "versions": versions, "head": head.stdout.strip() if head.returncode == 0 else ""}
+
+    def rename_version(self, project_id: str, commit: str, name: str) -> dict:
+        label = str(name or "").strip()
+        if not label:
+            raise ValueError("Version name cannot be empty.")
+        with self._git_lock:
+            self.ensure()
+            path = self._project_dir(project_id)
+            if not path.is_dir():
+                raise FileNotFoundError(f"Project not found: {project_id}")
+            meta = _read_json(path / "project.json", {})
+            self._ensure_initial_commit(path, meta.get("name") or project_id)
+            target = self._verify_commit(path, commit)
+            self._git(path, "notes", "--ref=vds-version-labels", "add", "-f", "-m", label, target)
+            return {"project": meta, "commit": target, "name": label}
+
+    def rollback_to_version(self, project_id: str, commit: str) -> dict:
+        with self._git_lock:
+            self.ensure()
+            path = self._project_dir(project_id)
+            if not path.is_dir():
+                raise FileNotFoundError(f"Project not found: {project_id}")
+            target = self._verify_commit(path, commit)
+            head = self._git(path, "rev-parse", "HEAD").stdout.strip()
+            self._git(path, "checkout", target, "--", ".")
+            self._remove_paths_added_after(path, target, head)
+            self._git(path, "clean", "-fd")
+            meta = _read_json(path / "project.json", {})
+            version = self._git_commit(
+                path,
+                self._commit_message(f"回退到版本 {target[:7]}", meta.get("name") or project_id),
+            )
+        detail = self.get_project(project_id)
+        self._refresh_index()
+        return {
+            "project": detail.get("project", {}),
+            "workspace": detail.get("workspace", {}),
+            "head": version.get("hash") or head,
+            "target": target,
+            "version": version,
+        }
+
+    def fork_project_version(self, project_id: str, commit: str, name: str = "") -> dict:
+        self.ensure()
+        source = self._project_dir(project_id)
+        if not source.is_dir():
+            raise FileNotFoundError(f"Project not found: {project_id}")
+        source_meta = _read_json(source / "project.json", {})
+        self._ensure_initial_commit(source, source_meta.get("name") or project_id)
+        target = self._verify_commit(source, commit)
+        fork_name = _clean_name(name or f"{source_meta.get('name') or project_id} 分叉")
+        fork_id, fork_dir = self._unique_project_dir(fork_name)
+        shutil.copytree(source, fork_dir)
+        self._git(fork_dir, "reset", "--hard", target)
+        self._git(fork_dir, "clean", "-fd")
+
+        now = _now()
+        meta = _read_json(fork_dir / "project.json", {})
+        meta.update({"id": fork_id, "name": fork_name, "created_at": now, "updated_at": now})
+        _write_json(fork_dir / "project.json", meta)
+        workspace = _read_json(fork_dir / "workspace.json", {})
+        workspace["project_id"] = fork_id
+        workspace["project_name"] = fork_name
+        workspace["dirs"] = _workspace_dirs(fork_dir, int(meta.get("control_count", 1)))
+        _write_json(fork_dir / "workspace.json", workspace)
+        version = self._git_commit(fork_dir, self._commit_message(f"分叉自版本 {target[:7]}", fork_name))
+        self._refresh_index()
+        return {"project": meta, "workspace": workspace, "version": version, "source_head": target}
 
     def update_ui_state(self, project_id: str, ui_state: dict) -> dict:
         path = self._project_dir(project_id)
@@ -712,7 +1141,7 @@ class ProjectStore:
         for child in sorted(self.trash_dir.iterdir(), key=lambda item: item.name.lower()):
             try:
                 if child.is_dir():
-                    shutil.rmtree(child)
+                    _remove_tree(child)
                 else:
                     child.unlink(missing_ok=True)
                 removed.append(child.name)

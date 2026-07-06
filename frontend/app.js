@@ -118,6 +118,14 @@ const state = {
   currentProjectName: "",
   projectQuery: "",
   projectSortMode: readStored(STORAGE_KEYS.projectSortMode, "updated"),
+  projectTagFilters: (() => {
+    try {
+      const parsed = JSON.parse(readStored(STORAGE_KEYS.projectTagFilters, "[]"));
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  })(),
   themeMode: readStored(STORAGE_KEYS.themeMode, "auto"),
   wallpaper: readStored(STORAGE_KEYS.wallpaper, "none"),
 };
@@ -170,12 +178,14 @@ const refs = {
   rescanWorkspaceBtn: document.querySelector("#rescanWorkspaceBtn"),
   saveProjectBtn: document.querySelector("#saveProjectBtn"),
   createProjectBtn: document.querySelector("#createProjectBtn"),
+  manageProjectTagsBtn: document.querySelector("#manageProjectTagsBtn"),
   refreshProjectsBtn: document.querySelector("#refreshProjectsBtn"),
   refreshListBtn: document.querySelector("#refreshListBtn"),
   cleanupTmpBtn: document.querySelector("#cleanupTmpBtn"),
   projectNameInput: document.querySelector("#projectNameInput"),
   projectSearchInput: document.querySelector("#projectSearchInput"),
   projectSortMode: document.querySelector("#projectSortMode"),
+  projectTagFilter: document.querySelector("#projectTagFilter"),
   projectGrid: document.querySelector("#projectGrid"),
   projectStatus: document.querySelector("#projectStatus"),
   workspaceStat: document.querySelector("#workspaceStat"),
@@ -1043,6 +1053,7 @@ const {
   saveCurrentProject,
   saveImportedWorkspaceToProject,
   createProject,
+  openProjectTagManager,
   openProject,
   saveOpenProjectUiState,
   cleanupTmpNow,
@@ -1260,6 +1271,7 @@ const { restorePersistedSettings, bindSettingsPersistence, bindEvents, bootstrap
   rescanWorkspace,
   saveCurrentProject,
   createProject,
+  openProjectTagManager,
   refreshProjects,
   cleanupTmpNow,
   scheduleCaptionAutosave,
