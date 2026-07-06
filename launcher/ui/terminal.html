@@ -5,6 +5,46 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Vision Dataset Studio Terminal</title>
     <style>
+      @font-face {
+        font-family: "HarmonyOS Sans SC Local";
+        src:
+          url("../assets/fonts/harmonyos-sans-sc/HarmonyOS_Sans_SC_Regular.ttf") format("truetype"),
+          url("../../frontend/assets/fonts/harmonyos-sans-sc/HarmonyOS_Sans_SC_Regular.ttf") format("truetype");
+        font-weight: 400;
+        font-style: normal;
+        font-display: swap;
+      }
+
+      @font-face {
+        font-family: "HarmonyOS Sans SC Local";
+        src:
+          url("../assets/fonts/harmonyos-sans-sc/HarmonyOS_Sans_SC_Medium.ttf") format("truetype"),
+          url("../../frontend/assets/fonts/harmonyos-sans-sc/HarmonyOS_Sans_SC_Medium.ttf") format("truetype");
+        font-weight: 500;
+        font-style: normal;
+        font-display: swap;
+      }
+
+      @font-face {
+        font-family: "HarmonyOS Sans SC Local";
+        src:
+          url("../assets/fonts/harmonyos-sans-sc/HarmonyOS_Sans_SC_Bold.ttf") format("truetype"),
+          url("../../frontend/assets/fonts/harmonyos-sans-sc/HarmonyOS_Sans_SC_Bold.ttf") format("truetype");
+        font-weight: 700;
+        font-style: normal;
+        font-display: swap;
+      }
+
+      @font-face {
+        font-family: "HarmonyOS Sans SC Local";
+        src:
+          url("../assets/fonts/harmonyos-sans-sc/HarmonyOS_Sans_SC_Black.ttf") format("truetype"),
+          url("../../frontend/assets/fonts/harmonyos-sans-sc/HarmonyOS_Sans_SC_Black.ttf") format("truetype");
+        font-weight: 800;
+        font-style: normal;
+        font-display: swap;
+      }
+
       :root {
         color-scheme: light;
         --terminal-bg: #eeeeee;
@@ -15,7 +55,7 @@
         --line: var(--terminal-line);
         --text: var(--terminal-text);
         --muted: var(--terminal-muted);
-        font-family: "HarmonyOS Sans SC", "HarmonyOS Sans", "HarmonyOS_Sans_SC", "Segoe UI", system-ui, sans-serif;
+        font-family: "HarmonyOS Sans SC Local", "HarmonyOS Sans SC", "HarmonyOS Sans", "HarmonyOS_Sans_SC", "Segoe UI", system-ui, sans-serif;
         background: var(--bg);
         color: var(--text);
       }

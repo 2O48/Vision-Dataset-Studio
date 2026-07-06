@@ -24,14 +24,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(workspace.router, prefix="/api/v1")
-app.include_router(items.router, prefix="/api/v1")
-app.include_router(batch.router, prefix="/api/v1")
-app.include_router(export.router, prefix="/api/v1")
-app.include_router(image_process.router, prefix="/api/v1")
-app.include_router(projects.router, prefix="/api/v1")
-app.include_router(ai.router, prefix="/api/v1")
-app.include_router(caption.router, prefix="/api/v1")
+for api_prefix in ("/api/v1", "/api"):
+    app.include_router(workspace.router, prefix=api_prefix)
+    app.include_router(items.router, prefix=api_prefix)
+    app.include_router(batch.router, prefix=api_prefix)
+    app.include_router(export.router, prefix=api_prefix)
+    app.include_router(image_process.router, prefix=api_prefix)
+    app.include_router(projects.router, prefix=api_prefix)
+    app.include_router(ai.router, prefix=api_prefix)
+    app.include_router(caption.router, prefix=api_prefix)
 
 
 @app.on_event("startup")
@@ -45,4 +46,9 @@ async def startup():
 
 @app.get("/api/v1/health")
 async def health():
+    return {"ok": True, "status": "healthy"}
+
+
+@app.get("/api/health")
+async def legacy_health():
     return {"ok": True, "status": "healthy"}
