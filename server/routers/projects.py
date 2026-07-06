@@ -51,6 +51,17 @@ class ProjectUiStateRequest(BaseModel):
     ui_state: dict = {}
 
 
+class ProjectVersionRequest(BaseModel):
+    id: str = ""
+    commit: str = ""
+
+
+class ProjectVersionForkRequest(BaseModel):
+    id: str = ""
+    commit: str = ""
+    name: str = ""
+
+
 class TmpCleanupRequest(BaseModel):
     max_age_hours: int = 48
 
@@ -94,6 +105,7 @@ def save_project(req: ProjectSaveRequest, ws: DatasetWorkspace = Depends(get_wor
         result_dir=dirs.get("result") or "",
         control_count=settings.get("control_count", result.get("project", {}).get("control_count", 1)),
         ignore_tokens=settings.get("ignore_tokens", []),
+        load_state=False,
     )
     items = workspace_info.get("items", []) if isinstance(workspace_info.get("items"), list) else []
     aliases = {
@@ -126,6 +138,7 @@ def open_project(req: ProjectOpenRequest, ws: DatasetWorkspace = Depends(get_wor
         result_dir=dirs.get("result") or "",
         control_count=settings.get("control_count", detail.get("project", {}).get("control_count", 1)),
         ignore_tokens=settings.get("ignore_tokens", []),
+        load_state=False,
     )
     items = workspace_info.get("items", []) if isinstance(workspace_info.get("items"), list) else []
     aliases = {
@@ -151,9 +164,40 @@ def rename_project(req: ProjectRenameRequest, store: ProjectStore = Depends(get_
     return {"ok": True, "project": project}
 
 
-@router.post("/projects/clone")
-def clone_project(req: ProjectRenameRequest, store: ProjectStore = Depends(get_project_store)):
-    result = store.clone_project(req.id, req.name)
+@router.post("/projects/fork")
+def fork_project(req: ProjectRenameRequest, store: ProjectStore = Depends(get_project_store)):
+    result = store.fork_project(req.id, req.name)
+    return {"ok": True, **result}
+
+
+@router.get("/projects/versions")
+def project_versions(id: str = "", store: ProjectStore = Depends(get_project_store)):
+    return {"ok": True, **store.list_versions(id)}
+
+
+@router.post("/projects/versions/rollback")
+def rollback_project_version(req: ProjectVersionRequest, ws: DatasetWorkspace = Depends(get_workspace), store: ProjectStore = Depends(get_project_store)):
+    result = store.rollback_to_version(req.id, req.commit)
+    workspace_info = result.get("workspace", {}) if isinstance(result.get("workspace"), dict) else {}
+    dirs = workspace_info.get("dirs", {}) if isinstance(workspace_info.get("dirs"), dict) else {}
+    settings = workspace_info.get("settings", {}) if isinstance(workspace_info.get("settings"), dict) else {}
+    summary = ws.open_dirs(
+        control1_dir=dirs.get("control1") or "",
+        control2_dir=dirs.get("control2") or "",
+        control3_dir=dirs.get("control3") or "",
+        result_dir=dirs.get("result") or "",
+        control_count=settings.get("control_count", result.get("project", {}).get("control_count", 1)),
+        ignore_tokens=settings.get("ignore_tokens", []),
+        load_state=False,
+    )
+    set_active_project(result.get("project", {}).get("id", req.id))
+    result["workspace"] = summary
+    return {"ok": True, **result}
+
+
+@router.post("/projects/versions/fork")
+def fork_project_version(req: ProjectVersionForkRequest, store: ProjectStore = Depends(get_project_store)):
+    result = store.fork_project_version(req.id, req.commit, req.name)
     return {"ok": True, **result}
 
 

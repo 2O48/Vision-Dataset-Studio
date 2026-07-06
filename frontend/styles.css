@@ -704,7 +704,7 @@ button {
 .dialog-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 200000;
+  z-index: 120000;
   display: grid;
   place-items: center;
   padding: 24px;
@@ -886,7 +886,7 @@ button {
 
 .item-context-menu {
   position: fixed;
-  z-index: 150000;
+  z-index: 200000;
   display: grid;
   gap: 4px;
   min-width: 190px;
@@ -1105,7 +1105,7 @@ button {
 
 .custom-select-menu {
   position: fixed;
-  z-index: 100000;
+  z-index: 200000;
   display: grid;
   gap: 4px;
   max-height: min(260px, 45vh);
@@ -1389,7 +1389,7 @@ button {
   position: fixed;
   top: var(--wallpaper-menu-top, 0px);
   left: var(--wallpaper-menu-left, 0px);
-  z-index: 120000;
+  z-index: 200000;
   display: grid;
   grid-template-columns: repeat(3, 50px);
   gap: 8px;
@@ -4532,6 +4532,105 @@ textarea::-webkit-resizer {
   gap: 8px;
 }
 
+.project-version-panel {
+  width: min(760px, 100%);
+  max-height: min(1000px, calc(100vh - 48px));
+  grid-template-rows: auto auto minmax(0, 1fr);
+  border-radius: 32px;
+}
+
+.project-version-dialog {
+  z-index: 90000;
+}
+
+.project-version-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.project-version-head h2 {
+  min-width: 0;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.project-version-status {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.project-version-list {
+  display: grid;
+  gap: 8px;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.project-version-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--surface-fill);
+}
+
+.project-version-body {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.project-version-body strong {
+  color: var(--list-heading);
+  font-size: 13px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.project-version-body span {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.project-version-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.project-version-icon-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 38px;
+  min-width: 38px;
+  height: 38px;
+  min-height: 38px;
+  padding: 0;
+  border-radius: 12px;
+}
+
+.project-version-icon-btn svg {
+  width: 20px;
+  height: 20px;
+  display: block;
+}
+
+.project-version-close-btn {
+  width: 40px;
+  min-width: 40px;
+  height: 40px;
+  min-height: 40px;
+  border-radius: 14px;
+}
+
 .model-picker-field {
   position: relative;
 }
@@ -4584,7 +4683,7 @@ textarea::-webkit-resizer {
 
 .model-picker-menu {
   position: fixed;
-  z-index: 100000;
+  z-index: 200000;
   display: grid;
   gap: 4px;
   padding: var(--menu-inset);

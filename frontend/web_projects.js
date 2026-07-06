@@ -22,6 +22,9 @@ export function createProjectsModule({
 }) {
   const PROJECT_STATE_VERSION = 1;
   let projectUiStateSaveTimer = 0;
+  let versionDialog = null;
+  let activeVersionProject = null;
+  let projectSavePromise = null;
 
   function setProjectStatus(message) {
     if (refs.projectStatus) refs.projectStatus.textContent = message;
@@ -346,6 +349,138 @@ export function createProjectsModule({
     return refs.projectNameInput.value.trim() || "未命名项目";
   }
 
+  function formatVersionTime(value) {
+    if (!value) return "未记录时间";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return value;
+    return date.toLocaleString();
+  }
+
+  function shortCommit(hash) {
+    return `${hash || ""}`.slice(0, 7);
+  }
+
+  const VERSION_ICONS = {
+    current: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" aria-hidden="true"><rect width="256" height="256" fill="none"/><line x1="128" y1="176" x2="128" y2="240" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/><line x1="64" y1="40" x2="192" y2="40" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/><line x1="40" y1="176" x2="216" y2="176" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/><line x1="56" y1="176" x2="80" y2="40" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/><line x1="176" y1="40" x2="200" y2="176" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/></svg>',
+    rollback: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" aria-hidden="true"><rect width="256" height="256" fill="none"/><polyline points="80 136 32 88 80 40" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/><path d="M80,200h88a56,56,0,0,0,56-56h0a56,56,0,0,0-56-56H32" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/></svg>',
+    fork: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" aria-hidden="true"><rect width="256" height="256" fill="none"/><path d="M64,88v24a16,16,0,0,0,16,16h96a16,16,0,0,0,16-16V88" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/><line x1="128" y1="128" x2="128" y2="168" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/><circle cx="64" cy="64" r="24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/><circle cx="128" cy="192" r="24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/><circle cx="192" cy="64" r="24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/></svg>',
+    close: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" aria-hidden="true"><rect width="256" height="256" fill="none"/><line x1="200" y1="56" x2="56" y2="200" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/><line x1="200" y1="200" x2="56" y2="56" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/></svg>',
+  };
+
+  function makeVersionIconButton({ icon, label, disabled = false } = {}) {
+    const button = document.createElement("button");
+    button.className = "button-ghost project-version-icon-btn";
+    button.type = "button";
+    button.innerHTML = icon || "";
+    button.disabled = Boolean(disabled);
+    button.setAttribute("aria-label", label || "");
+    button.title = label || "";
+    return button;
+  }
+
+  function ensureVersionDialog() {
+    if (versionDialog?.backdrop?.isConnected) return versionDialog;
+    const backdrop = document.createElement("div");
+    backdrop.className = "dialog-backdrop project-version-dialog";
+    backdrop.setAttribute("aria-hidden", "true");
+
+    const panel = document.createElement("section");
+    panel.className = "dialog-panel project-version-panel";
+    panel.setAttribute("role", "dialog");
+    panel.setAttribute("aria-modal", "true");
+
+    const head = document.createElement("div");
+    head.className = "project-version-head";
+    const title = document.createElement("h2");
+    title.textContent = "版本管理";
+    const closeBtn = makeVersionIconButton({ icon: VERSION_ICONS.close, label: "关闭" });
+    closeBtn.classList.add("project-version-close-btn");
+    closeBtn.addEventListener("click", closeVersionDialog);
+    head.append(title, closeBtn);
+
+    const status = document.createElement("p");
+    status.className = "project-version-status";
+    status.textContent = "正在读取版本...";
+
+    const list = document.createElement("div");
+    list.className = "project-version-list";
+
+    panel.append(head, status, list);
+    backdrop.append(panel);
+    backdrop.addEventListener("click", (event) => {
+      if (event.target === backdrop) closeVersionDialog();
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && backdrop.classList.contains("dialog-open")) closeVersionDialog();
+    });
+    document.body.appendChild(backdrop);
+    versionDialog = { backdrop, title, status, list };
+    return versionDialog;
+  }
+
+  function closeVersionDialog() {
+    const dialog = versionDialog;
+    if (!dialog?.backdrop) return;
+    dialog.backdrop.classList.remove("dialog-open");
+    dialog.backdrop.classList.add("dialog-closing");
+    dialog.backdrop.setAttribute("aria-hidden", "true");
+    window.setTimeout(() => {
+      dialog.backdrop.classList.remove("dialog-closing");
+    }, 180);
+  }
+
+  function showVersionDialog(project) {
+    const dialog = ensureVersionDialog();
+    activeVersionProject = project;
+    dialog.title.textContent = `版本管理：${project.name || project.id}`;
+    dialog.status.textContent = "正在读取版本...";
+    dialog.list.textContent = "";
+    dialog.backdrop.classList.remove("dialog-closing");
+    dialog.backdrop.setAttribute("aria-hidden", "false");
+    requestAnimationFrame(() => dialog.backdrop.classList.add("dialog-open"));
+    loadProjectVersions(project).catch((error) => {
+      dialog.status.textContent = error?.message || "读取版本失败。";
+      showError(error);
+    });
+  }
+
+  async function loadProjectVersions(project) {
+    const dialog = ensureVersionDialog();
+    const data = await apiGet("/api/projects/versions", { id: project.id });
+    const versions = Array.isArray(data.versions) ? data.versions : [];
+    dialog.list.textContent = "";
+    dialog.status.textContent = versions.length ? `共 ${versions.length} 个提交版本` : "暂无提交版本";
+    if (!versions.length) return;
+    for (const version of versions) {
+      const row = document.createElement("article");
+      row.className = "project-version-row";
+      const body = document.createElement("div");
+      body.className = "project-version-body";
+      const title = document.createElement("strong");
+      title.textContent = version.display_message || version.message || "未命名提交";
+      const meta = document.createElement("span");
+      meta.textContent = `${version.short_hash || shortCommit(version.hash)} · ${formatVersionTime(version.created_at)}`;
+      body.append(title, meta);
+
+      const actions = document.createElement("div");
+      actions.className = "project-version-actions";
+      const isCurrent = data.head === version.hash;
+      const rollbackBtn = makeVersionIconButton({
+        icon: isCurrent ? VERSION_ICONS.current : VERSION_ICONS.rollback,
+        label: isCurrent ? "当前版本" : "回退",
+        disabled: isCurrent,
+      });
+      if (!isCurrent) rollbackBtn.addEventListener("click", () => rollbackProjectVersion(project, version));
+
+      const forkBtn = makeVersionIconButton({ icon: VERSION_ICONS.fork, label: "分叉" });
+      forkBtn.addEventListener("click", () => forkProjectVersion(project, version));
+      actions.append(rollbackBtn, forkBtn);
+
+      row.append(body, actions);
+      dialog.list.appendChild(row);
+    }
+  }
+
   function isProjectNotFoundError(error) {
     return /Project not found:/i.test(`${error?.message || error || ""}`);
   }
@@ -375,34 +510,43 @@ export function createProjectsModule({
   }
 
   async function saveProject({ asNew = false, nameOverride = "" } = {}) {
-    if (state.captionDirty && state.selectedName) {
-      await saveCurrentCaption();
+    if (projectSavePromise) return projectSavePromise;
+    projectSavePromise = (async () => {
+      if (state.captionDirty && state.selectedName) {
+        await saveCurrentCaption();
+      }
+      const name = `${nameOverride || projectNameFromInput()}`.trim() || "未命名项目";
+      const payload = {
+        name,
+        control_count: Number(refs.controlCount?.value ?? 1),
+        ui_state: collectProjectUiState(name),
+      };
+      if (!asNew && state.currentProjectId) {
+        payload.overwrite_id = state.currentProjectId;
+      }
+      const data = await apiPost("/api/projects/save", payload);
+      state.currentProjectId = data.project?.id || "";
+      state.currentProjectName = data.project?.name || name;
+      refs.projectNameInput.value = data.project?.name || name;
+      if (state.currentProjectId) {
+        saveStored(STORAGE_KEYS.lastProjectId, state.currentProjectId);
+        saveStored(STORAGE_KEYS.lastProjectName, state.currentProjectName || state.currentProjectId);
+      }
+      renderWorkspaceSummary();
+      if (data.workspace) {
+        applyWorkspaceSummary(data.workspace);
+        rememberOpenedWorkspace(data.workspace);
+        await refreshItems({ skipDirtyCheck: true });
+      }
+      const version = data.version?.hash ? `（${shortCommit(data.version.hash)}）` : "";
+      setProjectStatus(`${asNew || !payload.overwrite_id ? "已提交项目版本" : "已提交当前版本"}：${data.project?.name || name}${version}`);
+      await refreshProjects();
+    })();
+    try {
+      return await projectSavePromise;
+    } finally {
+      projectSavePromise = null;
     }
-    const name = `${nameOverride || projectNameFromInput()}`.trim() || "未命名项目";
-    const payload = {
-      name,
-      control_count: Number(refs.controlCount?.value ?? 1),
-      ui_state: collectProjectUiState(name),
-    };
-    if (!asNew && state.currentProjectId) {
-      payload.overwrite_id = state.currentProjectId;
-    }
-    const data = await apiPost("/api/projects/save", payload);
-    state.currentProjectId = data.project?.id || "";
-    state.currentProjectName = data.project?.name || name;
-    refs.projectNameInput.value = data.project?.name || name;
-    if (state.currentProjectId) {
-      saveStored(STORAGE_KEYS.lastProjectId, state.currentProjectId);
-      saveStored(STORAGE_KEYS.lastProjectName, state.currentProjectName || state.currentProjectId);
-    }
-    renderWorkspaceSummary();
-    if (data.workspace) {
-      applyWorkspaceSummary(data.workspace);
-      rememberOpenedWorkspace(data.workspace);
-      await refreshItems({ skipDirtyCheck: true });
-    }
-    setProjectStatus(`${asNew || !payload.overwrite_id ? "已保存项目" : "已保存当前项目"}：${data.project?.name || name}`);
-    await refreshProjects();
   }
 
   async function saveCurrentProject() {
@@ -558,14 +702,39 @@ export function createProjectsModule({
     }).catch(showError);
   }
 
-  async function cloneProject(project) {
-    const defaultName = `${project.name || project.id} 副本`;
-    const name = await window.appPrompt("输入克隆后的项目名称", defaultName);
+  async function forkProject(project) {
+    const defaultName = `${project.name || project.id} 分叉`;
+    const name = await window.appPrompt("输入分叉后的项目名称", defaultName);
     if (!name || !name.trim()) return;
-    await runWithStatus("正在克隆项目...", async () => {
-      const data = await apiPost("/api/projects/clone", { id: project.id, name: name.trim() });
-      setProjectStatus(`已克隆项目：${data.project?.name || name.trim()}`);
+    await runWithStatus("正在分叉项目...", async () => {
+      const data = await apiPost("/api/projects/fork", { id: project.id, name: name.trim() });
+      setProjectStatus(`已分叉项目：${data.project?.name || name.trim()}`);
       await refreshProjects();
+    }).catch(showError);
+  }
+
+  async function rollbackProjectVersion(project, version) {
+    if (!(await window.appConfirm(`回退项目「${project.name || project.id}」到版本 ${version.short_hash || shortCommit(version.hash)}？当前项目文件会恢复到该提交。`))) return;
+    await runWithStatus("正在回退项目版本...", async () => {
+      const data = await apiPost("/api/projects/versions/rollback", { id: project.id, commit: version.hash });
+      closeVersionDialog();
+      setProjectStatus(`已回退到版本：${version.short_hash || shortCommit(version.hash)}`);
+      if (state.currentProjectId === project.id || activeVersionProject?.id === project.id) {
+        await openProject(data.project?.id || project.id, { skipCurrentStateSave: true });
+      }
+      await refreshProjects();
+    }).catch(showError);
+  }
+
+  async function forkProjectVersion(project, version) {
+    const defaultName = `${project.name || project.id} ${version.short_hash || shortCommit(version.hash)} 分叉`;
+    const name = await window.appPrompt("输入分叉项目名称", defaultName);
+    if (!name || !name.trim()) return;
+    await runWithStatus("正在分叉历史版本...", async () => {
+      const data = await apiPost("/api/projects/versions/fork", { id: project.id, commit: version.hash, name: name.trim() });
+      setProjectStatus(`已分叉项目：${data.project?.name || name.trim()}`);
+      await refreshProjects();
+      await loadProjectVersions(project);
     }).catch(showError);
   }
 
@@ -651,11 +820,17 @@ export function createProjectsModule({
       renameBtn.textContent = "重命名";
       renameBtn.addEventListener("click", () => renameProject(project));
 
-      const cloneBtn = document.createElement("button");
-      cloneBtn.className = "button-ghost";
-      cloneBtn.type = "button";
-      cloneBtn.textContent = "克隆";
-      cloneBtn.addEventListener("click", () => cloneProject(project));
+      const forkBtn = document.createElement("button");
+      forkBtn.className = "button-ghost";
+      forkBtn.type = "button";
+      forkBtn.textContent = "分叉";
+      forkBtn.addEventListener("click", () => forkProject(project));
+
+      const versionsBtn = document.createElement("button");
+      versionsBtn.className = "button-ghost";
+      versionsBtn.type = "button";
+      versionsBtn.textContent = "版本管理";
+      versionsBtn.addEventListener("click", () => showVersionDialog(project));
 
       const deleteBtn = document.createElement("button");
       deleteBtn.className = "button-ghost danger";
@@ -663,7 +838,7 @@ export function createProjectsModule({
       deleteBtn.textContent = "删除";
       deleteBtn.addEventListener("click", () => deleteProject(project));
 
-      actions.append(openBtn, renameBtn, cloneBtn, deleteBtn);
+      actions.append(openBtn, renameBtn, forkBtn, versionsBtn, deleteBtn);
       body.append(title, meta, actions);
       card.append(thumb, body);
       refs.projectGrid.appendChild(card);
@@ -680,7 +855,7 @@ export function createProjectsModule({
     saveOpenProjectUiState,
     openProject,
     renameProject,
-    cloneProject,
+    forkProject,
     deleteProject,
     cleanupTmpNow,
   };

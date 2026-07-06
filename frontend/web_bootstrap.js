@@ -1453,7 +1453,7 @@ export function createBootstrapModule({
 
     refs.loadWorkspaceBtn.addEventListener("click", () => runWithStatus("正在加载工作区...", () => loadWorkspace()).catch(showError));
     refs.rescanWorkspaceBtn.addEventListener("click", () => runWithStatus("正在重扫工作区...", () => rescanWorkspace()).catch(showError));
-    refs.saveProjectBtn?.addEventListener("click", () => runWithStatus("正在保存项目...", () => saveCurrentProject()).catch(showError));
+    refs.saveProjectBtn?.addEventListener("click", () => runWithStatus("正在提交版本...", () => saveCurrentProject()).catch(showError));
     refs.createProjectBtn?.addEventListener("click", () => createProject().catch(showError));
     refs.refreshProjectsBtn?.addEventListener("click", () => runWithStatus("正在刷新项目列表...", () => refreshProjects()).catch(showError));
     refs.refreshListBtn?.addEventListener("click", () => runWithStatus("正在重扫本地数据...", () => rescanWorkspace()).catch(showError));
@@ -1717,7 +1717,7 @@ export function createBootstrapModule({
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
         event.preventDefault();
         if (!event.repeat) {
-          runWithStatus("正在保存项目...", () => saveCurrentProject()).catch(showError);
+          runWithStatus("正在提交版本...", () => saveCurrentProject()).catch(showError);
         }
         return;
       }

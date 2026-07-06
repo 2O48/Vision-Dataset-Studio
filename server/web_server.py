@@ -361,6 +361,9 @@ class AppHandler(BaseHTTPRequestHandler):
                 project_id = query.get("id", [""])[0]
                 path_value = _project_thumbnail_path(project_id)
                 return self._send_project_thumbnail(path_value, query)
+            if path == "/api/projects/versions":
+                project_id = query.get("id", [""])[0]
+                return self._send_json({"ok": True, **PROJECT_STORE.list_versions(project_id)})
             if path == "/api/items":
                 filter_mode = query.get("filter", ["all"])[0]
                 tag_query = query.get("tag", [""])[0]
@@ -497,6 +500,7 @@ class AppHandler(BaseHTTPRequestHandler):
                     result_dir=dirs.get("result") or "",
                     control_count=settings.get("control_count", result.get("project", {}).get("control_count", 1)),
                     ignore_tokens=settings.get("ignore_tokens", []),
+                    load_state=False,
                 )
                 items = workspace.get("items", []) if isinstance(workspace.get("items"), list) else []
                 aliases = {
@@ -531,6 +535,7 @@ class AppHandler(BaseHTTPRequestHandler):
                     result_dir=dirs.get("result") or "",
                     control_count=settings.get("control_count", detail.get("project", {}).get("control_count", 1)),
                     ignore_tokens=settings.get("ignore_tokens", []),
+                    load_state=False,
                 )
                 items = workspace.get("items", []) if isinstance(workspace.get("items"), list) else []
                 aliases = {
@@ -556,9 +561,38 @@ class AppHandler(BaseHTTPRequestHandler):
                     _set_active_project(project.get("id", old_id))
                 return self._send_json({"ok": True, "project": project})
 
-            if path == "/api/projects/clone":
-                result = PROJECT_STORE.clone_project(
+            if path == "/api/projects/fork":
+                result = PROJECT_STORE.fork_project(
                     str(body.get("id", "") or ""),
+                    str(body.get("name", "") or ""),
+                )
+                return self._send_json({"ok": True, **result})
+
+            if path == "/api/projects/versions/rollback":
+                result = PROJECT_STORE.rollback_to_version(
+                    str(body.get("id", "") or ""),
+                    str(body.get("commit", "") or ""),
+                )
+                workspace = result.get("workspace", {}) if isinstance(result.get("workspace"), dict) else {}
+                dirs = workspace.get("dirs", {}) if isinstance(workspace.get("dirs"), dict) else {}
+                settings = workspace.get("settings", {}) if isinstance(workspace.get("settings"), dict) else {}
+                summary = WORKSPACE.open_dirs(
+                    control1_dir=dirs.get("control1") or "",
+                    control2_dir=dirs.get("control2") or "",
+                    control3_dir=dirs.get("control3") or "",
+                    result_dir=dirs.get("result") or "",
+                    control_count=settings.get("control_count", result.get("project", {}).get("control_count", 1)),
+                    ignore_tokens=settings.get("ignore_tokens", []),
+                    load_state=False,
+                )
+                result["workspace"] = summary
+                _set_active_project(result.get("project", {}).get("id", str(body.get("id", "") or "")))
+                return self._send_json({"ok": True, **result})
+
+            if path == "/api/projects/versions/fork":
+                result = PROJECT_STORE.fork_project_version(
+                    str(body.get("id", "") or ""),
+                    str(body.get("commit", "") or ""),
                     str(body.get("name", "") or ""),
                 )
                 return self._send_json({"ok": True, **result})
