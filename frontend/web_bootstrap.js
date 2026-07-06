@@ -26,6 +26,7 @@ export function createBootstrapModule({
   applyProjectUiState,
   renderViewer,
   renderTags,
+  updateCaptionSearchHighlight,
   renderQuickTags,
   renderGlobalTags,
   renderFilters,
@@ -1273,6 +1274,15 @@ export function createBootstrapModule({
       else state.segmentQuery = value || "";
     };
     const panelQuery = (panelId) => panelId === "secondary" ? (state.secondarySegmentQuery || "") : (state.segmentQuery || "");
+    const syncCaptionSearchHighlight = (panelId) => {
+      if (panelId !== "primary") return;
+      updateCaptionSearchHighlight?.();
+      renderTags?.();
+    };
+    const syncCaptionSearchTags = (panelId) => {
+      if (panelId !== "primary") return;
+      renderTags?.();
+    };
     const syncSearchClear = (panelId) => {
       const controls = panelControls[panelId];
       if (controls?.clearButton && controls.searchInput) controls.clearButton.hidden = !controls.searchInput.value.trim();
@@ -1307,6 +1317,7 @@ export function createBootstrapModule({
       const input = panelControls[panelId]?.searchInput;
       setPanelQuery(panelId, input?.value.trim() || "");
       syncSearchClear(panelId);
+      syncCaptionSearchTags(panelId);
       refreshItems(options).catch(showError);
     };
     const scheduleSearch = (panelId) => {
@@ -1337,7 +1348,9 @@ export function createBootstrapModule({
       const input = controls.searchInput;
       if (!input) return;
       input.addEventListener("input", () => {
+        setPanelQuery(panelId, input.value.trim() || "");
         syncSearchClear(panelId);
+        syncCaptionSearchHighlight(panelId);
         scheduleSearch(panelId);
       });
       input.addEventListener("change", () => {
@@ -1384,6 +1397,7 @@ export function createBootstrapModule({
         if (nextMode === panelSearchMode(panelId)) return;
         setPanelSearchMode(panelId, nextMode);
         syncSearchMode(panelId);
+        syncCaptionSearchTags(panelId);
         refreshItems({ skipDirtyCheck: true, suppressSelectionSync: true }).catch(showError);
       });
       controls.searchMatchGroup?.addEventListener("click", (event) => {
@@ -1395,6 +1409,7 @@ export function createBootstrapModule({
         if (nextMode === panelSearchMatchMode(panelId)) return;
         setPanelSearchMatchMode(panelId, nextMode);
         syncSearchMode(panelId);
+        syncCaptionSearchTags(panelId);
         refreshItems({ skipDirtyCheck: true, suppressSelectionSync: true }).catch(showError);
       });
     });

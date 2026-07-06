@@ -70,6 +70,21 @@ class DatasetWorkspaceTextTests(unittest.TestCase):
             exact = workspace.list_items(tag_query="soft light", search_mode="phrase", match_mode="exact")
             self.assertEqual([item["name"] for item in exact["items"]], ["sample"])
 
+    def test_list_search_refreshes_caption_cache_without_opening_item(self):
+        workspace = DatasetWorkspace()
+        with tempfile.TemporaryDirectory() as result_dir:
+            result_path = Path(result_dir)
+            (result_path / "sample.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+            workspace.open_dirs(result_dir=str(result_path), control_count=1)
+
+            self.assertEqual(workspace.list_items(tag_query="add channels", search_mode="phrase")["items"], [])
+            (result_path / "sample.txt").write_text("add channels, soft light", encoding="utf-8")
+
+            data = workspace.list_items(tag_query="add channels", search_mode="phrase", match_mode="exact")
+            self.assertEqual([item["name"] for item in data["items"]], ["sample"])
+            self.assertEqual(data["items"][0]["search_matches"]["segments"], ["add channels"])
+            self.assertEqual(workspace.get_global_segments()[0]["segment"], "add channels")
+
     def test_workspace_search_matches_nested_item_name(self):
         workspace = DatasetWorkspace()
         with tempfile.TemporaryDirectory() as result_dir:

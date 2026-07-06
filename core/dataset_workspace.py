@@ -220,6 +220,7 @@ class DatasetWorkspace:
             self.workspace_key = self._compute_workspace_key()
             self._load_workspace_state()
             self._apply_workspace_state()
+            self._refresh_caption_search_cache()
             self._mark_global_segments_dirty()
             self.file_names = sorted(self.file_names, key=_natural_key)
             return self._scanner.get_workspace_summary()
@@ -301,6 +302,7 @@ class DatasetWorkspace:
             self._resolution_mismatch.clear()
             self._resolution_index_ready = False
             self.file_names = sorted(self.file_names, key=_natural_key)
+            self._refresh_caption_search_cache()
             self._mark_global_segments_dirty()
             summary = self._scanner.get_workspace_summary()
             return {
@@ -314,6 +316,60 @@ class DatasetWorkspace:
     # ------------------------------------------------------------------
     def _mark_global_segments_dirty(self):
         self._state.mark_global_segments_dirty()
+
+    def _refresh_caption_search_cache(self) -> None:
+        """Refresh searchable caption text for the current visible items."""
+        valid_names = set(self.file_names)
+        changed = False
+
+        for name in list(self.txt_content):
+            if name not in valid_names:
+                self.txt_content.pop(name, None)
+                changed = True
+        for name in list(self.txt_files):
+            if name not in valid_names:
+                self.txt_files.pop(name, None)
+                changed = True
+
+        for name in self.file_names:
+            if name in self.caption_deleted:
+                if name in self.txt_content:
+                    self.txt_content.pop(name, None)
+                    changed = True
+                continue
+
+            if name in self.caption_overrides:
+                content = str(self.caption_overrides.get(name, "") or "")
+                if self.txt_content.get(name) != content:
+                    self.txt_content[name] = content
+                    changed = True
+                continue
+
+            txt_path = self.txt_files.get(name)
+            if txt_path is None:
+                result_path = self.files.get("result", {}).get(name)
+                if result_path is not None:
+                    candidate = result_path.with_suffix(".txt")
+                    if candidate.is_file():
+                        txt_path = candidate
+                        self.txt_files[name] = candidate
+                        changed = True
+
+            if txt_path is not None and txt_path.is_file():
+                content = self._items._read_text_file(txt_path)
+                if self.txt_content.get(name) != content:
+                    self.txt_content[name] = content
+                    changed = True
+            else:
+                if name in self.txt_content:
+                    self.txt_content.pop(name, None)
+                    changed = True
+                if txt_path is not None and self.txt_files.get(name) == txt_path:
+                    self.txt_files.pop(name, None)
+                    changed = True
+
+        if changed:
+            self._mark_global_segments_dirty()
 
     def _compute_workspace_key(self) -> str:
         return self._state_store._compute_workspace_key()
@@ -405,14 +461,17 @@ class DatasetWorkspace:
 
     def get_workspace_summary(self) -> dict:
         with self._lock:
+            self._refresh_caption_search_cache()
             return self._scanner.get_workspace_summary()
 
     def list_items(self, **kwargs) -> dict:
         with self._lock:
+            self._refresh_caption_search_cache()
             return self._scanner.list_items(**kwargs)
 
     def get_export_items(self, names: Optional[list[str]] = None) -> list[dict]:
         with self._lock:
+            self._refresh_caption_search_cache()
             return self._scanner.get_export_items(names)
 
     # ------------------------------------------------------------------
@@ -420,14 +479,17 @@ class DatasetWorkspace:
     # ------------------------------------------------------------------
     def get_item(self, name: str) -> dict:
         with self._lock:
+            self._refresh_caption_search_cache()
             return self._items.get_item(name)
 
     def get_global_segments(self) -> list[dict]:
         with self._lock:
+            self._refresh_caption_search_cache()
             return self._items.get_global_segments()
 
     def get_global_tags(self) -> list[dict]:
         with self._lock:
+            self._refresh_caption_search_cache()
             return self._items.get_global_tags()
 
     def save_segments(self, name: str, segments: list[str]) -> dict:
