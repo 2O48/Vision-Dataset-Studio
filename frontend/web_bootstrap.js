@@ -94,6 +94,280 @@ export function createBootstrapModule({
   syncCaptionDirty,
   restoreCaptionSettings,
 }) {
+  const appContextState = {
+    target: null,
+    editable: false,
+    closeTimer: 0,
+  };
+
+  function closeAppContextMenu() {
+    const menu = refs.appContextMenu;
+    if (!menu || menu.hidden) return;
+    if (appContextState.closeTimer) {
+      window.clearTimeout(appContextState.closeTimer);
+      appContextState.closeTimer = 0;
+    }
+    menu.classList.remove("menu-open");
+    menu.classList.add("menu-closing");
+    appContextState.closeTimer = window.setTimeout(() => {
+      appContextState.closeTimer = 0;
+      menu.hidden = true;
+      menu.classList.remove("menu-closing");
+    }, 180);
+  }
+
+  function positionAppContextMenu(event) {
+    const menu = refs.appContextMenu;
+    if (!menu) return;
+    if (appContextState.closeTimer) {
+      window.clearTimeout(appContextState.closeTimer);
+      appContextState.closeTimer = 0;
+    }
+    menu.classList.remove("menu-open", "menu-closing");
+    menu.hidden = false;
+    menu.style.left = "0px";
+    menu.style.top = "0px";
+    const rect = menu.getBoundingClientRect();
+    const padding = 8;
+    const left = Math.min(event.clientX, Math.max(padding, window.innerWidth - rect.width - padding));
+    const top = Math.min(event.clientY, Math.max(padding, window.innerHeight - rect.height - padding));
+    menu.style.left = `${Math.round(left)}px`;
+    menu.style.top = `${Math.round(top)}px`;
+    requestAnimationFrame(() => {
+      menu.classList.add("menu-open");
+    });
+  }
+
+  function isEditableContextTarget(target) {
+    if (!(target instanceof Element)) return false;
+    const editable = target.closest("textarea, input, [contenteditable='true'], [contenteditable='plaintext-only']");
+    return Boolean(editable);
+  }
+
+  function resolveEditableTarget(target) {
+    if (!(target instanceof Element)) return null;
+    return target.closest("textarea, input, [contenteditable='true'], [contenteditable='plaintext-only']");
+  }
+
+  function shouldBypassAppContextMenu(target) {
+    if (!(target instanceof Element)) return false;
+    return Boolean(
+      target.closest("#itemContextMenu, .item-card, .folder-filter-chip")
+    );
+  }
+
+  function isInputReadOnly(target) {
+    if (!target) return true;
+    if ("disabled" in target && target.disabled) return true;
+    if ("readOnly" in target && target.readOnly) return true;
+    if (target.getAttribute?.("contenteditable") && target.getAttribute("contenteditable") !== "false") return false;
+    return false;
+  }
+
+  function textSelectionLength(target) {
+    if (!target) return 0;
+    if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+      const start = typeof target.selectionStart === "number" ? target.selectionStart : 0;
+      const end = typeof target.selectionEnd === "number" ? target.selectionEnd : 0;
+      return Math.max(0, end - start);
+    }
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return 0;
+    const range = selection.getRangeAt(0);
+    if (!target.contains(range.commonAncestorContainer)) return 0;
+    return selection.toString().length;
+  }
+
+  function editableTextLength(target) {
+    if (!target) return 0;
+    if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+      return target.value?.length || 0;
+    }
+    return target.textContent?.length || 0;
+  }
+
+  function focusEditableTarget(target) {
+    if (!target?.focus) return;
+    target.focus({ preventScroll: true });
+  }
+
+  function configureAppContextMenu(target) {
+    const menu = refs.appContextMenu;
+    if (!menu) return;
+    const editableTarget = resolveEditableTarget(target);
+    const editable = Boolean(editableTarget);
+    appContextState.target = editableTarget || (target instanceof Element ? target : null);
+    appContextState.editable = editable;
+    const selectionLength = editable ? textSelectionLength(editableTarget) : 0;
+    const textLength = editable ? editableTextLength(editableTarget) : 0;
+    const readOnly = editable ? isInputReadOnly(editableTarget) : true;
+
+    menu.querySelectorAll("button[data-action]").forEach((button) => {
+      const action = button.dataset.action;
+      const show =
+        editable
+          ? action === "cut" || action === "copy" || action === "paste" || action === "select-all"
+          : action === "refresh";
+      button.hidden = !show;
+      if (!show) return;
+      if (action === "refresh") {
+        button.disabled = false;
+        return;
+      }
+      if (action === "cut") {
+        button.disabled = readOnly || selectionLength <= 0;
+        return;
+      }
+      if (action === "copy") {
+        button.disabled = selectionLength <= 0;
+        return;
+      }
+      if (action === "paste") {
+        button.disabled = readOnly || !navigator.clipboard?.readText;
+        return;
+      }
+      if (action === "select-all") {
+        button.disabled = textLength <= 0;
+      }
+    });
+  }
+
+  async function runAppContextAction(action) {
+    const target = appContextState.target;
+    if (action === "refresh") {
+      window.location.reload();
+      return;
+    }
+    if (!appContextState.editable || !target) return;
+    focusEditableTarget(target);
+
+    if (action === "select-all") {
+      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+        target.select();
+      } else {
+        const selection = window.getSelection();
+        const range = document.createRange();
+        range.selectNodeContents(target);
+        selection?.removeAllRanges();
+        selection?.addRange(range);
+      }
+      return;
+    }
+
+    if (action === "copy" || action === "cut") {
+      let handled = false;
+      try {
+        handled = document.execCommand(action);
+      } catch {
+        handled = false;
+      }
+
+      if (!handled && navigator.clipboard?.writeText) {
+        let selectedText = "";
+        if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+          const start = target.selectionStart ?? 0;
+          const end = target.selectionEnd ?? 0;
+          selectedText = target.value.slice(start, end);
+        } else {
+          selectedText = window.getSelection()?.toString() || "";
+        }
+        if (selectedText) {
+          await navigator.clipboard.writeText(selectedText);
+          handled = true;
+          if (action === "cut" && (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) && !isInputReadOnly(target)) {
+            const start = target.selectionStart ?? 0;
+            const end = target.selectionEnd ?? 0;
+            const nextValue = `${target.value.slice(0, start)}${target.value.slice(end)}`;
+            target.value = nextValue;
+            target.setSelectionRange(start, start);
+            target.dispatchEvent(new Event("input", { bubbles: true }));
+            target.dispatchEvent(new Event("change", { bubbles: true }));
+          }
+        }
+      }
+
+      if (!handled) showError("当前环境不支持该右键操作。");
+      return;
+    }
+
+    if (action === "paste") {
+      if (!navigator.clipboard?.readText) {
+        showError("当前环境不支持粘贴。");
+        return;
+      }
+      try {
+        const text = await navigator.clipboard.readText();
+        if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+          const start = target.selectionStart ?? target.value.length;
+          const end = target.selectionEnd ?? target.value.length;
+          target.setRangeText(text, start, end, "end");
+          target.dispatchEvent(new Event("input", { bubbles: true }));
+          target.dispatchEvent(new Event("change", { bubbles: true }));
+        } else {
+          const inserted = document.execCommand("insertText", false, text);
+          if (!inserted) {
+            const selection = window.getSelection();
+            if (selection?.rangeCount) {
+              const range = selection.getRangeAt(0);
+              range.deleteContents();
+              range.insertNode(document.createTextNode(text));
+              range.collapse(false);
+            }
+          }
+          target.dispatchEvent(new Event("input", { bubbles: true }));
+          target.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+      } catch (error) {
+        showError(error?.message || "粘贴失败。");
+      }
+    }
+  }
+
+  function bindAppContextMenu() {
+    const menu = refs.appContextMenu;
+    if (!menu || menu.dataset.bound === "true") return;
+    menu.dataset.bound = "true";
+
+    menu.addEventListener("click", async (event) => {
+      const button = event.target.closest("button[data-action]");
+      if (!button || button.disabled) return;
+      const { action } = button.dataset;
+      closeAppContextMenu();
+      await runAppContextAction(action);
+    });
+
+    document.addEventListener(
+      "contextmenu",
+      (event) => {
+        if (event.target instanceof Element && event.target.closest("#appContextMenu")) {
+          event.preventDefault();
+          return;
+        }
+        if (shouldBypassAppContextMenu(event.target)) {
+          closeAppContextMenu();
+          return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation?.();
+        configureAppContextMenu(event.target);
+        positionAppContextMenu(event);
+      },
+      true
+    );
+
+    document.addEventListener("pointerdown", (event) => {
+      if (event.target instanceof Element && event.target.closest("#appContextMenu")) return;
+      closeAppContextMenu();
+    });
+    document.addEventListener("scroll", closeAppContextMenu, true);
+    window.addEventListener("resize", closeAppContextMenu);
+    window.addEventListener("blur", closeAppContextMenu);
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") closeAppContextMenu();
+    });
+  }
+
   function enhanceTextareaResizers() {
     const textareas = Array.from(document.querySelectorAll("textarea"));
 
@@ -961,6 +1235,7 @@ export function createBootstrapModule({
   function bindEvents() {
     enhanceFloatingScrollbars();
     enhanceSelectMenus();
+    bindAppContextMenu();
 
     function numericCssVar(name, fallback) {
       const value = window.getComputedStyle(refs.workbenchShell).getPropertyValue(name).trim();

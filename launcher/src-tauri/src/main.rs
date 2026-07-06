@@ -363,9 +363,7 @@ fn apply_launcher_window_style(window: &tauri::WebviewWindow) {
 fn apply_platform_window_style(_window: &tauri::WebviewWindow) {}
 
 #[cfg(target_os = "windows")]
-fn apply_platform_window_style(window: &tauri::WebviewWindow) {
-    let _ = window_vibrancy::apply_acrylic(window, Some((238, 238, 238, 0)));
-}
+fn apply_platform_window_style(_window: &tauri::WebviewWindow) {}
 
 #[cfg(target_os = "macos")]
 fn apply_platform_window_style(window: &tauri::WebviewWindow) {
@@ -505,6 +503,7 @@ fn launch_backend(state: Arc<LauncherState>) -> Result<String, String> {
         if wait_for_port(&host, port, Duration::from_millis(200)) {
             if backend_ready(&host, port) {
                 push_log(&state, format!("[launcher] using existing backend at {}", url));
+                push_log(&state, "[launcher] backend was started outside this launcher; terminal output stays in the already-open PowerShell/terminal window.");
                 update_repo_in_background(root);
                 return Ok(url);
             }

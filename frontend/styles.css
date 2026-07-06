@@ -943,6 +943,22 @@ button {
   display: none;
 }
 
+.item-context-menu button:disabled {
+  border-color: transparent;
+  background: transparent;
+  color: color-mix(in srgb, var(--list-heading) 46%, transparent);
+  box-shadow: none;
+  cursor: default;
+}
+
+.item-context-menu button:disabled:hover,
+.item-context-menu button:disabled:focus-visible {
+  border-color: transparent;
+  background: transparent;
+  color: color-mix(in srgb, var(--list-heading) 46%, transparent);
+  box-shadow: none;
+}
+
 .item-context-menu button:hover,
 .item-context-menu button:focus-visible {
   border-color: var(--accent);

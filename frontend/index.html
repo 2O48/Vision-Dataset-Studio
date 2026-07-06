@@ -1067,6 +1067,73 @@
     </button>
   </div>
 
+  <div class="item-context-menu" id="appContextMenu" hidden>
+    <button type="button" data-action="refresh">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" aria-hidden="true">
+        <rect width="256" height="256" fill="none" />
+        <polyline points="24 56 24 104 72 104" fill="none" stroke="currentColor" stroke-linecap="round"
+          stroke-linejoin="round" stroke-width="16" />
+        <path d="M67.59,192A88,88,0,1,0,65.77,65.77L24,104" fill="none" stroke="currentColor"
+          stroke-linecap="round" stroke-linejoin="round" stroke-width="16" />
+      </svg>
+      <span>刷新</span>
+    </button>
+    <button type="button" data-action="cut">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" aria-hidden="true">
+        <rect width="256" height="256" fill="none" />
+        <circle cx="60" cy="76" r="28" fill="none" stroke="currentColor" stroke-linecap="round"
+          stroke-linejoin="round" stroke-width="16" />
+        <circle cx="60" cy="180" r="28" fill="none" stroke="currentColor" stroke-linecap="round"
+          stroke-linejoin="round" stroke-width="16" />
+        <line x1="136" y1="128" x2="83.11" y2="164.19" fill="none" stroke="currentColor"
+          stroke-linecap="round" stroke-linejoin="round" stroke-width="16" />
+        <line x1="232" y1="62.32" x2="164.33" y2="108.61" fill="none" stroke="currentColor"
+          stroke-linecap="round" stroke-linejoin="round" stroke-width="16" />
+        <line x1="232" y1="193.68" x2="83.11" y2="91.81" fill="none" stroke="currentColor"
+          stroke-linecap="round" stroke-linejoin="round" stroke-width="16" />
+      </svg>
+      <span>剪切</span>
+    </button>
+    <button type="button" data-action="copy">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" aria-hidden="true">
+        <rect width="256" height="256" fill="none" />
+        <polyline points="168 168 216 168 216 40 88 40 88 88" fill="none" stroke="currentColor"
+          stroke-linecap="round" stroke-linejoin="round" stroke-width="16" />
+        <rect x="40" y="88" width="128" height="128" fill="none" stroke="currentColor" stroke-linecap="round"
+          stroke-linejoin="round" stroke-width="16" />
+      </svg>
+      <span>复制</span>
+    </button>
+    <button type="button" data-action="paste">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" aria-hidden="true">
+        <rect width="256" height="256" fill="none" />
+        <line x1="96" y1="152" x2="160" y2="152" fill="none" stroke="currentColor" stroke-linecap="round"
+          stroke-linejoin="round" stroke-width="16" />
+        <line x1="96" y1="120" x2="160" y2="120" fill="none" stroke="currentColor" stroke-linecap="round"
+          stroke-linejoin="round" stroke-width="16" />
+        <path d="M160,40h40a8,8,0,0,1,8,8V216a8,8,0,0,1-8,8H56a8,8,0,0,1-8-8V48a8,8,0,0,1,8-8H96" fill="none"
+          stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16" />
+        <path d="M88,72V64a40,40,0,0,1,80,0v8Z" fill="none" stroke="currentColor" stroke-linecap="round"
+          stroke-linejoin="round" stroke-width="16" />
+      </svg>
+      <span>粘贴</span>
+    </button>
+    <button type="button" data-action="select-all">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" aria-hidden="true">
+        <rect width="256" height="256" fill="none" />
+        <path d="M128,80a32,32,0,0,1,32-32h16" fill="none" stroke="currentColor" stroke-linecap="round"
+          stroke-linejoin="round" stroke-width="16" />
+        <path d="M176,208H160a32,32,0,0,1-32-32" fill="none" stroke="currentColor" stroke-linecap="round"
+          stroke-linejoin="round" stroke-width="16" />
+        <path d="M80,208H96a32,32,0,0,0,32-32V80A32,32,0,0,0,96,48H80" fill="none" stroke="currentColor"
+          stroke-linecap="round" stroke-linejoin="round" stroke-width="16" />
+        <line x1="104" y1="128" x2="152" y2="128" fill="none" stroke="currentColor" stroke-linecap="round"
+          stroke-linejoin="round" stroke-width="16" />
+      </svg>
+      <span>全选</span>
+    </button>
+  </div>
+
   <template id="tagChipTemplate">
     <button class="chip" type="button">
       <span class="chip-text"></span>

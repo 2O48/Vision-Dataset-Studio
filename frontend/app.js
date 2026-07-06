@@ -328,6 +328,7 @@ const refs = {
   topAiProgressText: document.querySelector("#topAiProgressText"),
   aiProgressBar: document.querySelector("#aiProgressBar"),
   aiStatusLine: document.querySelector("#aiStatusLine"),
+  appContextMenu: document.querySelector("#appContextMenu"),
 };
 
 function createAppDialog() {
