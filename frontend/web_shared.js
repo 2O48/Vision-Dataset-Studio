@@ -51,6 +51,7 @@ export const STORAGE_KEYS = {
   quickTags: storageKey("quick-tags"),
   quickTagsCollapsed: storageKey("quick-tags-collapsed"),
   projectSortMode: storageKey("project-sort-mode"),
+  projectTagFilters: storageKey("project-tag-filters"),
   themeMode: storageKey("theme-mode"),
   wallpaper: storageKey("wallpaper"),
   captionBackend: storageKey("caption-backend"),

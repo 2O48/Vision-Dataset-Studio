@@ -25,6 +25,14 @@ export function createProjectsModule({
   let versionDialog = null;
   let activeVersionProject = null;
   let projectSavePromise = null;
+  let projectTags = [];
+  let projectTagDragIndex = -1;
+  let projectTagDragMoved = false;
+  let projectTagHoverTimer = 0;
+  let projectTagHoverRow = null;
+  let projectTagSortTimer = 0;
+  let projectEditDialog = null;
+  let projectTagDialog = null;
 
   function setProjectStatus(message) {
     if (refs.projectStatus) refs.projectStatus.textContent = message;
@@ -312,9 +320,13 @@ export function createProjectsModule({
 
   function visibleProjects() {
     const query = state.projectQuery.trim().toLowerCase();
+    const tagFilters = activeProjectTagFilters();
     let rows = state.projects.filter((project) => {
-      if (!query) return true;
-      return `${project.name || ""} ${project.id || ""}`.toLowerCase().includes(query);
+      const matchesQuery = !query || `${project.name || ""} ${project.id || ""}`.toLowerCase().includes(query);
+      if (!matchesQuery) return false;
+      if (!tagFilters.length) return true;
+      const projectTagSet = new Set(_cleanTagList(project.tags || []).map((tag) => tag.toLowerCase()));
+      return tagFilters.every((tag) => projectTagSet.has(tag.toLowerCase()));
     });
     rows = [...rows].sort((a, b) => {
       if (state.projectSortMode === "name") {
@@ -326,9 +338,87 @@ export function createProjectsModule({
     return rows;
   }
 
+  function availableProjectFilterTags() {
+    const tags = [];
+    const seen = new Set();
+    const add = (value) => {
+      const tag = _cleanTagList([value])[0] || "";
+      const key = tag.toLowerCase();
+      if (tag && !seen.has(key)) {
+        tags.push(tag);
+        seen.add(key);
+      }
+    };
+    projectTags.forEach(add);
+    state.projects.forEach((project) => (Array.isArray(project.tags) ? project.tags : []).forEach(add));
+    return tags;
+  }
+
+  function activeProjectTagFilters() {
+    return _cleanTagList(state.projectTagFilters || []);
+  }
+
+  function saveProjectTagFilters(filters) {
+    state.projectTagFilters = _cleanTagList(filters);
+    saveStored(STORAGE_KEYS.projectTagFilters, JSON.stringify(state.projectTagFilters));
+  }
+
+  function normalizeProjectTagFilters() {
+    const available = new Set(availableProjectFilterTags().map((tag) => tag.toLowerCase()));
+    const next = activeProjectTagFilters().filter((tag) => available.has(tag.toLowerCase()));
+    if (next.length !== activeProjectTagFilters().length) saveProjectTagFilters(next);
+  }
+
+  function renderProjectTagFilters() {
+    if (!refs.projectTagFilter) return;
+    refs.projectTagFilter.textContent = "";
+    const tags = availableProjectFilterTags();
+    const selected = activeProjectTagFilters();
+    refs.projectTagFilter.hidden = !tags.length;
+    if (!tags.length) return;
+
+    const all = document.createElement("button");
+    all.type = "button";
+    all.className = "project-tag-filter-tab folder-filter-chip";
+    all.textContent = "全部";
+    all.classList.toggle("active", !selected.length);
+    all.setAttribute("aria-pressed", String(!selected.length));
+    all.addEventListener("click", () => {
+      saveProjectTagFilters([]);
+      renderProjects();
+    });
+    refs.projectTagFilter.appendChild(all);
+
+    const options = document.createElement("div");
+    options.className = "project-tag-filter-options folder-filter-group";
+    refs.projectTagFilter.appendChild(options);
+
+    const selectedSet = new Set(selected.map((tag) => tag.toLowerCase()));
+    for (const tag of tags) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "project-tag-filter-tab folder-filter-chip";
+      button.textContent = tag;
+      button.dataset.tag = tag;
+      const active = selectedSet.has(tag.toLowerCase());
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-pressed", String(active));
+      button.addEventListener("click", () => {
+        const next = active
+          ? selected.filter((item) => item.toLowerCase() !== tag.toLowerCase())
+          : [...selected, tag];
+        saveProjectTagFilters(next);
+        renderProjects();
+      });
+      options.appendChild(button);
+    }
+  }
+
   async function refreshProjects() {
     const data = await apiGet("/api/projects");
     state.projects = data.projects || [];
+    await loadProjectTags();
+    normalizeProjectTagFilters();
     if (!state.currentProjectId && !state.currentProjectName && state.projects.length === 1 && state.workspace?.counts?.all) {
       const project = state.projects[0];
       state.currentProjectId = project.id || "";
@@ -346,7 +436,7 @@ export function createProjectsModule({
   }
 
   function projectNameFromInput() {
-    return refs.projectNameInput.value.trim() || "未命名项目";
+    return `${state.currentProjectName || state.workspace?.project_name || ""}`.trim() || importedWorkspaceProjectName();
   }
 
   function formatVersionTime(value) {
@@ -360,11 +450,35 @@ export function createProjectsModule({
     return `${hash || ""}`.slice(0, 7);
   }
 
+  function formatProjectCardTime(value) {
+    const raw = `${value || ""}`.trim();
+    if (!raw) return "未记录时间";
+    const date = new Date(raw);
+    if (!Number.isNaN(date.getTime())) {
+      const pad = (num) => `${num}`.padStart(2, "0");
+      return [
+        `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`,
+        `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`,
+      ].join(" ");
+    }
+    return raw.replace("T", " ").replace(/([+-]\d{2}:\d{2}|Z)$/, "");
+  }
+
+  function projectCardTime(project) {
+    const useCreated = state.projectSortMode === "created";
+    const time = formatProjectCardTime(useCreated ? project.created_at : project.updated_at);
+    const commit = shortCommit(useCreated ? project.created_commit : project.updated_commit);
+    return commit ? `${time} · ${commit}` : time;
+  }
+
   const VERSION_ICONS = {
+    edit: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" aria-hidden="true"><rect width="256" height="256" fill="none"/><path d="M96,216H48a8,8,0,0,1-8-8V163.31a8,8,0,0,1,2.34-5.65L165.66,34.34a8,8,0,0,1,11.31,0L221.66,79a8,8,0,0,1,0,11.31Z" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/><line x1="216" y1="216" x2="96" y2="216" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/><line x1="136" y1="64" x2="192" y2="120" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/></svg>',
     current: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" aria-hidden="true"><rect width="256" height="256" fill="none"/><line x1="128" y1="176" x2="128" y2="240" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/><line x1="64" y1="40" x2="192" y2="40" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/><line x1="40" y1="176" x2="216" y2="176" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/><line x1="56" y1="176" x2="80" y2="40" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/><line x1="176" y1="40" x2="200" y2="176" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/></svg>',
+    version: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" aria-hidden="true"><rect width="256" height="256" fill="none"/><circle cx="128" cy="128" r="48" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/><line x1="8" y1="128" x2="80" y2="128" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/><line x1="176" y1="128" x2="248" y2="128" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/></svg>',
     rollback: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" aria-hidden="true"><rect width="256" height="256" fill="none"/><polyline points="80 136 32 88 80 40" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/><path d="M80,200h88a56,56,0,0,0,56-56h0a56,56,0,0,0-56-56H32" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/></svg>',
     fork: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" aria-hidden="true"><rect width="256" height="256" fill="none"/><path d="M64,88v24a16,16,0,0,0,16,16h96a16,16,0,0,0,16-16V88" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/><line x1="128" y1="128" x2="128" y2="168" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/><circle cx="64" cy="64" r="24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/><circle cx="128" cy="192" r="24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/><circle cx="192" cy="64" r="24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/></svg>',
     close: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" aria-hidden="true"><rect width="256" height="256" fill="none"/><line x1="200" y1="56" x2="56" y2="200" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/><line x1="200" y1="200" x2="56" y2="56" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/></svg>',
+    delete: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" aria-hidden="true"><rect width="256" height="256" fill="none"/><line x1="216" y1="56" x2="40" y2="56" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/><line x1="104" y1="104" x2="104" y2="168" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/><line x1="152" y1="104" x2="152" y2="168" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/><path d="M200,56V208a8,8,0,0,1-8,8H64a8,8,0,0,1-8-8V56" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/><path d="M168,56V40a16,16,0,0,0-16-16H104A16,16,0,0,0,88,40V56" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/></svg>',
   };
 
   function makeVersionIconButton({ icon, label, disabled = false } = {}) {
@@ -376,6 +490,393 @@ export function createProjectsModule({
     button.setAttribute("aria-label", label || "");
     button.title = label || "";
     return button;
+  }
+
+  async function loadProjectTags() {
+    const data = await apiGet("/api/projects/tags");
+    projectTags = Array.isArray(data.tags) ? data.tags : [];
+    return projectTags;
+  }
+
+  function openDialogBackdrop(backdrop) {
+    backdrop.classList.remove("dialog-closing");
+    backdrop.setAttribute("aria-hidden", "false");
+    requestAnimationFrame(() => backdrop.classList.add("dialog-open"));
+  }
+
+  function closeDialogBackdrop(backdrop) {
+    if (!backdrop) return;
+    backdrop.classList.remove("dialog-open");
+    backdrop.classList.add("dialog-closing");
+    backdrop.setAttribute("aria-hidden", "true");
+    window.setTimeout(() => backdrop.classList.remove("dialog-closing"), 180);
+  }
+
+  function renderTagChoices(container, selected = []) {
+    container.textContent = "";
+    const selectedSet = new Set(_cleanTagList(selected).map((tag) => tag.casefold?.() || tag.toLowerCase()));
+    if (!projectTags.length) {
+      const empty = document.createElement("p");
+      empty.className = "project-tag-empty";
+      empty.textContent = "暂无可选标签";
+      container.appendChild(empty);
+      return;
+    }
+    for (const tag of projectTags) {
+      const button = document.createElement("button");
+      button.className = "project-tag-choice";
+      button.type = "button";
+      button.dataset.tag = tag;
+      button.textContent = tag;
+      const active = selectedSet.has(tag.casefold?.() || tag.toLowerCase());
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-pressed", String(active));
+      button.addEventListener("click", () => {
+        const nextActive = !button.classList.contains("active");
+        button.classList.toggle("active", nextActive);
+        button.setAttribute("aria-pressed", String(nextActive));
+      });
+      container.appendChild(button);
+    }
+  }
+
+  function selectedTagChoices(container) {
+    return Array.from(container.querySelectorAll(".project-tag-choice.active")).map((button) => button.dataset.tag || "");
+  }
+
+  function _cleanTagList(values) {
+    const result = [];
+    const seen = new Set();
+    for (const value of Array.isArray(values) ? values : []) {
+      const tag = `${value || ""}`.trim().replace(/\s+/g, " ").slice(0, 40);
+      const key = tag.toLowerCase();
+      if (tag && !seen.has(key)) {
+        result.push(tag);
+        seen.add(key);
+      }
+    }
+    return result;
+  }
+
+  function ensureProjectEditDialog() {
+    if (projectEditDialog?.backdrop?.isConnected) return projectEditDialog;
+    const backdrop = document.createElement("div");
+    backdrop.className = "dialog-backdrop project-edit-dialog";
+    backdrop.setAttribute("aria-hidden", "true");
+    const panel = document.createElement("section");
+    panel.className = "dialog-panel project-edit-panel";
+    panel.setAttribute("role", "dialog");
+    panel.setAttribute("aria-modal", "true");
+    const title = document.createElement("h2");
+    title.textContent = "修改项目";
+    const input = document.createElement("input");
+    input.className = "dialog-input";
+    input.placeholder = "项目名称";
+    const tags = document.createElement("div");
+    tags.className = "project-tag-select";
+    const actions = document.createElement("div");
+    actions.className = "dialog-actions";
+    const cancel = document.createElement("button");
+    cancel.className = "button-ghost";
+    cancel.type = "button";
+    cancel.textContent = "取消";
+    const confirm = document.createElement("button");
+    confirm.className = "button-primary";
+    confirm.type = "button";
+    confirm.textContent = "确定";
+    actions.append(cancel, confirm);
+    panel.append(title, input, tags, actions);
+    backdrop.appendChild(panel);
+    backdrop.addEventListener("click", (event) => {
+      if (event.target === backdrop) closeDialogBackdrop(backdrop);
+    });
+    cancel.addEventListener("click", () => closeDialogBackdrop(backdrop));
+    document.body.appendChild(backdrop);
+    projectEditDialog = { backdrop, input, tags, confirm };
+    return projectEditDialog;
+  }
+
+  async function openProjectEditor(project) {
+    await loadProjectTags();
+    const dialog = ensureProjectEditDialog();
+    dialog.input.value = project.name || project.id || "";
+    renderTagChoices(dialog.tags, project.tags || []);
+    dialog.confirm.onclick = async () => {
+      const name = dialog.input.value.trim();
+      if (!name) return;
+      closeDialogBackdrop(dialog.backdrop);
+      await runWithStatus("正在修改项目...", async () => {
+        const data = await apiPost("/api/projects/rename", {
+          id: project.id,
+          name,
+          tags: selectedTagChoices(dialog.tags),
+        });
+        if (state.currentProjectId === project.id) {
+          state.currentProjectId = data.project?.id || project.id;
+          state.currentProjectName = data.project?.name || name;
+          if (refs.projectNameInput) refs.projectNameInput.value = state.currentProjectName;
+          renderWorkspaceSummary();
+        }
+        setProjectStatus(`已修改项目：${data.project?.name || name}`);
+        await refreshProjects();
+      });
+    };
+    openDialogBackdrop(dialog.backdrop);
+    dialog.input.focus({ preventScroll: true });
+  }
+
+  function ensureProjectTagDialog() {
+    if (projectTagDialog?.backdrop?.isConnected) return projectTagDialog;
+    const backdrop = document.createElement("div");
+    backdrop.className = "dialog-backdrop project-tag-dialog";
+    backdrop.setAttribute("aria-hidden", "true");
+    const panel = document.createElement("section");
+    panel.className = "dialog-panel project-version-panel project-tag-panel";
+    panel.setAttribute("role", "dialog");
+    panel.setAttribute("aria-modal", "true");
+    const head = document.createElement("div");
+    head.className = "project-version-head";
+    const title = document.createElement("h2");
+    title.textContent = "标签管理";
+    const close = makeVersionIconButton({ icon: VERSION_ICONS.close, label: "关闭" });
+    close.classList.add("project-version-close-btn");
+    head.append(title, close);
+    const row = document.createElement("div");
+    row.className = "project-tag-add-row";
+    const input = document.createElement("input");
+    input.className = "dialog-input";
+    input.placeholder = "新增标签";
+    const add = document.createElement("button");
+    add.className = "button-primary";
+    add.type = "button";
+    add.textContent = "添加";
+    row.append(input, add);
+    const list = document.createElement("div");
+    list.className = "project-version-list project-tag-manager-list";
+    panel.append(head, row, list);
+    backdrop.appendChild(panel);
+    backdrop.addEventListener("click", (event) => {
+      if (event.target === backdrop) closeDialogBackdrop(backdrop);
+    });
+    close.addEventListener("click", () => closeDialogBackdrop(backdrop));
+    add.addEventListener("click", () => addProjectTag(input.value));
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        addProjectTag(input.value);
+      }
+    });
+    document.body.appendChild(backdrop);
+    projectTagDialog = { backdrop, input, list };
+    return projectTagDialog;
+  }
+
+  async function saveProjectTagList(tags) {
+    const data = await apiPost("/api/projects/tags", { tags: _cleanTagList(tags) });
+    projectTags = Array.isArray(data.tags) ? data.tags : [];
+    renderProjectTagManager();
+    await refreshProjects();
+  }
+
+  async function addProjectTag(value) {
+    const tag = _cleanTagList([value])[0] || "";
+    if (!tag) return;
+    const next = _cleanTagList([...projectTags, tag]);
+    if (projectTagDialog?.input) projectTagDialog.input.value = "";
+    await saveProjectTagList(next);
+  }
+
+  function renderProjectTagManager() {
+    const dialog = ensureProjectTagDialog();
+    dialog.list.textContent = "";
+    if (!projectTags.length) {
+      const empty = document.createElement("p");
+      empty.className = "project-tag-empty";
+      empty.textContent = "暂无标签";
+      dialog.list.appendChild(empty);
+      return;
+    }
+    projectTags.forEach((tag, index) => {
+      const row = document.createElement("div");
+      row.className = "project-version-row project-tag-manager-row";
+      row.dataset.tagIndex = String(index);
+      row.draggable = true;
+      const handle = document.createElement("span");
+      handle.className = "quick-tag-handle project-tag-drag-handle";
+      handle.textContent = "::";
+      handle.draggable = true;
+      handle.title = "拖拽排序";
+      const body = document.createElement("div");
+      body.className = "project-tag-manager-body";
+      const name = document.createElement("span");
+      name.className = "project-tag-manager-name";
+      name.textContent = tag;
+      body.appendChild(name);
+      const actions = document.createElement("div");
+      actions.className = "project-version-actions";
+      const remove = makeVersionIconButton({ icon: VERSION_ICONS.delete, label: "删除" });
+      remove.addEventListener("click", () => saveProjectTagList(projectTags.filter((item) => item !== tag)).catch(showError));
+      actions.appendChild(remove);
+      row.addEventListener("dragstart", (event) => {
+        if (event.target?.closest?.("button")) {
+          event.preventDefault();
+          return;
+        }
+        projectTagDragIndex = Number(row.dataset.tagIndex);
+        projectTagDragMoved = false;
+        row.classList.add("dragging");
+        event.dataTransfer?.setData("text/plain", String(projectTagDragIndex));
+        if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
+      });
+      row.addEventListener("dragend", () => {
+        clearProjectTagHoverTimer();
+        const moved = projectTagDragMoved;
+        projectTagDragIndex = -1;
+        projectTagDragMoved = false;
+        row.classList.remove("dragging");
+        dialog.list.classList.remove("sorting");
+        if (moved) saveProjectTagList([...projectTags]).catch(showError);
+      });
+      row.addEventListener("dragover", handleProjectTagDragOver);
+      row.addEventListener("drop", (event) => {
+        event.preventDefault();
+        clearProjectTagHoverTimer();
+      });
+      row.addEventListener("dblclick", () => renameProjectTag(tag).catch(showError));
+      row.append(handle, body, actions);
+      dialog.list.appendChild(row);
+    });
+  }
+
+  function projectTagRowFromPoint(event) {
+    const dialog = ensureProjectTagDialog();
+    const x = Number(event.clientX);
+    const y = Number(event.clientY);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+    const hit = document.elementFromPoint(x, y);
+    const row = hit instanceof Element ? hit.closest(".project-tag-manager-row") : null;
+    if (row && dialog.list.contains(row) && !row.classList.contains("dragging")) return row;
+    return null;
+  }
+
+  function updateProjectTagDomIndexes() {
+    const dialog = ensureProjectTagDialog();
+    [...dialog.list.querySelectorAll(".project-tag-manager-row")].forEach((row, index) => {
+      row.dataset.tagIndex = String(index);
+    });
+  }
+
+  function projectTagReflowRects() {
+    const dialog = ensureProjectTagDialog();
+    return new Map(
+      [...dialog.list.querySelectorAll(".project-tag-manager-row:not(.dragging)")].map((row) => [row, row.getBoundingClientRect()])
+    );
+  }
+
+  function animateProjectTagReflow(beforeRects) {
+    const dialog = ensureProjectTagDialog();
+    const rows = [...dialog.list.querySelectorAll(".project-tag-manager-row:not(.dragging)")];
+    dialog.list.classList.add("sorting");
+    for (const row of rows) {
+      const before = beforeRects.get(row);
+      if (!before) continue;
+      const after = row.getBoundingClientRect();
+      const dx = before.left - after.left;
+      const dy = before.top - after.top;
+      if (!dx && !dy) continue;
+      row.style.transition = "none";
+      row.style.transform = `translate(${dx}px, ${dy}px)`;
+      row.getBoundingClientRect();
+      requestAnimationFrame(() => {
+        row.style.transition = "";
+        row.style.transform = "";
+      });
+    }
+    window.clearTimeout(projectTagSortTimer);
+    projectTagSortTimer = window.setTimeout(() => {
+      dialog.list.classList.remove("sorting");
+      dialog.list.querySelectorAll(".project-tag-manager-row").forEach((row) => {
+        row.style.transition = "";
+        row.style.transform = "";
+      });
+    }, 220);
+  }
+
+  function moveProjectTagDom(fromIndex, toIndex) {
+    if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0) return false;
+    if (fromIndex >= projectTags.length || toIndex >= projectTags.length) return false;
+    const dialog = ensureProjectTagDialog();
+    const beforeRects = projectTagReflowRects();
+    const next = [...projectTags];
+    const [item] = next.splice(fromIndex, 1);
+    next.splice(toIndex, 0, item);
+    projectTags = next;
+
+    const rows = [...dialog.list.querySelectorAll(".project-tag-manager-row")];
+    const moving = rows.find((row) => Number(row.dataset.tagIndex) === fromIndex);
+    const target = rows.find((row) => Number(row.dataset.tagIndex) === toIndex);
+    if (moving && target) {
+      if (fromIndex < toIndex) dialog.list.insertBefore(moving, target.nextSibling);
+      else dialog.list.insertBefore(moving, target);
+      updateProjectTagDomIndexes();
+    }
+    animateProjectTagReflow(beforeRects);
+    return true;
+  }
+
+  function clearProjectTagHoverTimer() {
+    if (projectTagHoverTimer) {
+      window.clearTimeout(projectTagHoverTimer);
+      projectTagHoverTimer = 0;
+    }
+    projectTagHoverRow = null;
+  }
+
+  function scheduleProjectTagHover(row) {
+    if (!row || projectTagHoverRow === row) return;
+    clearProjectTagHoverTimer();
+    projectTagHoverRow = row;
+    projectTagHoverTimer = window.setTimeout(() => {
+      projectTagHoverTimer = 0;
+      if (projectTagHoverRow !== row || !row.isConnected) return;
+      projectTagHoverRow = null;
+      const fromIndex = Number(projectTagDragIndex);
+      const toIndex = Number(row.dataset.tagIndex);
+      if (moveProjectTagDom(fromIndex, toIndex)) {
+        projectTagDragIndex = toIndex;
+        projectTagDragMoved = true;
+      }
+    }, 200);
+  }
+
+  function handleProjectTagDragOver(event) {
+    if (projectTagDragIndex < 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+    const targetRow = projectTagRowFromPoint(event);
+    if (targetRow) {
+      scheduleProjectTagHover(targetRow);
+      return;
+    }
+    clearProjectTagHoverTimer();
+  }
+
+  async function renameProjectTag(tag) {
+    const name = await window.appPrompt("输入新的标签名称", tag);
+    if (!name || !name.trim()) return;
+    const data = await apiPost("/api/projects/tags/rename", { old: tag, name: name.trim() });
+    projectTags = Array.isArray(data.tags) ? data.tags : [];
+    renderProjectTagManager();
+    await refreshProjects();
+  }
+
+  async function openProjectTagManager() {
+    await loadProjectTags();
+    const dialog = ensureProjectTagDialog();
+    renderProjectTagManager();
+    openDialogBackdrop(dialog.backdrop);
+    dialog.input.focus({ preventScroll: true });
   }
 
   function ensureVersionDialog() {
@@ -476,6 +977,10 @@ export function createProjectsModule({
       forkBtn.addEventListener("click", () => forkProjectVersion(project, version));
       actions.append(rollbackBtn, forkBtn);
 
+      row.addEventListener("dblclick", (event) => {
+        if (event.target.closest("button")) return;
+        renameProjectVersion(project, version).catch(showError);
+      });
       row.append(body, actions);
       dialog.list.appendChild(row);
     }
@@ -527,7 +1032,7 @@ export function createProjectsModule({
       const data = await apiPost("/api/projects/save", payload);
       state.currentProjectId = data.project?.id || "";
       state.currentProjectName = data.project?.name || name;
-      refs.projectNameInput.value = data.project?.name || name;
+      if (refs.projectNameInput) refs.projectNameInput.value = data.project?.name || name;
       if (state.currentProjectId) {
         saveStored(STORAGE_KEYS.lastProjectId, state.currentProjectId);
         saveStored(STORAGE_KEYS.lastProjectName, state.currentProjectName || state.currentProjectId);
@@ -554,8 +1059,7 @@ export function createProjectsModule({
   }
 
   function importedWorkspaceProjectName() {
-    const explicitName = `${refs.projectNameInput?.value || ""}`.trim();
-    if (state.currentProjectId && explicitName) return explicitName;
+    if (state.currentProjectId && state.currentProjectName) return state.currentProjectName;
     const dirs = state.workspace?.dirs || {};
     const source = dirs.result || dirs.control1 || dirs.control2 || dirs.control3 || "";
     const normalized = `${source || ""}`.replace(/[\\/]+$/, "");
@@ -576,7 +1080,7 @@ export function createProjectsModule({
   }
 
   async function createProject() {
-    const defaultName = refs.projectNameInput?.value.trim() || "新项目";
+    const defaultName = `${state.currentProjectName || state.workspace?.project_name || ""}`.trim() || "新项目";
     const name = await window.appPrompt("输入新项目名称", defaultName);
     if (!name || !name.trim()) return;
     await runWithStatus("正在新建项目...", async () => {
@@ -603,7 +1107,7 @@ export function createProjectsModule({
     try {
       await apiPost("/api/projects/ui-state", {
         id: projectId,
-        ui_state: collectProjectUiState(state.currentProjectName || refs.projectNameInput?.value || ""),
+        ui_state: collectProjectUiState(state.currentProjectName || ""),
       });
     } catch (error) {
       if (ignoreMissingCurrent && isProjectNotFoundError(error)) {
@@ -618,7 +1122,7 @@ export function createProjectsModule({
     if (!state.currentProjectId) return;
     const payload = {
       id: state.currentProjectId,
-      ui_state: collectProjectUiState(state.currentProjectName || refs.projectNameInput?.value || ""),
+      ui_state: collectProjectUiState(state.currentProjectName || ""),
     };
     const body = JSON.stringify(payload);
     if (navigator.sendBeacon) {
@@ -666,7 +1170,7 @@ export function createProjectsModule({
     const data = await apiPost("/api/projects/open", { id: projectId });
     state.currentProjectId = data.project?.id || projectId;
     state.currentProjectName = data.project?.name || projectId;
-    refs.projectNameInput.value = data.project?.name || projectId;
+    if (refs.projectNameInput) refs.projectNameInput.value = data.project?.name || projectId;
     saveStored(STORAGE_KEYS.lastProjectId, state.currentProjectId);
     saveStored(STORAGE_KEYS.lastProjectName, state.currentProjectName || state.currentProjectId);
     renderWorkspaceSummary();
@@ -684,22 +1188,6 @@ export function createProjectsModule({
     }
     setProjectStatus(`已打开项目：${data.project?.name || projectId}`);
     closeUtilityPanel();
-  }
-
-  async function renameProject(project) {
-    const name = await window.appPrompt("输入新的项目名称", project.name || project.id);
-    if (!name || !name.trim()) return;
-    await runWithStatus("正在重命名项目...", async () => {
-      const data = await apiPost("/api/projects/rename", { id: project.id, name: name.trim() });
-      if (state.currentProjectId === project.id) {
-        state.currentProjectId = data.project?.id || project.id;
-        state.currentProjectName = data.project?.name || name.trim();
-        refs.projectNameInput.value = state.currentProjectName;
-        renderWorkspaceSummary();
-      }
-      setProjectStatus(`已重命名项目：${data.project?.name || name.trim()}`);
-      await refreshProjects();
-    }).catch(showError);
   }
 
   async function forkProject(project) {
@@ -738,6 +1226,17 @@ export function createProjectsModule({
     }).catch(showError);
   }
 
+  async function renameProjectVersion(project, version) {
+    const currentName = version.custom_label || version.display_message || version.message || "";
+    const name = await window.appPrompt("输入新的版本名称", currentName);
+    if (!name || !name.trim() || name.trim() === currentName) return;
+    await runWithStatus("正在重命名版本...", async () => {
+      await apiPost("/api/projects/versions/rename", { id: project.id, commit: version.hash, name: name.trim() });
+      setProjectStatus(`已重命名版本：${version.short_hash || shortCommit(version.hash)}`);
+      await loadProjectVersions(project);
+    }).catch(showError);
+  }
+
   async function deleteProject(project) {
     if (!(await window.appConfirm(`删除项目「${project.name || project.id}」？项目会移动到用户目录 .vision_dataset_studio/trash。`))) return;
     await runWithStatus("正在删除项目...", async () => {
@@ -768,6 +1267,7 @@ export function createProjectsModule({
   function renderProjects() {
     if (!refs.projectGrid) return;
     refs.projectGrid.textContent = "";
+    renderProjectTagFilters();
     const rows = visibleProjects();
     if (!rows.length) {
       const empty = document.createElement("div");
@@ -804,7 +1304,7 @@ export function createProjectsModule({
       const title = document.createElement("h3");
       title.textContent = project.name || project.id;
       const meta = document.createElement("p");
-      meta.textContent = `${projectProgressText(project)} · ${project.updated_at || "未记录时间"}`;
+      meta.textContent = `${projectProgressText(project)} · ${projectCardTime(project)}`;
       const actions = document.createElement("div");
       actions.className = "project-actions";
 
@@ -814,32 +1314,29 @@ export function createProjectsModule({
       openBtn.textContent = "打开";
       openBtn.addEventListener("click", () => runWithStatus("正在打开项目...", () => openProject(project.id)).catch(showError));
 
-      const renameBtn = document.createElement("button");
-      renameBtn.className = "button-ghost";
-      renameBtn.type = "button";
-      renameBtn.textContent = "重命名";
-      renameBtn.addEventListener("click", () => renameProject(project));
+      const renameBtn = makeVersionIconButton({ icon: VERSION_ICONS.edit, label: "修改" });
+      renameBtn.addEventListener("click", () => openProjectEditor(project).catch(showError));
 
-      const forkBtn = document.createElement("button");
-      forkBtn.className = "button-ghost";
-      forkBtn.type = "button";
-      forkBtn.textContent = "分叉";
+      const forkBtn = makeVersionIconButton({ icon: VERSION_ICONS.fork, label: "分叉" });
       forkBtn.addEventListener("click", () => forkProject(project));
 
-      const versionsBtn = document.createElement("button");
-      versionsBtn.className = "button-ghost";
-      versionsBtn.type = "button";
-      versionsBtn.textContent = "版本管理";
+      const versionsBtn = makeVersionIconButton({ icon: VERSION_ICONS.version, label: "版本管理" });
       versionsBtn.addEventListener("click", () => showVersionDialog(project));
 
-      const deleteBtn = document.createElement("button");
-      deleteBtn.className = "button-ghost danger";
-      deleteBtn.type = "button";
-      deleteBtn.textContent = "删除";
+      const deleteBtn = makeVersionIconButton({ icon: VERSION_ICONS.delete, label: "删除" });
+      deleteBtn.classList.add("danger");
       deleteBtn.addEventListener("click", () => deleteProject(project));
 
       actions.append(openBtn, renameBtn, forkBtn, versionsBtn, deleteBtn);
-      body.append(title, meta, actions);
+      const tags = document.createElement("div");
+      tags.className = "project-card-tags";
+      for (const tag of Array.isArray(project.tags) ? project.tags : []) {
+        const chip = document.createElement("span");
+        chip.className = "project-tag-chip";
+        chip.textContent = tag;
+        tags.appendChild(chip);
+      }
+      body.append(title, meta, actions, tags);
       card.append(thumb, body);
       refs.projectGrid.appendChild(card);
     }
@@ -854,7 +1351,8 @@ export function createProjectsModule({
     createProject,
     saveOpenProjectUiState,
     openProject,
-    renameProject,
+    openProjectEditor,
+    openProjectTagManager,
     forkProject,
     deleteProject,
     cleanupTmpNow,

@@ -354,6 +354,8 @@ class AppHandler(BaseHTTPRequestHandler):
                 return self._send_json({"ok": True, "browser": _list_child_directories(browse_path)})
             if path == "/api/projects":
                 return self._send_json({"ok": True, "projects": PROJECT_STORE.list_projects()})
+            if path == "/api/projects/tags":
+                return self._send_json({"ok": True, "tags": PROJECT_STORE.list_project_tags()})
             if path == "/api/projects/detail":
                 project_id = query.get("id", [""])[0]
                 return self._send_json({"ok": True, **PROJECT_STORE.get_project(project_id)})
@@ -556,7 +558,7 @@ class AppHandler(BaseHTTPRequestHandler):
 
             if path == "/api/projects/rename":
                 old_id = str(body.get("id", "") or "")
-                project = PROJECT_STORE.rename_project(old_id, str(body.get("name", "") or ""))
+                project = PROJECT_STORE.rename_project(old_id, str(body.get("name", "") or ""), body.get("tags", []))
                 if _active_project_id() == old_id:
                     _set_active_project(project.get("id", old_id))
                 return self._send_json({"ok": True, "project": project})
@@ -567,6 +569,17 @@ class AppHandler(BaseHTTPRequestHandler):
                     str(body.get("name", "") or ""),
                 )
                 return self._send_json({"ok": True, **result})
+
+            if path == "/api/projects/tags":
+                tags = PROJECT_STORE.save_project_tags(body.get("tags", []))
+                return self._send_json({"ok": True, "tags": tags})
+
+            if path == "/api/projects/tags/rename":
+                tags = PROJECT_STORE.rename_project_tag(
+                    str(body.get("old", "") or ""),
+                    str(body.get("name", "") or ""),
+                )
+                return self._send_json({"ok": True, "tags": tags})
 
             if path == "/api/projects/versions/rollback":
                 result = PROJECT_STORE.rollback_to_version(
@@ -591,6 +604,14 @@ class AppHandler(BaseHTTPRequestHandler):
 
             if path == "/api/projects/versions/fork":
                 result = PROJECT_STORE.fork_project_version(
+                    str(body.get("id", "") or ""),
+                    str(body.get("commit", "") or ""),
+                    str(body.get("name", "") or ""),
+                )
+                return self._send_json({"ok": True, **result})
+
+            if path == "/api/projects/versions/rename":
+                result = PROJECT_STORE.rename_version(
                     str(body.get("id", "") or ""),
                     str(body.get("commit", "") or ""),
                     str(body.get("name", "") or ""),

@@ -40,6 +40,16 @@ class ProjectOpenRequest(BaseModel):
 class ProjectRenameRequest(BaseModel):
     id: str = ""
     name: str = ""
+    tags: list[str] = []
+
+
+class ProjectTagsRequest(BaseModel):
+    tags: list[str] = []
+
+
+class ProjectTagRenameRequest(BaseModel):
+    old: str = ""
+    name: str = ""
 
 
 class ProjectDeleteRequest(BaseModel):
@@ -62,6 +72,12 @@ class ProjectVersionForkRequest(BaseModel):
     name: str = ""
 
 
+class ProjectVersionRenameRequest(BaseModel):
+    id: str = ""
+    commit: str = ""
+    name: str = ""
+
+
 class TmpCleanupRequest(BaseModel):
     max_age_hours: int = 48
 
@@ -69,6 +85,21 @@ class TmpCleanupRequest(BaseModel):
 @router.get("/projects")
 def list_projects(store: ProjectStore = Depends(get_project_store)):
     return {"ok": True, "projects": store.list_projects()}
+
+
+@router.get("/projects/tags")
+def list_project_tags(store: ProjectStore = Depends(get_project_store)):
+    return {"ok": True, "tags": store.list_project_tags()}
+
+
+@router.post("/projects/tags")
+def save_project_tags(req: ProjectTagsRequest, store: ProjectStore = Depends(get_project_store)):
+    return {"ok": True, "tags": store.save_project_tags(req.tags)}
+
+
+@router.post("/projects/tags/rename")
+def rename_project_tag(req: ProjectTagRenameRequest, store: ProjectStore = Depends(get_project_store)):
+    return {"ok": True, "tags": store.rename_project_tag(req.old, req.name)}
 
 
 @router.get("/projects/detail")
@@ -158,7 +189,7 @@ def open_project(req: ProjectOpenRequest, ws: DatasetWorkspace = Depends(get_wor
 @router.post("/projects/rename")
 def rename_project(req: ProjectRenameRequest, store: ProjectStore = Depends(get_project_store)):
     old_id = req.id
-    project = store.rename_project(old_id, req.name)
+    project = store.rename_project(old_id, req.name, req.tags)
     if get_active_project_id() == old_id:
         set_active_project(project.get("id", old_id))
     return {"ok": True, "project": project}
@@ -198,6 +229,12 @@ def rollback_project_version(req: ProjectVersionRequest, ws: DatasetWorkspace = 
 @router.post("/projects/versions/fork")
 def fork_project_version(req: ProjectVersionForkRequest, store: ProjectStore = Depends(get_project_store)):
     result = store.fork_project_version(req.id, req.commit, req.name)
+    return {"ok": True, **result}
+
+
+@router.post("/projects/versions/rename")
+def rename_project_version(req: ProjectVersionRenameRequest, store: ProjectStore = Depends(get_project_store)):
+    result = store.rename_version(req.id, req.commit, req.name)
     return {"ok": True, **result}
 
 
