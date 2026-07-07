@@ -45,6 +45,7 @@ export function createBootstrapModule({
   selectItem,
   selectRelativeItem,
   trashCurrentItem,
+  trashSelectedOrCurrentItems,
   shouldIgnoreListArrowNavigation,
   loadWorkspace,
   openProject,
@@ -63,6 +64,7 @@ export function createBootstrapModule({
   swapControlResultPairs,
   deleteCurrent,
   mergeWorkspace,
+  toggleImagePreviewForCurrent,
   scaleViewerItem,
   matchViewerControlsToResult,
   processImages,
@@ -1776,7 +1778,15 @@ export function createBootstrapModule({
       if (event.key === "Delete") {
         if (event.repeat || shouldIgnoreListArrowNavigation(event.target)) return;
         event.preventDefault();
-        runWithStatus("正在删除当前图片...", () => trashCurrentItem()).catch(showError);
+        runWithStatus("正在删除图片...", () => trashSelectedOrCurrentItems()).catch(showError);
+        return;
+      }
+      if (event.key === " ") {
+        const imagePreviewOpen = document.body.classList.contains("image-preview-open");
+        if (event.repeat || document.body.classList.contains("dialog-open")) return;
+        if (!imagePreviewOpen && shouldIgnoreListArrowNavigation(event.target)) return;
+        if (!toggleImagePreviewForCurrent?.()) return;
+        event.preventDefault();
         return;
       }
       if (shouldIgnoreListArrowNavigation(event.target)) return;

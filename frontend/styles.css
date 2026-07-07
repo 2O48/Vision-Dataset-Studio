@@ -494,7 +494,7 @@ body {
 
 html.vds-tauri-launcher,
 html.vds-tauri-launcher body {
-  background-color: transparent;
+  background-color: var(--bg);
 }
 
 html.vds-tauri-launcher body {
@@ -6101,9 +6101,10 @@ textarea::-webkit-resizer {
 }
 
 :root[data-theme="dark"] .image-preview-controls button.active {
-  background: var(--list-selected-bg);
-  color: var(--list-heading);
-  box-shadow: var(--control-top-highlight);
+  border-color: var(--button-active-border);
+  background: var(--button-active-fill);
+  color: var(--ink-contrast);
+  box-shadow: var(--control-top-highlight), var(--button-active-shadow);
 }
 
 :root[data-theme="dark"] .activity-card.elevated {
