@@ -312,6 +312,10 @@ class AppHandler(BaseHTTPRequestHandler):
             ".ico": "image/x-icon",
             ".cur": "image/x-icon",
             ".ani": "application/x-navi-animation",
+            ".ttf": "font/ttf",
+            ".otf": "font/otf",
+            ".woff": "font/woff",
+            ".woff2": "font/woff2",
         }
         return self._send_text_file(target, content_types.get(suffix, "application/octet-stream"))
 

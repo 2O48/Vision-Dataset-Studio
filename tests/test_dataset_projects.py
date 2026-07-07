@@ -5,6 +5,7 @@ from unittest import mock
 
 from PIL import Image
 
+from core.dataset_image_processor import process_workspace_match_results
 from core.dataset_projects import ProjectStore
 from core.dataset_workspace import DatasetWorkspace
 
@@ -216,11 +217,26 @@ class ProjectStoreTests(unittest.TestCase):
             self.assertEqual(renamed_versions[0]["display_message"], "检查后的版本名称")
             self.assertEqual(renamed_versions[0]["custom_label"], "检查后的版本名称")
             self.assertEqual(renamed_versions[0]["message"], "添加0张图片，修改1张图片，删除0张图片")
+            version_count = len(renamed_versions)
+            noop = store.save_project(
+                name="版本项目",
+                workspace=reopened,
+                overwrite_id=project_id,
+                ui_state={"selected_name": "system/display_on"},
+            )
+            self.assertFalse(noop["version"]["committed"])
+            self.assertEqual(len(store.list_versions(project_id)["versions"]), version_count)
+
+            Image.new("RGB", (32, 32), (120, 40, 30)).save(Path(saved["workspace"]["dirs"]["result"]) / "system" / "display_off.png")
+            image_changed = store.save_project(name="版本项目", workspace=reopened, overwrite_id=project_id)
+            self.assertTrue(image_changed["version"]["committed"])
+            image_versions = store.list_versions(project_id)["versions"]
+            self.assertEqual(image_versions[0]["display_message"], "添加0张图片，修改1张图片，删除0张图片")
             project_row = next(row for row in store.list_projects() if row["id"] == project_id)
-            self.assertEqual(project_row["created_at"], versions[-1]["created_at"])
-            self.assertEqual(project_row["updated_at"], versions[0]["created_at"])
-            self.assertEqual(project_row["created_commit"], versions[-1]["hash"])
-            self.assertEqual(project_row["updated_commit"], versions[0]["hash"])
+            self.assertEqual(project_row["created_at"], image_versions[-1]["created_at"])
+            self.assertEqual(project_row["updated_at"], image_versions[0]["created_at"])
+            self.assertEqual(project_row["created_commit"], image_versions[-1]["hash"])
+            self.assertEqual(project_row["updated_commit"], image_versions[0]["hash"])
 
             rolled_back = store.rollback_to_version(project_id, first_head)
             result_txt = Path(rolled_back["workspace"]["dirs"]["result"]) / "system" / "display_off.txt"
@@ -240,6 +256,58 @@ class ProjectStoreTests(unittest.TestCase):
             self.assertEqual(fork_txt.read_text(encoding="utf-8"), "display is off")
             fork_versions = store.list_versions(forked["project"]["id"])["versions"]
             self.assertEqual(fork_versions[0]["display_message"], f"分叉自版本 {first_head[:7]}")
+
+    def test_match_result_save_after_fork_records_modified_items(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            result_dir = root / "source" / "result"
+            control_dir = root / "source" / "control1"
+            (result_dir / "system").mkdir(parents=True)
+            (control_dir / "system").mkdir(parents=True)
+            Image.new("RGB", (64, 64), (230, 200, 40)).save(result_dir / "system" / "1.jpg")
+            Image.new("RGB", (32, 32), (230, 200, 40)).save(control_dir / "system" / "1.jpg")
+
+            store = ProjectStore(root / "app" / "projects")
+            workspace = DatasetWorkspace()
+            workspace.open_dirs(control1_dir=str(control_dir), result_dir=str(result_dir), control_count=1)
+            saved = store.save_project(name="匹配尺寸项目", workspace=workspace)
+            forked = store.fork_project(saved["project"]["id"], "匹配尺寸项目分叉")
+            fork_id = forked["project"]["id"]
+
+            fork_workspace = DatasetWorkspace()
+            fork_workspace.open_dirs(
+                control1_dir=forked["workspace"]["dirs"]["control1"],
+                result_dir=forked["workspace"]["dirs"]["result"],
+                control_count=1,
+            )
+            processed = process_workspace_match_results(
+                items=fork_workspace.get_export_items(),
+                project_name="匹配尺寸项目分叉",
+                include_controls=True,
+                only_mismatched=True,
+                control_count=1,
+            )
+
+            processed_workspace = DatasetWorkspace()
+            processed_workspace.open_dirs(
+                control1_dir=processed["dirs"]["control1"],
+                result_dir=processed["dirs"]["result"],
+                control_count=1,
+            )
+            overwritten = store.save_project(
+                name="匹配尺寸项目分叉",
+                workspace=processed_workspace,
+                overwrite_id=fork_id,
+            )
+
+            versions = store.list_versions(fork_id)["versions"]
+            self.assertTrue(overwritten["version"]["committed"])
+            self.assertEqual(versions[0]["hash"], overwritten["version"]["hash"])
+            self.assertEqual(versions[0]["display_message"], "添加0张图片，修改1张图片，删除0张图片")
+            self.assertFalse(versions[0]["display_message"].startswith("分叉自版本"))
+            self.assertTrue(
+                (root / "app" / "projects" / fork_id / "assets" / "control1" / "system" / "1.png").exists()
+            )
 
     def test_list_projects_repairs_stale_metadata_id(self):
         with tempfile.TemporaryDirectory() as tmp:

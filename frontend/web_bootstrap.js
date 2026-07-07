@@ -100,13 +100,25 @@ export function createBootstrapModule({
     editable: false,
     closeTimer: 0,
   };
+  const EXCLUSIVE_MENU_EVENT = "vds:close-exclusive-menus";
 
-  function closeAppContextMenu() {
+  function requestExclusiveMenu(source) {
+    document.dispatchEvent(new CustomEvent(EXCLUSIVE_MENU_EVENT, { detail: { source } }));
+  }
+
+  function closeAppContextMenu(immediate = false) {
     const menu = refs.appContextMenu;
     if (!menu || menu.hidden) return;
     if (appContextState.closeTimer) {
       window.clearTimeout(appContextState.closeTimer);
       appContextState.closeTimer = 0;
+    }
+    if (immediate) {
+      menu.hidden = true;
+      menu.classList.remove("menu-open", "menu-closing");
+      appContextState.target = null;
+      appContextState.editable = false;
+      return;
     }
     menu.classList.remove("menu-open");
     menu.classList.add("menu-closing");
@@ -120,6 +132,7 @@ export function createBootstrapModule({
   function positionAppContextMenu(event) {
     const menu = refs.appContextMenu;
     if (!menu) return;
+    requestExclusiveMenu("app-context");
     if (appContextState.closeTimer) {
       window.clearTimeout(appContextState.closeTimer);
       appContextState.closeTimer = 0;
@@ -337,6 +350,10 @@ export function createBootstrapModule({
       await runAppContextAction(action);
     });
 
+    document.addEventListener(EXCLUSIVE_MENU_EVENT, (event) => {
+      if (event.detail?.source !== "app-context") closeAppContextMenu(true);
+    });
+
     document.addEventListener(
       "contextmenu",
       (event) => {
@@ -461,6 +478,7 @@ export function createBootstrapModule({
       ".model-picker-menu",
       ".model-picker-list",
       ".project-list-scroll",
+      ".project-version-list",
       ".workspace-browser-list",
       ".image-preview-controls",
     ].join(", ");
@@ -480,6 +498,14 @@ export function createBootstrapModule({
     const resolveActive = (el, canScrollY, canScrollX) => {
       if (!canScrollY && !canScrollX) return false;
       return Boolean(el.__floatingScrollbar?.dragging || el.__floatingScrollbar?.hovering || el.matches(":hover") || document.activeElement && el.contains(document.activeElement));
+    };
+
+    const resolveRailZIndex = (el) => {
+      for (let node = el; node && node !== document.body; node = node.parentElement) {
+        const zIndex = Number.parseInt(getComputedStyle(node).zIndex, 10);
+        if (Number.isFinite(zIndex)) return Math.min(199999, zIndex + 2);
+      }
+      return 50000;
     };
 
     const shouldSuppressHost = (el) => {
@@ -612,9 +638,7 @@ export function createBootstrapModule({
       const canScrollY = scrollH > viewH + 1;
       const canScrollX = scrollW > viewW + 1;
       const rect = el.getBoundingClientRect();
-      const computed = getComputedStyle(el);
-      const zIndex = Number.parseInt(computed.zIndex, 10);
-      const railZ = Number.isFinite(zIndex) ? Math.min(199999, zIndex + 1) : 50000;
+      const railZ = resolveRailZIndex(el);
       const borderTop = el.clientTop || 0;
       const borderLeft = el.clientLeft || 0;
       const isSidePanelScroller = el.matches(sidePanelScrollerSelector);

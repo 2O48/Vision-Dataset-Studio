@@ -37,6 +37,7 @@ export function createBrowserModule({
   const SPLIT_LIST_COLLAPSED_ICON = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" aria-hidden="true"><rect width="256" height="256" fill="none"/><rect x="48" y="48" width="160" height="160" rx="8" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/><line x1="128" y1="48" x2="128" y2="208" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/><line x1="128" y1="80" x2="208" y2="80" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/><line x1="128" y1="112" x2="208" y2="112" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/><line x1="128" y1="144" x2="208" y2="144" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/><line x1="128" y1="176" x2="208" y2="176" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/></svg>';
   const SPLIT_LIST_EXPANDED_ICON = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" aria-hidden="true"><rect width="256" height="256" fill="none"/><path fill="currentColor" d="M200,40H56A16,16,0,0,0,40,56V200a16,16,0,0,0,16,16H200a16,16,0,0,0,16-16V56A16,16,0,0,0,200,40ZM56,56h72V200H56Z"/></svg>';
   const itemContextMenu = document.querySelector("#itemContextMenu");
+  const EXCLUSIVE_MENU_EVENT = "vds:close-exclusive-menus";
   let itemContextTarget = null;
   let itemContextCloseTimer = 0;
   let splitListRenderTimer = 0;
@@ -1072,15 +1073,22 @@ export function createBrowserModule({
     if (nextName) await selectItem(nextName, true, { skipDirtyCheck: true, panelId: activeListPanelId() });
   }
 
-  function closeItemContextMenu() {
+  function closeItemContextMenu(immediate = false) {
     if (!itemContextMenu) return;
     if (itemContextMenu.hidden) {
       itemContextTarget = null;
       return;
     }
+    if (itemContextCloseTimer) window.clearTimeout(itemContextCloseTimer);
+    itemContextCloseTimer = 0;
+    if (immediate) {
+      itemContextMenu.hidden = true;
+      itemContextMenu.classList.remove("menu-open", "menu-closing");
+      itemContextTarget = null;
+      return;
+    }
     itemContextMenu.classList.remove("menu-open");
     itemContextMenu.classList.add("menu-closing");
-    if (itemContextCloseTimer) window.clearTimeout(itemContextCloseTimer);
     itemContextCloseTimer = window.setTimeout(() => {
       itemContextCloseTimer = 0;
       itemContextMenu.hidden = true;
@@ -1091,6 +1099,7 @@ export function createBrowserModule({
 
   function positionItemContextMenu(event) {
     if (!itemContextMenu) return;
+    document.dispatchEvent(new CustomEvent(EXCLUSIVE_MENU_EVENT, { detail: { source: "item-context" } }));
     if (itemContextCloseTimer) {
       window.clearTimeout(itemContextCloseTimer);
       itemContextCloseTimer = 0;
@@ -1297,6 +1306,9 @@ export function createBrowserModule({
       } else if (action === "trash") {
         trashItemFiles(item).catch(showError || console.error);
       }
+    });
+    document.addEventListener(EXCLUSIVE_MENU_EVENT, (event) => {
+      if (event.detail?.source !== "item-context") closeItemContextMenu(true);
     });
     document.addEventListener("click", (event) => {
       if (event.target.closest("#itemContextMenu")) return;

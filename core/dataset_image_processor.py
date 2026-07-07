@@ -15,7 +15,7 @@ from core.dataset_exporter import (
     image_target_path,
     role_folder,
     target_size_for,
-    unique_name,
+    unique_export_name,
     write_processed_image,
 )
 from core.dataset_paths import TMP_DIR, resolve_user_path
@@ -41,6 +41,18 @@ def _viewer_process_root(name: str, operation: str) -> Path:
 
 def _viewer_target_path(root: Path, role: str, name: str) -> Path:
     return root / role / f"{clean_name(name, 'item')}.png"
+
+
+def _caption_target_path(root: Path, export_prefix: str, export_name: str) -> Path:
+    target = image_target_path(
+        root,
+        export_prefix,
+        export_name,
+        Path("caption.txt"),
+        process_images=False,
+        role="result",
+    )
+    return target.with_suffix(".txt")
 
 
 def _item_active_roles(control_count: int) -> tuple[str, ...]:
@@ -175,7 +187,11 @@ def process_workspace_images(
             continue
 
         try:
-            base_name = unique_name(str(item.get("name") or result_source.stem), used_names)
+            base_name = unique_export_name(
+                str(item.get("name") or result_source.stem),
+                used_names,
+                preserve_subfolders=True,
+            )
             with Image.open(result_source) as image:
                 target_size = target_size_for(image.size, target_pixels, multiple)
 
@@ -188,7 +204,8 @@ def process_workspace_images(
                 role="result",
             )
             write_processed_image(result_source, result_target, target_size)
-            text_target = role_dirs["result"] / f"{base_name}.txt"
+            text_target = _caption_target_path(process_root, process_prefix, base_name)
+            text_target.parent.mkdir(parents=True, exist_ok=True)
             text_target.write_text(str(item.get("text") or "").strip(), encoding="utf-8")
 
             processed_files = {
@@ -318,7 +335,11 @@ def process_workspace_match_results(
             continue
 
         try:
-            base_name = unique_name(str(item.get("name") or result_source.stem), used_names)
+            base_name = unique_export_name(
+                str(item.get("name") or result_source.stem),
+                used_names,
+                preserve_subfolders=True,
+            )
             with Image.open(result_source) as image:
                 target_size = image.size
 
@@ -331,7 +352,8 @@ def process_workspace_match_results(
                 role="result",
             )
             copy_original_image(result_source, result_target)
-            text_target = role_dirs["result"] / f"{base_name}.txt"
+            text_target = _caption_target_path(process_root, process_prefix, base_name)
+            text_target.parent.mkdir(parents=True, exist_ok=True)
             text_target.write_text(str(item.get("text") or "").strip(), encoding="utf-8")
 
             processed_files = {

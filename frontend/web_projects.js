@@ -715,7 +715,11 @@ export function createProjectsModule({
       const actions = document.createElement("div");
       actions.className = "project-version-actions";
       const remove = makeVersionIconButton({ icon: VERSION_ICONS.delete, label: "删除" });
-      remove.addEventListener("click", () => saveProjectTagList(projectTags.filter((item) => item !== tag)).catch(showError));
+      remove.classList.add("danger");
+      remove.addEventListener("click", async () => {
+        if (!(await window.appConfirm(`删除标签「${tag}」？`))) return;
+        saveProjectTagList(projectTags.filter((item) => item !== tag)).catch(showError);
+      });
       actions.appendChild(remove);
       row.addEventListener("dragstart", (event) => {
         if (event.target?.closest?.("button")) {
@@ -951,7 +955,11 @@ export function createProjectsModule({
     const versions = Array.isArray(data.versions) ? data.versions : [];
     dialog.list.textContent = "";
     dialog.status.textContent = versions.length ? `共 ${versions.length} 个提交版本` : "暂无提交版本";
-    if (!versions.length) return;
+    const refreshScrollbars = () => requestAnimationFrame(() => window.dispatchEvent(new Event("resize")));
+    if (!versions.length) {
+      refreshScrollbars();
+      return;
+    }
     for (const version of versions) {
       const row = document.createElement("article");
       row.className = "project-version-row";
@@ -966,16 +974,19 @@ export function createProjectsModule({
       const actions = document.createElement("div");
       actions.className = "project-version-actions";
       const isCurrent = data.head === version.hash;
+      const renameBtn = makeVersionIconButton({ icon: VERSION_ICONS.edit, label: "重命名" });
+      renameBtn.addEventListener("click", () => renameProjectVersion(project, version).catch(showError));
+
+      const forkBtn = makeVersionIconButton({ icon: VERSION_ICONS.fork, label: "分叉" });
+      forkBtn.addEventListener("click", () => forkProjectVersion(project, version));
+
       const rollbackBtn = makeVersionIconButton({
         icon: isCurrent ? VERSION_ICONS.current : VERSION_ICONS.rollback,
         label: isCurrent ? "当前版本" : "回退",
         disabled: isCurrent,
       });
       if (!isCurrent) rollbackBtn.addEventListener("click", () => rollbackProjectVersion(project, version));
-
-      const forkBtn = makeVersionIconButton({ icon: VERSION_ICONS.fork, label: "分叉" });
-      forkBtn.addEventListener("click", () => forkProjectVersion(project, version));
-      actions.append(rollbackBtn, forkBtn);
+      actions.append(rollbackBtn, renameBtn, forkBtn);
 
       row.addEventListener("dblclick", (event) => {
         if (event.target.closest("button")) return;
@@ -984,6 +995,7 @@ export function createProjectsModule({
       row.append(body, actions);
       dialog.list.appendChild(row);
     }
+    refreshScrollbars();
   }
 
   function isProjectNotFoundError(error) {
@@ -1042,6 +1054,11 @@ export function createProjectsModule({
         applyWorkspaceSummary(data.workspace);
         rememberOpenedWorkspace(data.workspace);
         await refreshItems({ skipDirtyCheck: true });
+      }
+      if (data.version && data.version.committed === false) {
+        setProjectStatus(data.version.message || "没有检测到项目变更。");
+        await refreshProjects();
+        return;
       }
       const version = data.version?.hash ? `（${shortCommit(data.version.hash)}）` : "";
       setProjectStatus(`${asNew || !payload.overwrite_id ? "已提交项目版本" : "已提交当前版本"}：${data.project?.name || name}${version}`);

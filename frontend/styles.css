@@ -1,3 +1,35 @@
+@font-face {
+  font-family: "HarmonyOS Sans SC Local";
+  src: url("assets/fonts/harmonyos-sans-sc/HarmonyOS_Sans_SC_Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "HarmonyOS Sans SC Local";
+  src: url("assets/fonts/harmonyos-sans-sc/HarmonyOS_Sans_SC_Medium.ttf") format("truetype");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "HarmonyOS Sans SC Local";
+  src: url("assets/fonts/harmonyos-sans-sc/HarmonyOS_Sans_SC_Bold.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "HarmonyOS Sans SC Local";
+  src: url("assets/fonts/harmonyos-sans-sc/HarmonyOS_Sans_SC_Black.ttf") format("truetype");
+  font-weight: 800;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
   color-scheme: light;
   --bg: #eeeeee;
@@ -52,7 +84,7 @@
   --list-thumb-bg: #afb8c8;
   --list-danger-bg: #ffcaca;
   --list-danger-text: #894a4a;
-  --list-font: "HarmonyOS Sans SC", "HarmonyOS_Sans_SC", "HarmonyOS Sans", "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "SF Pro Text", "Segoe UI", Arial, sans-serif;
+  --list-font: "HarmonyOS Sans SC Local", "HarmonyOS Sans SC", "HarmonyOS_Sans_SC", "HarmonyOS Sans", "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "SF Pro Text", "Segoe UI", Arial, sans-serif;
   --surface-border-width: 1px;
   --surface-border-gradient: linear-gradient(180deg, rgba(255, 255, 255, 0.92) 0%, rgba(250, 250, 250, 0.72) 100%);
   --surface-card-fill: rgba(249, 249, 249, 0.9);
@@ -456,7 +488,7 @@ body {
   background-repeat: no-repeat;
   background-size: cover;
   color: var(--ink);
-  font-family: "-apple-system-body", "ui-sans-serif", "-apple-system", "HarmonyOS Sans SC", "SF Pro", "Pingfang SC", "system-ui", "Segoe UI", Helvetica, "Apple Color Emoji", Arial, sans-serif, "Segoe UI Emoji", "Segoe UI Symbol";
+  font-family: "-apple-system-body", "ui-sans-serif", "-apple-system", "HarmonyOS Sans SC Local", "HarmonyOS Sans SC", "SF Pro", "Pingfang SC", "system-ui", "Segoe UI", Helvetica, "Apple Color Emoji", Arial, sans-serif, "Segoe UI Emoji", "Segoe UI Symbol";
   cursor: var(--cursor-default);
 }
 
@@ -5865,6 +5897,25 @@ textarea::-webkit-resizer {
   box-shadow: var(--control-top-highlight);
 }
 
+:root[data-theme="dark"] .project-tag-choice {
+  border-color: rgba(255, 255, 255, 0.28);
+  background: #111827;
+  color: #fff;
+  box-shadow: var(--control-top-highlight), 0 1px 2px rgba(12, 16, 25, 0.2);
+}
+
+:root[data-theme="dark"] .project-tag-choice:hover,
+:root[data-theme="dark"] .project-tag-choice:focus-visible {
+  border-color: rgba(255, 255, 255, 0.46);
+}
+
+:root[data-theme="dark"] .project-tag-choice.active {
+  border-color: #fff;
+  background: #fff;
+  color: #111827;
+  box-shadow: 0 1px 2px rgba(12, 16, 25, 0.2);
+}
+
 :root[data-theme="dark"] .viewer-pixels-field {
   border-color: var(--list-border);
   background: var(--glass-control-bg);
@@ -6109,9 +6160,11 @@ textarea::-webkit-resizer {
   backdrop-filter: var(--glass-surface-filter);
 }
 
-.dialog-panel {
+.dialog-panel,
+:root[data-theme="dark"] .dialog-panel {
   position: relative;
   overflow: hidden;
+  box-shadow: var(--glass-surface-shadow), inset 0 1px 1px var(--glass-surface-highlight);
 }
 
 .command-bar>.command-top {
@@ -6269,7 +6322,6 @@ textarea::-webkit-resizer {
 .utility-page-shell .export-status,
 .utility-page-shell .checkbox-row,
 .utility-page-shell .toggle-row,
-.utility-page-shell .project-card,
 .utility-page-shell .project-empty,
 .utility-page-shell .summary-row,
 .utility-page-shell .metric-tile,
@@ -6283,6 +6335,13 @@ textarea::-webkit-resizer {
   box-shadow: none;
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
+}
+
+.utility-page-shell .project-card {
+  background-color: var(--glass-inner-bg);
+  background-image: none;
+  -webkit-backdrop-filter: var(--glass-surface-filter);
+  backdrop-filter: var(--glass-surface-filter);
 }
 
 .list-card .item-card:hover,
