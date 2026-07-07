@@ -1036,6 +1036,7 @@ const {
   selectRelativeItem,
   prepareSelectionAfterRemoving,
   trashCurrentItem,
+  trashSelectedOrCurrentItems,
   refreshItems,
   selectItem,
   applyWorkspaceSummary,
@@ -1044,6 +1045,7 @@ const {
   rescanWorkspace,
   mergeWorkspace,
   updateControlFieldVisibility,
+  toggleImagePreviewForCurrent,
 } = browserModule;
 
 const {
@@ -1265,6 +1267,7 @@ const { restorePersistedSettings, bindSettingsPersistence, bindEvents, bootstrap
   selectItem,
   selectRelativeItem,
   trashCurrentItem,
+  trashSelectedOrCurrentItems,
   shouldIgnoreListArrowNavigation,
   loadWorkspace,
   openProject,
@@ -1283,6 +1286,7 @@ const { restorePersistedSettings, bindSettingsPersistence, bindEvents, bootstrap
   swapControlResultPairs,
   deleteCurrent,
   mergeWorkspace,
+  toggleImagePreviewForCurrent,
   scaleViewerItem,
   matchViewerControlsToResult,
   processImages,

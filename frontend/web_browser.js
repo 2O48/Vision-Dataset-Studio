@@ -1278,6 +1278,19 @@ export function createBrowserModule({
     await selectAfterListMutation(panelId, nextName());
   }
 
+  async function trashSelectedOrCurrentItems() {
+    const targets = selectedBatchNames();
+    if (targets.length > 1) {
+      await trashBatchItems(targets);
+      return;
+    }
+    if (targets.length === 1 && targets[0] !== state.selectedName) {
+      await trashBatchItems(targets);
+      return;
+    }
+    await trashCurrentItem();
+  }
+
   function ensureItemContextMenuEvents() {
     if (!itemContextMenu || state.itemContextMenuBound) return;
     state.itemContextMenuBound = true;
@@ -1510,6 +1523,27 @@ export function createBrowserModule({
     return [...activeControlRoles(), "result"].filter((role) => item.exists?.[role]);
   }
 
+  function visibleViewerRoles() {
+    const controlCount = activeControlCount();
+    return controlCount === 0
+      ? ["result"]
+      : state.viewMode === "one"
+        ? ["result"]
+        : state.viewMode === "two"
+          ? ["control1", "result"]
+          : state.viewMode === "three"
+            ? ["control1", "control2", "result"]
+            : ["control1", "control2", "control3", "result"];
+  }
+
+  function defaultPreviewRole() {
+    const item = state.currentItem;
+    if (!item) return "";
+    const visibleExisting = visibleViewerRoles().filter((role) => item.exists?.[role]);
+    if (!visibleExisting.length) return "";
+    return visibleExisting.includes("result") ? "result" : visibleExisting[0];
+  }
+
   function previewRoleLabel(role) {
     return role === "result" ? "结果图" : ROLE_LABELS[role] || role;
   }
@@ -1635,6 +1669,17 @@ export function createBrowserModule({
     }
     imagePreview.root.classList.remove("minimap-visible", "minimap-dragging");
     document.body.classList.remove("image-preview-open");
+  }
+
+  function toggleImagePreviewForCurrent() {
+    if (imagePreview && !imagePreview.root.hidden) {
+      closeImagePreview();
+      return true;
+    }
+    const role = defaultPreviewRole();
+    if (!role) return false;
+    openImagePreview(role);
+    return true;
   }
 
   async function navigateImagePreview(offset) {
@@ -2397,16 +2442,7 @@ export function createBrowserModule({
       button.classList.toggle("active", controlCount > 0 && button.dataset.mode === state.viewMode);
     });
 
-    const visibleRoles =
-      controlCount === 0
-        ? ["result"]
-        : state.viewMode === "one"
-          ? ["result"]
-          : state.viewMode === "two"
-            ? ["control1", "result"]
-            : state.viewMode === "three"
-              ? ["control1", "control2", "result"]
-              : ["control1", "control2", "control3", "result"];
+    const visibleRoles = visibleViewerRoles();
 
     refs.viewerGrid.querySelectorAll(".image-card").forEach((card) => {
       const role = card.dataset.role;
@@ -2759,6 +2795,7 @@ export function createBrowserModule({
     selectRelativeItem,
     prepareSelectionAfterRemoving,
     trashCurrentItem,
+    trashSelectedOrCurrentItems,
     refreshItems,
     selectItem,
     applyWorkspaceSummary,
@@ -2767,5 +2804,6 @@ export function createBrowserModule({
     rescanWorkspace,
     mergeWorkspace,
     updateControlFieldVisibility,
+    toggleImagePreviewForCurrent,
   };
 }

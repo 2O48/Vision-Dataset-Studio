@@ -48,9 +48,25 @@
 
       :root {
         color-scheme: dark;
+        --launcher-bg: #37383c;
+        --launcher-fg: #eef3f7;
+        --launcher-titlebar-fg: rgba(238, 243, 247, 0.54);
+        --launcher-control-hover-bg: rgba(238, 243, 247, 0.08);
+        --launcher-control-hover-fg: #eef3f7;
         font-family: "HarmonyOS Sans SC Local", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
-        background: transparent;
-        color: #eef3f7;
+        background: var(--launcher-bg);
+        color: var(--launcher-fg);
+      }
+
+      @media (prefers-color-scheme: light) {
+        :root {
+          color-scheme: light;
+          --launcher-bg: #eeeeee;
+          --launcher-fg: #424956;
+          --launcher-titlebar-fg: rgba(66, 73, 86, 0.68);
+          --launcher-control-hover-bg: rgba(66, 73, 86, 0.08);
+          --launcher-control-hover-fg: #424956;
+        }
       }
 
       * {
@@ -64,7 +80,7 @@
         min-height: 100%;
         margin: 0;
         overflow: hidden;
-        background: transparent;
+        background: var(--launcher-bg);
       }
 
       body {
@@ -85,8 +101,8 @@
         display: grid;
         place-items: center;
         overflow: hidden;
-        background: #37383c;
-        color: #eef3f7;
+        background: var(--launcher-bg);
+        color: var(--launcher-fg);
       }
 
       html.mac-window-chrome .shell {
@@ -107,7 +123,7 @@
         gap: 12px;
         height: 44px;
         padding: 8px 10px 8px 18px;
-        color: rgba(238, 243, 247, 0.54);
+        color: var(--launcher-titlebar-fg);
       }
 
       .brand {
@@ -163,8 +179,8 @@
       }
 
       .window-controls button:hover {
-        background: rgba(238, 243, 247, 0.08);
-        color: #eef3f7;
+        background: var(--launcher-control-hover-bg);
+        color: var(--launcher-control-hover-fg);
       }
 
       .window-controls button[data-action="close"]:hover {
