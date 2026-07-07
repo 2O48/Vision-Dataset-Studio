@@ -280,11 +280,30 @@
         text-align: center;
       }
 
+      .logo-row {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 20px;
+      }
+
       .logo {
         width: 100px;
         height: 100px;
         display: block;
+        object-fit: contain;
         filter: drop-shadow(0 18px 28px rgba(19, 22, 27, 0.22));
+      }
+
+      .logo-tai {
+        width: auto;
+      }
+
+      .logo-sep {
+        color: #9ca4b3;
+        font-size: 34px;
+        line-height: 1;
+        font-weight: 500;
       }
 
       main {
@@ -430,9 +449,17 @@
           padding-inline: 24px;
         }
 
+        .logo-row {
+          gap: 14px;
+        }
+
         .logo {
           width: 80px;
           height: 80px;
+        }
+
+        .logo-sep {
+          font-size: 28px;
         }
 
         h1 {
@@ -462,7 +489,11 @@
         </div>
       </header>
       <section class="content">
-        <img class="logo" src="vds-logo.png" alt="">
+        <div class="logo-row" aria-hidden="true">
+          <img class="logo logo-tai" src="tai-logo.png" alt="">
+          <span class="logo-sep">×</span>
+          <img class="logo" src="vds-logo.png" alt="">
+        </div>
         <main>
           <h1 id="launcher-title">VISION DATASET STUDIO</h1>
         </main>
