@@ -578,6 +578,52 @@ class ProjectStore:
             return Path("/".join(parts[1:])).with_suffix("").as_posix()
         return ""
 
+    def _git_show_json(self, project_dir: Path, commit: str, rel: str) -> dict:
+        if not commit:
+            return {}
+        result = self._git(project_dir, "show", f"{commit}:{rel}", check=False)
+        if result.returncode != 0 or not result.stdout.strip():
+            return {}
+        try:
+            data = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    def _version_label_item_keys_at(self, project_dir: Path, commit: str) -> set[str]:
+        labels = self._git_show_json(project_dir, commit, "state/labels.json")
+        items = labels.get("items", {}) if isinstance(labels, dict) else {}
+        if not isinstance(items, dict):
+            return set()
+        return {str(key).replace("\\", "/") for key in items.keys() if str(key).strip()}
+
+    def _version_item_keys_at(self, project_dir: Path, commit: str) -> set[str]:
+        if not commit:
+            return set()
+        result = self._git(project_dir, "ls-tree", "-r", "--name-only", commit, check=False)
+        if result.returncode != 0:
+            return set()
+        keys: set[str] = set()
+        for raw in result.stdout.splitlines():
+            key = self._version_item_key(raw.strip())
+            if key:
+                keys.add(key)
+        keys.update(self._version_label_item_keys_at(project_dir, commit))
+        return keys
+
+    def _version_changed_label_item_keys(self, project_dir: Path, parent: str, commit: str) -> set[str]:
+        before = self._git_show_json(project_dir, parent, "state/labels.json").get("items", {})
+        after = self._git_show_json(project_dir, commit, "state/labels.json").get("items", {})
+        before_items = before if isinstance(before, dict) else {}
+        after_items = after if isinstance(after, dict) else {}
+        keys: set[str] = set()
+        for key in set(before_items) | set(after_items):
+            if before_items.get(key) != after_items.get(key):
+                normalized = str(key).replace("\\", "/").strip()
+                if normalized:
+                    keys.add(normalized)
+        return keys
+
     def _commit_first_parent(self, project_dir: Path, commit: str) -> str:
         result = self._git(project_dir, "rev-list", "--parents", "-n", "1", commit, check=False)
         if result.returncode != 0:
@@ -602,7 +648,10 @@ class ProjectStore:
             return f"分叉自版本 {parent[:7]}" if parent else "分叉自历史版本"
 
         result = self._git(project_dir, "diff-tree", "--root", "--no-commit-id", "--name-status", "-r", commit)
-        item_changes: dict[str, set[str]] = {}
+        parent = self._commit_first_parent(project_dir, commit)
+        before_keys = self._version_item_keys_at(project_dir, parent)
+        after_keys = self._version_item_keys_at(project_dir, commit)
+        changed_keys: set[str] = set()
         for raw in result.stdout.splitlines():
             if not raw.strip():
                 continue
@@ -613,15 +662,20 @@ class ProjectStore:
                 paths = paths[-1:]
                 status = "M"
             for rel in paths:
+                if rel.replace("\\", "/") == "state/labels.json":
+                    changed_keys.update(self._version_changed_label_item_keys(project_dir, parent, commit))
+                    continue
                 key = self._version_item_key(rel)
                 if key:
-                    item_changes.setdefault(key, set()).add(status)
+                    changed_keys.add(key)
 
         added = modified = deleted = 0
-        for statuses in item_changes.values():
-            if statuses and statuses <= {"A"}:
+        for key in changed_keys:
+            existed_before = key in before_keys
+            exists_after = key in after_keys
+            if not existed_before and exists_after:
                 added += 1
-            elif statuses and statuses <= {"D"}:
+            elif existed_before and not exists_after:
                 deleted += 1
             else:
                 modified += 1

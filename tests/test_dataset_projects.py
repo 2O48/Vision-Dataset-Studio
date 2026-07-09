@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -237,6 +238,17 @@ class ProjectStoreTests(unittest.TestCase):
             self.assertEqual(project_row["updated_at"], image_versions[0]["created_at"])
             self.assertEqual(project_row["created_commit"], image_versions[-1]["hash"])
             self.assertEqual(project_row["updated_commit"], image_versions[0]["hash"])
+
+            project_dir = root / "app" / "projects" / project_id
+            labels_path = project_dir / "state" / "labels.json"
+            labels = json.loads(labels_path.read_text(encoding="utf-8"))
+            labels["items"]["system/display_off"] = ["manual label"]
+            labels_path.write_text(json.dumps(labels, ensure_ascii=False, indent=2), encoding="utf-8")
+            label_version = store._git_commit(project_dir, "删除999张图片: misleading subject")
+            self.assertTrue(label_version["committed"])
+            label_versions = store.list_versions(project_id)["versions"]
+            self.assertEqual(label_versions[0]["hash"], label_version["hash"])
+            self.assertEqual(label_versions[0]["display_message"], "添加0张图片，修改1张图片，删除0张图片")
 
             rolled_back = store.rollback_to_version(project_id, first_head)
             result_txt = Path(rolled_back["workspace"]["dirs"]["result"]) / "system" / "display_off.txt"
